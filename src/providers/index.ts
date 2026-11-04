@@ -16,7 +16,7 @@ const defaults:Record<string,string> = {
 };
 const jsonHeaders = { 'Content-Type': 'application/json', Accept: 'application/json' };
 
-export function validateProvider(provider:Partial<Provider>|null|undefined):ValidatedProvider {
+export function validateProvider(provider:Partial<Provider>|null|undefined, {requireModel=true}: {requireModel?:boolean} = {}):ValidatedProvider {
   if (!provider || typeof provider !== 'object' || (!freeTypes.has(provider.type!) && !Object.hasOwn(defaults, provider.type!)))
     throw failure('INVALID_CONFIG', 'Choose a supported translation service.');
   const p = { ...provider } as ValidatedProvider;
@@ -26,7 +26,7 @@ export function validateProvider(provider:Partial<Provider>|null|undefined):Vali
     p[name] = (p[name] || '').trim();
   }
   if (!['deeplx', 'ollama'].includes(p.type) && !p.apiKey) throw failure('INVALID_CONFIG', 'This service requires your API key.');
-  if (modelTypes.has(p.type) && !p.model) throw failure('INVALID_CONFIG', 'Enter a model name for this service.');
+  if (requireModel && modelTypes.has(p.type) && !p.model) throw failure('INVALID_CONFIG', 'Enter a model name for this service.');
   if (p.model!.length > 200 || p.apiKey!.length > 8192 || p.region!.length > 100 || p.baseUrl!.length > 2048)
     throw failure('INVALID_CONFIG', 'A provider configuration field is too long.');
   p.baseUrl ||= defaults[p.type];
@@ -220,4 +220,48 @@ export async function translateWithProvider(provider:Partial<Provider>|null|unde
     for (const batch of chunks(texts)) translated.push(...await translateBatch(p, batch, sourceLanguage, targetLanguage, fetchImpl, requestSignal));
     return output(translated, texts.length);
   }, { signal, timeoutMs });
+}
+
+export interface ProviderModel {id:string;name:string}
+
+/** Lists models with the same transport, credential and lifetime rules as translation. */
+export async function listProviderModels(provider:Partial<Provider>, {signal,fetchImpl=globalThis.fetch,timeoutMs}:Pick<ProviderOptions,'signal'|'fetchImpl'|'timeoutMs'> = {}):Promise<ProviderModel[]> {
+  const p=validateProvider(provider,{requireModel:false});
+  if(!modelTypes.has(p.type))throw failure('INVALID_CONFIG','This translation service does not expose AI models.');
+  const url=new URL(p.baseUrl!);
+  // Accept the full translation URL as well as an API root, keeping gateway prefixes.
+  let path=url.pathname.replace(/\/+$/,'').replace(/\/(?:chat\/completions|messages|models\/[^/]+:generateContent|api\/chat|api\/tags|models)$/,'');
+  if(p.type==='ollama')path=path.replace(/\/api$/,'');
+  url.pathname=(path || (p.type==='gemini'?'/v1beta':p.type==='ollama'?'':'/v1'))+(p.type==='ollama'?'/api/tags':'/models');
+  const headers:Record<string,string>={Accept:'application/json'};
+  if(p.type==='gemini')headers['x-goog-api-key']=p.apiKey!;
+  else if(p.type==='anthropic')Object.assign(headers,{'x-api-key':p.apiKey!,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'});
+  else if(p.apiKey)headers.Authorization='Bearer '+p.apiKey;
+  return withRequestLifetime(async activeSignal=>{
+    const models=new Map<string,ProviderModel>(),cursors=new Set<string>();
+    for(let page=0;page<50;page++){
+      const value=await requestJSON(fetchImpl,url,{method:'GET',headers},activeSignal);
+      const entries=p.type==='gemini'||p.type==='ollama'?value?.models:value?.data;
+      if(!Array.isArray(entries))throw failure('INVALID_RESPONSE','The service did not return a model list.');
+      for(const entry of entries){
+        if(!entry || typeof entry!=='object')continue;
+        if(p.type==='gemini' && !entry.supportedGenerationMethods?.includes?.('generateContent'))continue;
+        const raw=p.type==='gemini'||p.type==='ollama'?entry.name:entry.id;
+        if(typeof raw!=='string')continue;
+        const id=(p.type==='gemini'?raw.replace(/^models\//,''):raw).trim();
+        if(!id || id.length>200 || /[\u0000-\u001f\u007f]/.test(id))continue;
+        const label=entry.displayName || entry.display_name || id;
+        models.set(id,{id,name:typeof label==='string'?label.slice(0,200):id});
+        if(models.size>5000)throw failure('INVALID_RESPONSE','The service returned too many models.');
+      }
+      const cursor=p.type==='gemini'?value.nextPageToken:p.type==='anthropic'&&value.has_more?value.last_id:undefined;
+      if(!cursor){
+        if(p.type==='anthropic'&&value.has_more)throw failure('INVALID_RESPONSE','The model list pagination is invalid.');
+        return [...models.values()].sort((a,b)=>a.id.localeCompare(b.id));
+      }
+      if(typeof cursor!=='string' || cursor.length>2048 || cursors.has(cursor))throw failure('INVALID_RESPONSE','The model list pagination is invalid.');
+      cursors.add(cursor);url.searchParams.set(p.type==='gemini'?'pageToken':'after_id',cursor);
+    }
+    throw failure('INVALID_RESPONSE','The model list has too many pages.');
+  },{signal,timeoutMs});
 }

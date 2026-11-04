@@ -75,3 +75,37 @@ test('editing the original while a file reads keeps the user text',async t=>{
   pending.resolve('Late file');await task;
   assert.equal(h.node('input').value,'User edit');assert.equal(h.node('translate').disabled,false);
 });
+
+test('model controls fetch, select and save a model while ignoring a stale provider response',async t=>{
+  const previousChrome=globalThis.chrome,checks=[],saved=[];
+  const settings=defaultSettings();
+  for(const id of ['custom-a','custom-b'])settings.providers.push({id,type:'openai',name:id,enabled:true,baseUrl:'',apiKey:'fixture-only',model:'',region:'',temperature:null});
+  globalThis.chrome={runtime:{sendMessage:async message=>{
+    if(message.type==='KUAI_GET_SETTINGS')return {ok:true,value:settings};
+    if(message.type==='KUAI_SAVE_SETTINGS'){saved.push(message.settings);return {ok:true,value:message.settings};}
+    if(message.type==='KUAI_CANCEL')return {ok:true,value:{cancelled:true}};
+    if(message.type==='KUAI_LIST_MODELS'){const result=deferred();checks.push({message,result});return result.promise;}
+    assert.fail('Unexpected message '+message.type);
+  }}};
+  t.after(()=>{globalThis.chrome=previousChrome;});
+  const h=documentBoundary('options');await startOptions(h.document);
+  assert.ok(h.node('fetch-models'),'model discovery action exists');
+  await h.node('provider-list').children[4].fire('click');
+  const first=h.node('fetch-models').fire('click');
+  assert.equal(h.node('fetch-models').disabled,true);
+  await h.node('provider-list').children[5].fire('click');
+  checks[0].result.resolve({ok:true,value:[{id:'stale',name:'Stale'}]});await first;
+  assert.equal(h.node('model-status').textContent,'');
+  assert.equal(h.node('fetch-models').disabled,false);
+  const second=h.node('fetch-models').fire('click');
+  checks[1].result.resolve({ok:true,value:[{id:'chosen',name:'Chosen model'}]});await second;
+  assert.ok(h.node('provider-model-list').children.some(item=>item.value==='chosen'));
+  h.node('provider-model-list').value='chosen';await h.node('provider-model-list').fire('change');
+  assert.equal(h.node('provider-model').value,'chosen');
+  assert.equal(saved.at(-1).providers.find(item=>item.id==='custom-b').model,'chosen');
+  h.node('provider-apiKey').value='new-key';await h.node('provider-apiKey').fire('input');
+  assert.equal(h.node('provider-model-list').hidden,true);
+  const third=h.node('fetch-models').fire('click');checks[2].result.resolve({ok:false,error:{code:'HTTP_401',message:'Check key'}});await third;
+  assert.match(h.node('model-status').textContent,/Check key/);
+  assert.equal(h.node('provider-model').value,'chosen');
+});

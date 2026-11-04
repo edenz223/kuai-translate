@@ -532,3 +532,23 @@ test('opaque content frames require HTTP origin evidence and never become truste
   ])assert.equal((await h.controller.handleMessage({type:'KUAI_GET_SETTINGS'},sender)).error?.code,'FORBIDDEN');
   h.controller.stop();
 });
+
+test('model discovery is restricted to extension pages and cancellation owns its request',async()=>{
+  const h=fixture();await h.controller.ready;h.controller.stop();
+  let calls=0,aborted=false;
+  const controller=createBackground({chromeApi:h.chromeApi,fetchImpl:async(_url,init)=>{
+    calls++;
+    if(calls===1)return Response.json({data:[{id:'available'}]});
+    init.signal.addEventListener('abort',()=>{aborted=true;});
+    return new Promise(()=>{});
+  }});
+  const message={type:'KUAI_LIST_MODELS',requestId:'models',provider:{id:'draft',type:'openai',apiKey:'fixture-key',model:''}};
+  assert.equal((await controller.handleMessage(message,page)).error.code,'FORBIDDEN');
+  assert.equal(calls,0);
+  assert.deepEqual((await controller.handleMessage(message,options)).value,[{id:'available',name:'available'}]);
+  const pending=controller.handleMessage(message,options);await flush();
+  assert.equal((await controller.handleMessage({type:'KUAI_CANCEL',requestId:'models'},page)).value.cancelled,false);
+  assert.equal((await controller.handleMessage({type:'KUAI_CANCEL',requestId:'models'},options)).value.cancelled,true);
+  assert.equal((await pending).error.code,'CANCELLED');assert.equal(aborted,true);
+  assert.equal(h.writes.length,0);controller.stop();
+});

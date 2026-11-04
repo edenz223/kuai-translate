@@ -12,6 +12,11 @@ const profile=await fs.mkdtemp(path.join(os.tmpdir(),'kuai-browser-smoke-'));
 const sockets=[],exceptions=[];
 let browser;
 const server=createServer(async(req,res)=>{
+  if(req.url==='/v1/models'){
+    assert.equal(req.headers.authorization,'Bearer fixture-model-key');
+    res.writeHead(200,{'Content-Type':'application/json'});
+    res.end(JSON.stringify({data:[{id:'smoke-chat-model'}]}));return;
+  }
   if(req.url==='/api/translate'){
     let body='';for await(const chunk of req)body+=chunk;
     res.writeHead(200,{'Content-Type':'application/json'});
@@ -169,10 +174,24 @@ try{
   for(const name of ['options.html','text.html']){
     const cdp=await page(extensionOrigin+'/'+name);
     await until(()=>evaluate(cdp,'document.querySelector("#provider")?.options.length>0 || document.querySelector("#provider-list")?.children.length>0'),'UI initialization '+name);
+    if(name==='options.html'){
+      await evaluate(cdp,`document.querySelector('#provider-type').value='openai';document.querySelector('#add-provider').click()`);
+      await until(()=>evaluate(cdp,`document.querySelector('#provider-kind').textContent==='OpenAI 兼容 API'`),'new AI provider');
+      await evaluate(cdp,`(()=>{
+        for(const [id,value] of [['provider-baseUrl',${JSON.stringify(fixtureURL+'v1')}],['provider-apiKey','fixture-model-key']]){
+          const field=document.getElementById(id);field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));
+        }
+        document.querySelector('#fetch-models').click();
+      })()`);
+      await until(()=>evaluate(cdp,`[...document.querySelector('#provider-model-list').options].some(item=>item.value==='smoke-chat-model')`),'model discovery through the real worker');
+      await evaluate(cdp,`(()=>{const select=document.querySelector('#provider-model-list');select.value='smoke-chat-model';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+      await until(async()=>{const reply=await getSettings();return reply.value.providers.some(item=>item.type==='openai'&&item.model==='smoke-chat-model');},'selected model saved');
+      assert.equal(await evaluate(cdp,`document.querySelector('#provider-model').value`),'smoke-chat-model');
+    }
     pages[name]=await evaluate(cdp,'({title:document.title,controls:document.querySelectorAll("button,input,select,textarea").length})');
   }
   assert.deepEqual(exceptions,[]);
-  console.log(JSON.stringify({browser:'Chromium',serviceWorker:worker.url,popupProviders:4,settingsSave:true,pageTranslation:translated,pageRestore:true,pages,uncaughtExceptions:exceptions.length},null,2));
+  console.log(JSON.stringify({browser:'Chromium',serviceWorker:worker.url,popupProviders:4,settingsSave:true,modelDiscoveryAndSelection:true,pageTranslation:translated,pageRestore:true,pages,uncaughtExceptions:exceptions.length},null,2));
 }finally{
   for(const socket of sockets)socket.close();
   if(browser){browser.kill('SIGTERM');await new Promise(resolve=>{if(browser.exitCode!==null)return resolve();browser.once('exit',resolve);setTimeout(resolve,2000);});}
