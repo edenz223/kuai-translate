@@ -7,12 +7,12 @@ interface BackgroundController {start():BackgroundController;stop():void;
   handleMessage(message:BackgroundRequest,sender:chrome.runtime.MessageSender):Promise<BackgroundResponse>;readonly ready:Promise<void>}
 type MessageOf<T extends BackgroundRequest['type']> = Extract<BackgroundRequest,{type:T}>;
 import { SETTINGS_KEY, defaultSettings, normalizeSettings, publicSettings } from '../shared/settings.js';
-import { translateWithProvider } from '../providers/index.js';
+import { translateWithProvider, listProviderModels } from '../providers/index.js';
 import { failure, publicError } from '../providers/errors.js';
 import { mergeSettings } from './settings-merge.js';
 import { applyPreferencePatch } from './preferences.js';
 
-const messageTypes = new Set(['KUAI_GET_SETTINGS', 'KUAI_SAVE_SETTINGS', 'KUAI_UPDATE_PREFERENCES', 'KUAI_UPDATE_PAGE_PREFERENCES', 'KUAI_OPEN_OPTIONS', 'KUAI_TRANSLATE', 'KUAI_CANCEL', 'KUAI_TEST_PROVIDER']);
+const messageTypes = new Set(['KUAI_GET_SETTINGS', 'KUAI_SAVE_SETTINGS', 'KUAI_UPDATE_PREFERENCES', 'KUAI_UPDATE_PAGE_PREFERENCES', 'KUAI_OPEN_OPTIONS', 'KUAI_TRANSLATE', 'KUAI_CANCEL', 'KUAI_TEST_PROVIDER', 'KUAI_LIST_MODELS']);
 const providerIdentity=(provider?:Provider)=>provider ? JSON.stringify(['id','type','enabled','baseUrl','apiKey','model','region','temperature'].map(key=>provider[key as keyof Provider])) : '';
 const menuItems: {id:string;title:string;contexts:NonNullable<chrome.contextMenus.CreateProperties['contexts']>;message:PageActionType}[] = [
   { id: 'kuai.page', title: 'Kuai translate · 翻译网页', contexts: ['page'], message: 'KUAI_PAGE_TRANSLATE' },
@@ -163,7 +163,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     await chromeApi.tabs.create({url:chromeApi.runtime.getURL('options.html')+'#'+section});
     return {opened:true,section};
   }
-  async function translate(owner:Owner, requestId:unknown, provider:Provider, message:{texts:string[];providerId?:string;sourceLanguage?:string;targetLanguage?:string}, savedProvider=false) {
+  async function providerRequest(owner:Owner, requestId:unknown, provider:Provider, message:{texts:string[];providerId?:string;sourceLanguage?:string;targetLanguage?:string}, savedProvider=false, models=false) {
     const key = requestKey(owner, requestId);
     if (jobs.has(key)) throw failure('DUPLICATE_REQUEST', 'This translation request is already running.');
     if (jobs.size >= 64 || Array.from(jobs.values()).filter(job => job.owner.scope === owner.scope).length >= 12)
@@ -176,9 +176,13 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     };
     jobs.set(key, job);
     try {
+      const options = {
+        signal: job.controller.signal, fetchImpl, timeoutMs,
+      };
+      if(models)return await listProviderModels(provider,options);
       const translations = await translateWithProvider(provider, {
         texts:message.texts,sourceLanguage:job.sourceLanguage,targetLanguage:job.targetLanguage,
-        signal: job.controller.signal, fetchImpl, timeoutMs,
+        ...options,
       });
       if (job.controller.signal.aborted) throw failure('CANCELLED', 'Translation was cancelled.');
       return { translations, providerId: provider.id || provider.type };
@@ -189,7 +193,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
       if (stopped) throw failure('CANCELLED', 'The extension worker has stopped. Retry the request.');
       const owner = identify(sender);
       if (!message || !messageTypes.has(message.type)) throw failure('UNKNOWN_MESSAGE', 'This request type is not supported.');
-      if (['KUAI_SAVE_SETTINGS', 'KUAI_TEST_PROVIDER'].includes(message.type) || message.type === 'KUAI_GET_SETTINGS' && message.includeSecrets) requirePage(owner);
+      if (['KUAI_SAVE_SETTINGS', 'KUAI_TEST_PROVIDER', 'KUAI_LIST_MODELS'].includes(message.type) || message.type === 'KUAI_GET_SETTINGS' && message.includeSecrets) requirePage(owner);
       if (message.type==='KUAI_OPEN_OPTIONS') return {ok:true,value:await openOptions(message)};
       await initialize();
       if(stopped) throw failure('CANCELLED','The extension worker has stopped. Retry the request.');
@@ -212,8 +216,11 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
           const job = jobs.get(requestKey(owner, message.requestId));
           job?.controller.abort(); value = { cancelled: !!job }; break;
         }
+        case 'KUAI_LIST_MODELS':
+          value = await providerRequest(owner, message.requestId, message.provider, {texts:[],sourceLanguage:'auto',targetLanguage:'en'},false,true);
+          break;
         case 'KUAI_TEST_PROVIDER':
-          value = await translate(owner, message.requestId || 'test-' + crypto.randomUUID(), message.provider, {
+          value = await providerRequest(owner, message.requestId || 'test-' + crypto.randomUUID(), message.provider, {
             texts: [message.text ?? 'Hello'], sourceLanguage: 'auto',
           });
           break;
@@ -221,7 +228,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
           const id = !message.providerId || message.providerId === 'follow_page' ? settings.activeProviderId : message.providerId;
           const provider = settings.providers.find(item => item.id === id && item.enabled);
           if (!provider) throw failure('INVALID_CONFIG', 'Select an enabled translation service in the extension settings.');
-          value = await translate(owner, message.requestId, provider, message, true); break;
+          value = await providerRequest(owner, message.requestId, provider, message, true); break;
         }
       }
       return { ok: true, value };

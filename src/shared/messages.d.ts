@@ -1,3 +1,4 @@
+import type {ProviderModel} from '../providers/index.js';
 import type {Provider, Settings, PublicSettings} from './settings.js';
 
 export type OptionsSection = 'webpage' | 'selection' | 'input' | 'hover' | 'subtitles';
@@ -19,6 +20,7 @@ export interface RequestPayloadMap {
   KUAI_OPEN_OPTIONS: {section: OptionsSection};
   KUAI_TRANSLATE: Omit<TranslationOptions, 'signal'> & {requestId: string; texts: string[]};
   KUAI_CANCEL: {requestId: string};
+  KUAI_LIST_MODELS: {provider: Provider; requestId: string};
   KUAI_TEST_PROVIDER: {provider: Provider; requestId?: string; text?: string};
 }
 export interface RequestResultMap {
@@ -29,6 +31,7 @@ export interface RequestResultMap {
   KUAI_OPEN_OPTIONS: {opened: boolean; section: OptionsSection};
   KUAI_TRANSLATE: TranslationResult;
   KUAI_CANCEL: {cancelled: boolean};
+  KUAI_LIST_MODELS: ProviderModel[];
   KUAI_TEST_PROVIDER: TranslationResult;
 }
 export type RequestType = keyof RequestPayloadMap;

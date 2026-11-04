@@ -1,3 +1,4 @@
+import type {ProviderModel} from '../providers/index.js';
 import type {Settings} from '../shared/settings.js';
 import type {EditorStatus} from './state.js';
 
@@ -21,6 +22,14 @@ export async function startOptions(document: Document = globalThis.document): Pr
   const presentation=createPresentationControls({document,editor,onError:fail});
   const interactions=createInteractionControls({document,editor,onError:fail,onValidationChange:()=>render(editor.get(),editor.status())});
   const fields=Object.fromEntries(['name','enabled','baseUrl','apiKey','model','region','temperature'].map(key=>[key,byId<HTMLInputElement>(document,'provider-'+key)]));
+  const modelSelect=byId<HTMLSelectElement>(document,'provider-model-list'),modelButton=byId<HTMLButtonElement>(document,'fetch-models'),modelStatus=byId(document,'model-status');
+  let modelGeneration=0,modelRequestId:string|undefined,modelFingerprint='',models:ProviderModel[]=[];
+  function invalidateModels():void {
+    modelGeneration++;
+    if(modelRequestId)void cancel(modelRequestId).catch(()=>{});
+    modelRequestId=undefined;models=[];modelButton.disabled=false;modelSelect.hidden=true;
+    modelSelect.replaceChildren();setStatus(modelStatus,'');
+  }
   const preferences: Record<'subtitlesEnabled' | 'selectionEnabled' | 'hoverEnabled',string>={subtitlesEnabled:'subtitles-enabled',selectionEnabled:'selection-enabled',hoverEnabled:'hover-enabled'};
   function render(settings: Settings,state: EditorStatus): void {
     if (!settings.providers.some(provider=>provider.id===selectedId)) selectedId=settings.providers[0]?.id;
@@ -33,6 +42,9 @@ export async function startOptions(document: Document = globalThis.document): Pr
       button.append(name,detail);button.addEventListener('click',()=>{selectedId=provider.id;setStatus(testStatus,'');render(editor.get(),editor.status());});return button;
     }));
     const provider=settings.providers.find(item=>item.id===selectedId), free=FREE_TYPES.includes(provider?.type as string);
+    const modelKey=JSON.stringify(provider && [provider.id,provider.type,provider.baseUrl,provider.apiKey]);
+    if(modelKey!==modelFingerprint){modelFingerprint=modelKey;invalidateModels();}
+    if(models.length && provider)fillSelect(document,modelSelect,[['','请选择模型'],...models.map((model):[string,string]=>[model.id,model.name===model.id?model.id:model.name+' · '+model.id])],provider.model || '');
     const fingerprint=JSON.stringify(provider);
     if(fingerprint!==providerFingerprint){providerFingerprint=fingerprint;tester.invalidate();}
     byId(document,'provider-form').hidden=!provider;
@@ -46,7 +58,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
       const machine=['azure','deepl','deeplx'].includes(provider.type);
       byId(document,'model-field').hidden=machine;byId(document,'temperature-field').hidden=machine;
       byId(document,'region-field').hidden=provider.type!=='azure';
-      byId(document,'key-help').textContent=['deeplx','ollama'].includes(provider.type) ? '自建服务可不填 Key。请填写自己的服务地址。' : '仅保存在扩展本地存储中。测试和翻译时发往所选服务。';
+      byId(document,'key-help').textContent=['deeplx','ollama'].includes(provider.type) ? '自建服务可不填 Key。请填写自己的服务地址。' : '仅保存在扩展本地存储中。获取模型、测试和翻译时发往所选服务。';
       fields.baseUrl.placeholder=({openai:'https://api.openai.com/v1',gemini:'https://generativelanguage.googleapis.com',anthropic:'https://api.anthropic.com',azure:'https://api.cognitive.microsofttranslator.com',deepl:'https://api-free.deepl.com',deeplx:'https://your-server.example/translate',ollama:'http://localhost:11434'} as Record<string,string>)[provider.type] || '';
     }
     fillProviders(document,byId<HTMLSelectElement>(document,'active-provider'),settings,settings.activeProviderId);
@@ -78,7 +90,24 @@ export async function startOptions(document: Document = globalThis.document): Pr
   byId<HTMLButtonElement>(document,'delete-provider').addEventListener('click',()=>editor.removeProvider(selectedId).catch(fail));
   byId(document,'show-key').addEventListener('click',event=>{const show=fields.apiKey.type==='password';fields.apiKey.type=show?'text':'password';(event.target as HTMLButtonElement).textContent=show?'隐藏':'显示';});
   byId<HTMLButtonElement>(document,'test-provider').addEventListener('click',()=>tester.test(editor.get().providers.find(item=>item.id===selectedId)!));
-  document.defaultView?.addEventListener('pagehide',()=>tester.invalidate(),{once:true});
+  modelSelect.addEventListener('change',async()=>{
+    if(modelSelect.value)try{fields.model.value=modelSelect.value;await editor.patchProvider(selectedId,{model:modelSelect.value});}catch(error){fail(error);}
+  });
+  modelButton.addEventListener('click',async()=>{
+    const provider=editor.get().providers.find(item=>item.id===selectedId);
+    if(!provider || modelButton.disabled)return;
+    const generation=++modelGeneration,requestId=makeRequestId();modelRequestId=requestId;
+    modelButton.disabled=true;setStatus(modelStatus,'正在获取模型…');
+    try{
+      const result=await request('KUAI_LIST_MODELS',{provider,requestId});
+      if(generation!==modelGeneration)return;
+      models=result;modelSelect.hidden=!models.length;
+      render(editor.get(),editor.status());
+      setStatus(modelStatus,models.length?`已获取 ${models.length} 个模型，请选择；也可手动填写。`:'服务未返回可用模型，可重试或手动填写模型名。');
+    }catch(error){if(generation===modelGeneration)setStatus(modelStatus,'获取失败：'+errorMessage(error)+'；可重试或手动填写模型名。',true);}
+    finally{if(generation===modelGeneration){modelRequestId=undefined;modelButton.disabled=false;}}
+  });
+  document.defaultView?.addEventListener('pagehide',()=>{tester.invalidate();invalidateModels();},{once:true});
   byId(document,'export-settings').addEventListener('click',()=>{
     try {const value=exportSettings(editor.get(),{includeSecrets:byId<HTMLInputElement>(document,'include-secrets').checked});downloadText(document,'kuai-translate-settings.json',typeof value==='string'?value:JSON.stringify(value,null,2),'application/json');}
     catch(error){fail(error);}

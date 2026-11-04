@@ -22,13 +22,15 @@ This is a new source project with its own extension identity. It does not includ
 | YouTube subtitle list | Independent compact bilingual rows, original above translation; timestamps, current-cue highlighting and an explicit return to current after manual reading |
 | Subtitle study mask | Blur existing translations and reveal them on hover or keyboard focus, independently of display mode |
 | Subtitle text selection | Hold the current caption and pause playback while selecting; resume only playback paused by this extension for that selection |
-| Custom APIs | Multiple named instances, manual model names, connection checks and local settings |
+| Custom APIs | Multiple named instances, API model discovery and selection (with manual entry), connection checks and local settings |
 | Text and files | Separate page for pasted text and TXT, MD, SRT and VTT files, with visible original/translated text and downloads |
 | Settings backup | API keys excluded by default; optional secret export and import of recognized legacy free/direct API, presentation and interaction settings |
 
 **This release does not include OCR, PDF layout translation, ebooks, meeting transcription or integrations for other video sites.** Multi-model scoring, mobile gestures and context-summary translation are also outside its scope. The browser's PDF viewer is not a supported document translation workflow.
 
 Page translation starts manually by default and processes loaded, readable text. Automatic translation and continued translation of dynamic content are separate opt-in settings. Bilingual mode keeps originals visible; translation-only mode retains their nodes for restoration. Browser-internal pages, extension stores and other protected pages block injection; shortcuts and site rules cannot override those browser restrictions.
+
+For AI services, enter your API address (or leave it blank for the default) and key, click “获取模型” (Fetch models), then select a model to save it. OpenAI-compatible APIs, Gemini, Anthropic Claude and Ollama are supported. Manual model entry remains available if discovery fails or returns no models. Ollama lists models installed on the server and permits an empty key for local services.
 
 ## Installation
 
