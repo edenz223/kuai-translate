@@ -8,7 +8,8 @@ import {blockText,collectBlocks} from '../dist/src/content/dom.js';
 const settle=async()=>{for(let index=0;index<12;index++)await Promise.resolve();};
 const outputs=h=>h.doc.querySelectorAll('[data-kuai-page-translation]');
 const result=element=>element.querySelector('[data-kuai-page-translation]');
-const text=element=>result(element)?.firstChild?.textContent;
+const text=element=>result(element)?.querySelector('font')?.firstChild?.textContent;
+const sheet=h=>h.doc.querySelector('[data-kuai-page-style]')?.textContent||'';
 const release=h=>h.emit(h.doc,'keyup',{key:'Alt'});
 function setup(overrides={}){
   const h=fixture();h.settings.hoverEnabled=true;h.settings.hoverOptions={trigger:'alt',displayMode:'inline',delay:50,...overrides};
@@ -23,9 +24,10 @@ test('paragraph output uses the page style, translation-only mode and safe plain
   h.respond(async()=>({translations:['<img src=x onerror=alert(1)>你好']}));
   const ui=createInteractions(h.dependencies).start();await hover(h,link);
   const output=result(p);assert.ok(output,'the translation must appear inside the source paragraph');
-  assert.equal(output.tagName,'SPAN');assert.equal(p.childNodes.at(-1),output);assert.match(output.style.cssText,/display:block!important/);
-  assert.equal(output.firstChild.nodeType,3);assert.equal(text(p),'<img src=x onerror=alert(1)>你好');assert.equal(output.querySelector('img'),null);
-  assert.equal(output.getAttribute('data-state'),'success');assert.equal(output.style['font-size'],'125%');assert.equal(output.style.color,'#123456');assert.equal(output.getAttribute('data-kuai-preset'),'border');
+  assert.equal(output.tagName,'KUAI-TRANSLATOR');assert.equal(p.childNodes.at(-1),output);assert.equal(output.className,'kuai-translator-wrapper notranslate');
+  assert.equal(output.firstChild.tagName,'BR');assert.equal(output.querySelector('font').getAttribute('lang'),'zh-Hans');
+  assert.equal(output.querySelector('font').firstChild.nodeType,3);assert.equal(text(p),'<img src=x onerror=alert(1)>你好');assert.equal(output.querySelector('img'),null);
+  assert.equal(output.getAttribute('data-state'),'success');assert.match(sheet(h),/font-size:125%/);assert.match(sheet(h),/color:#123456/);assert.match(sheet(h),/border-left:2px solid/);assert.equal(output.getAttribute('style'),null);
   assert.equal(original.parentElement.hidden,true);assert.equal(link.parentElement.hidden,true);assert.ok(p.querySelector('[data-kuai-original]'));
   h.emit(link,'click');assert.equal(clicks,1);assert.equal(blockText(p,h.env),'Hello world');
   assert.deepEqual(collectBlocks(h.doc,h.env).map(item=>item.text),['Hello world']);assert.equal(h.doc.getElementById('kuai-translation-popup'),null);
@@ -63,10 +65,10 @@ test('finished paragraph translations survive movement and release, then toggle 
 test('live style changes preserve pending requests and restyle completed inline results without translating again',async()=>{
   const h=setup(),p=h.paragraph('Styled');let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start();
   await hover(h,p);const output=result(p);assert.ok(output);h.settings.pageStyle={preset:'blur',fontSize:150,textColor:'#334455'};ui.updateSettings();ui.refreshPresentation();
-  assert.equal(result(p),output);assert.equal(h.cancellations.length,0);assert.ok(h.doc.querySelector('[data-kuai-page-loading]'));assert.match(output.style.cssText,/display:none!important/);
-  finish({translations:['With new style']});await settle();assert.equal(text(p),'With new style');assert.equal(output.style['font-size'],'150%');assert.equal(output.style.filter,'blur(4px)');release(h);
+  assert.equal(result(p),output);assert.equal(h.cancellations.length,0);assert.ok(h.doc.querySelector('[data-kuai-page-loading]'));assert.match(sheet(h),/display:none!important/);
+  finish({translations:['With new style']});await settle();assert.equal(text(p),'With new style');assert.match(sheet(h),/font-size:150%/);assert.match(sheet(h),/filter:blur\(4px\)/);release(h);
   h.settings.pageStyle={preset:'highlight',fontSize:115,backgroundColor:'#ddffee'};ui.refreshPresentation();
-  assert.equal(output.style['font-size'],'115%');assert.equal(output.style['background-color'],'#ddffee');assert.equal(output.style.filter,'none');assert.equal(h.requests.length,1);ui.stop();
+  assert.match(sheet(h),/font-size:115%/);assert.match(sheet(h),/background-color:#ddffee/);assert.doesNotMatch(sheet(h),/filter:blur/);assert.equal(h.requests.length,1);ui.stop();
 });
 
 test('pointer area translation reuses a real page entry and only sends the missing paragraph',async()=>{
@@ -132,7 +134,7 @@ for(const policy of ['never-site','hover-site','never-language','selector','inli
 test('provider failures remain visible as safe inline text and a fresh hover can retry',async()=>{
   const h=setup(),p=h.paragraph('Retry source');h.respond(async()=>{throw Error('<script>provider failed</script>');});h.settings.pageStyle={preset:'blur',opacity:5};
   const ui=createInteractions(h.dependencies).start();await hover(h,p);const output=result(p);assert.ok(output);assert.equal(output.getAttribute('data-state'),'error');assert.equal(output.getAttribute('role'),'status');
-  assert.equal(text(p),'<script>provider failed</script>');assert.equal(output.querySelector('script'),null);assert.equal(output.style.filter,'none');assert.equal(output.style.opacity,'1');assert.ok(output.querySelector('button').textContent);
+  assert.equal(text(p),'<script>provider failed</script>');assert.equal(output.querySelector('script'),null);assert.doesNotMatch(sheet(h),/filter:blur/);assert.match(sheet(h),/opacity:1!important/);assert.ok(output.querySelector('button').textContent);
   release(h);h.respond(async()=>({translations:['Recovered']}));await hover(h,p);assert.equal(text(p),'Recovered');assert.equal(outputs(h).length,1);assert.equal(h.requests.length,2);ui.stop();
 });
 
@@ -237,4 +239,55 @@ test('a long paragraph with a legacy popup setting stops before its next request
   h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start();await hover(h,p);assert.equal(h.requests.length,1);
   p.className='skip';finish({translations:h.requests[0].texts.map(()=> 'First translated part')});await settle();
   assert.equal(h.requests.length,1);assert.equal(result(p),null);assert.equal(h.doc.getElementById('kuai-translation-popup'),null);ui.stop();
+});
+
+test('bilingual wrapper starts on a new line and restores source clipping on removal',async()=>{
+  const h=setup(),p=h.paragraph('Clamped source'),original=p.firstChild;
+  p.setAttribute('style','-webkit-line-clamp:2;max-height:40px;height:40px');
+  h.settings.pageStyle={preset:'plain'};
+  const ui=createInteractions(h.dependencies).start();await hover(h,p);
+  const output=result(p),inner=output.querySelector('font');
+  assert.equal(output.firstChild.tagName,'BR');assert.equal(inner.className.includes('kuai-translator-inner'),true);
+  assert.equal(inner.textContent,'译：Clamped source');assert.equal(inner.getAttribute('style'),null);
+  assert.equal(p.getAttribute('data-kuai-page-source'),'expanded');
+  assert.match(sheet(h),/-webkit-line-clamp:unset!important/);
+  assert.equal(blockText(p,h.env),'Clamped source');
+  ui.refreshPresentation();assert.equal(output.children.length,2);
+  ui.clearInlineTranslations();assert.equal(p.firstChild,original);
+  assert.equal(p.getAttribute('data-kuai-page-source'),null);
+  assert.equal(p.getAttribute('style'),'-webkit-line-clamp:2;max-height:40px;height:40px');
+  assert.equal(h.doc.querySelector('[data-kuai-page-style]'),null);ui.stop();
+});
+
+for(const mode of ['bilingual','translation_only'])test('mixed container hover places its own translation before the following paragraph in '+mode,async()=>{
+  const h=setup(),container=h.paragraph('First comment','div'),source=container.firstChild,p=h.doc.createElement('p');
+  p.textContent='Second paragraph';container.append(p);h.settings.pageDisplayMode=mode;
+  let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));
+  const ui=createInteractions(h.dependencies).start();await hover(h,container);
+  const output=result(container);assert.ok(output);
+  assert.equal(container.childNodes.indexOf(output)+1,container.childNodes.indexOf(p),'pending output belongs before the next paragraph');
+  assert.deepEqual(h.requests[0].texts,['First comment','Second paragraph']);
+  finish({translations:['First translation','Second translation']});await settle();
+  assert.equal(container.childNodes.indexOf(output)+1,container.childNodes.indexOf(p));
+  assert.equal(output.querySelector('font').textContent,'First translation');
+  ui.refreshPresentation();assert.equal(container.childNodes.indexOf(output)+1,container.childNodes.indexOf(p));
+  assert.equal(result(p)?.querySelector('font').textContent,'Second translation');
+  ui.clearInlineTranslations();assert.deepEqual(container.childNodes,[source,p]);ui.stop();
+});
+
+for(const mode of ['bilingual','translation_only'])test('Shift translates every paragraph inside a mixed-text HN comment selection in '+mode,async()=>{
+  const h=setup({trigger:'shift',showIndicator:true}),comment=h.paragraph('First comment paragraph','div');comment.className='commtext c00';
+  const paragraphs=['Second paragraph','Look at the PHP situation:','- HTTP details','- PHP details'].map(value=>{
+    const p=h.doc.createElement('p');p.textContent=value;comment.append(p);return p;
+  });
+  h.paragraph('Another user comment','div');h.settings.pageDisplayMode=mode;
+  const ui=createInteractions(h.dependencies).start();h.emit(comment,'mousemove');
+  h.emit(h.doc,'keydown',{key:'Shift',shiftKey:true});assert.ok(h.doc.getElementById('kuai-hover-indicator'));
+  h.emit(h.doc,'keyup',{key:'Shift'});await settle();
+  assert.deepEqual(h.requests.flatMap(request=>request.texts),['First comment paragraph','Second paragraph','Look at the PHP situation:','- HTTP details','- PHP details']);
+  assert.equal(outputs(h).length,5);
+  assert.equal(comment.childNodes.indexOf(result(comment))+1,comment.childNodes.indexOf(paragraphs[0]));
+  for(const p of paragraphs)assert.equal(result(p)?.parentNode,p);
+  h.emit(h.doc,'keydown',{key:'Shift',shiftKey:true});h.emit(h.doc,'keyup',{key:'Shift'});await settle();
+  assert.equal(outputs(h).length,0);assert.equal(comment.firstChild.textContent,'First comment paragraph');ui.stop();
 });

@@ -65,7 +65,7 @@ test('paragraph retry sends only the failed paragraph and leaves another failure
   const h=fixture(),first=h.paragraph('First'),second=h.paragraph('Second');h.respond(async()=>{throw Error('Provider failed');});
   const page=shared(h);await page.translatePage();assert.equal(page.status().errors,2);
   h.respond(async texts=>({translations:texts.map(text=>'Recovered '+text)}));h.emit(output(first).querySelector('button'),'click');await settle();
-  assert.deepEqual(h.requests.map(item=>item.texts),[['First','Second'],['First']]);assert.equal(output(first).firstChild.textContent,'Recovered First');
+  assert.deepEqual(h.requests.map(item=>item.texts),[['First','Second'],['First']]);assert.equal(output(first).querySelector('font').firstChild.textContent,'Recovered First');
   assert.equal(output(second).getAttribute('data-state'),'error');assert.equal(page.status().errors,1);
 });
 

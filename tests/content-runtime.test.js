@@ -1,4 +1,5 @@
 import test from 'node:test';
+const sheet=h=>h.doc.querySelector('[data-kuai-page-style]')?.textContent||'';
 import assert from 'node:assert/strict';
 import { fixture, Event } from './helpers/content-dom.cjs';
 import { createContentRuntime } from '../dist/src/content/index.js';
@@ -33,12 +34,12 @@ test('presentation-only notifications restyle translated content without clearin
  const h=setup(),p=h.paragraph('Hello');await h.runtime.start();await h.message('KUAI_PAGE_TRANSLATE');for(let i=0;i<10;i++)await Promise.resolve();
  const output=p.querySelector('[data-kuai-page-translation]'),node=output.firstChild;
  await h.notify({...h.settings,pageStyle:{textColor:'#123456',fontSize:140}});
- assert.strictEqual(p.querySelector('[data-kuai-page-translation]'),output);assert.strictEqual(output.firstChild,node);assert.equal(output.style.color,'#123456');assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);h.runtime.stop();
+ assert.strictEqual(p.querySelector('[data-kuai-page-translation]'),output);assert.strictEqual(output.firstChild,node);assert.ok(sheet(h).includes('color:#123456!important'));assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);h.runtime.stop();
 });
 test('style changes during a page request neither cancel it nor lose its eventual result',async()=>{
  const h=setup(),p=h.paragraph('Hello');let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));await h.runtime.start();await h.message('KUAI_PAGE_TRANSLATE');
  await h.notify({...h.settings,pageStyle:{textColor:'#654321'},subtitleStyle:{hideTranslation:true}});assert.equal(h.cancellations.length,0);
- finish({translations:['你好']});for(let i=0;i<12;i++)await Promise.resolve();const output=p.querySelector('[data-kuai-page-translation]');assert.equal(output.textContent,'你好');assert.equal(output.style.color,'#654321');h.runtime.stop();
+ finish({translations:['你好']});for(let i=0;i<12;i++)await Promise.resolve();const output=p.querySelector('[data-kuai-page-translation]');assert.equal(output.textContent,'你好');assert.ok(sheet(h).includes('color:#654321!important'));h.runtime.stop();
 });
 test('a transient initial settings failure can be retried on the same runtime without duplicate listeners',async()=>{
  const h=setup();let attempts=0;h.client.getSettings=async()=>{if(++attempts===1)throw Error('temporary');return h.settings;};
@@ -145,7 +146,7 @@ test('runtime refreshes paragraph output styles without clearing text or sending
  const h=setup(),p=h.paragraph('Hover source');h.settings.hoverEnabled=true;h.settings.hoverOptions={displayMode:'inline',delay:50};t.after(()=>h.runtime.stop());await h.runtime.start();
  await paragraphTap(h,p);const output=pageOutput(p);assert.ok(output);assert.equal((await h.message('KUAI_PAGE_STATUS')).value.translated,1);
  await h.notify({...h.settings,pageStyle:{preset:'highlight',textColor:'#123456',fontSize:130}});
- assert.strictEqual(pageOutput(p),output);assert.equal(output.style.color,'#123456');assert.equal(output.style['font-size'],'130%');assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);
+ assert.strictEqual(pageOutput(p),output);assert.ok(sheet(h).includes('color:#123456!important'));assert.ok(sheet(h).includes('font-size:130%!important'));assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);
 });
 
 test('a full page pass keeps prior paragraph output and never resends its source',async t=>{

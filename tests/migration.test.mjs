@@ -26,7 +26,7 @@ test('unchanged public assets preserve their migration baseline',async()=>{
 test('unchanged runtimes preserve their original executable structure',async()=>{
   // These modules now intentionally evolve beyond the migration-only baseline.
   // Dedicated caption capture, runtime, overlay, sidebar and style tests cover them.
-  const evolved=new Set(['src/youtube/index.js','src/youtube/capture-main.js','src/youtube/sidebar.js','src/youtube/presentation.js','src/youtube/overlay.js','src/shared/presentation.js','src/shared/settings.js','src/shared/styles.js','src/ui/presentation.js']);
+  const evolved=new Set(['src/content/interactions.js','src/content/dom.js','src/content/page-translator.js','src/youtube/index.js','src/youtube/capture-main.js','src/youtube/sidebar.js','src/youtube/presentation.js','src/youtube/overlay.js','src/shared/presentation.js','src/shared/settings.js','src/shared/styles.js','src/ui/presentation.js']);
   for(const [name,hash] of Object.entries(baseline.runtime)) {
     if(evolved.has(name))continue;
     const target=name==='public/content-loader.js'?'content-loader.js':name;

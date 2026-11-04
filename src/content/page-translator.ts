@@ -7,12 +7,12 @@ export interface PageStatus {active:boolean;translated:number;errors:number;tota
 export interface PageTranslatorOptions {document:Document;env?:BrowserEnvironment;translate:Translate;cancel?:(id:string)=>unknown;getSettings:()=>Settings;makeRequestId?:()=>string;onBeforeTranslate?:()=>void;onRestore?:()=>void}
 export interface TranslateBlocksOptions {validate?:()=>boolean;retryErrors?:boolean;viewportOnly?:boolean}
 type PageEntryStatus = 'pending'|'success'|'error'|'cancelled';
-interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>boolean;viewportOnly:boolean;url:string;status:PageEntryStatus;output:HTMLElement|null;parts:(string|undefined)[];originals:HTMLElement[];content:PageContent;links:PageLinkBinding[];resolve:(()=>void)|null;done?:Promise<void>;titleLayout?:boolean;loadingHost?:HTMLElement|null;loadingNode?:Text|null;expected?:number}
+interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>boolean;viewportOnly:boolean;url:string;status:PageEntryStatus;output:HTMLElement|null;inner?:HTMLElement;sheet?:HTMLStyleElement;sourceLayout?:string|null;parts:(string|undefined)[];originals:HTMLElement[];content:PageContent;links:PageLinkBinding[];resolve:(()=>void)|null;done?:Promise<void>;titleLayout?:boolean;loadingHost?:HTMLElement|null;loadingNode?:Text|null;expected?:number}
 interface PageRequest {owners:Set<PageEntry>;release:(()=>void)|null}
 
 import { ancestors, BLOCK_SELECTOR, batches, blockText, collectBlocks, isChinese, isReadable, isInViewport, makeId, requestOptions, translationsOf } from './dom.js';
 import {filterPageBlocks,isPageBlockAllowed,isPageSiteBlocked,pageTranslationKey} from './page-policy.js';
-import {applyPageStyle} from '../shared/styles.js';
+import {pageStyleRule} from '../shared/styles.js';
 import {hideOriginal,restoreOriginal} from './originals.js';
 import {capturePageContent,pageContentMatches,renderPageContent,refreshPageLinks,isPageLinkMutation,PAGE_LINK_ATTRIBUTES} from './page-content.js';
 
@@ -21,6 +21,7 @@ const words = {
   en:{loading:'Translating…',cancelled:'Stopped',retry:'Retry',failed:'Translation failed. Please retry.'},
 };
 const alwaysAllowed=()=>true;
+let nextOutputId=0;
 
 /** Append translations to existing blocks. Original nodes and listeners never move. */
 export function createPageTranslator({ document, env = globalThis, translate, cancel = () => {}, getSettings, makeRequestId = makeId,onBeforeTranslate=()=>{},onRestore=()=>{} }: PageTranslatorOptions) {
@@ -44,7 +45,11 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
   }
   function finish(entry: PageEntry): void {entry.resolve?.();entry.resolve=null;}
   function remove(entry: PageEntry): void {
-    releaseRequests(entry);removeLoading(entry);restoreOriginal(entry);entry.output?.remove();finish(entry);
+    releaseRequests(entry);removeLoading(entry);restoreOriginal(entry);entry.output?.remove();entry.sheet?.remove();finish(entry);
+    if(entry.sourceLayout!==undefined&&entry.element.getAttribute('data-kuai-page-source')==='expanded'){
+      if(entry.sourceLayout===null)entry.element.removeAttribute('data-kuai-page-source');
+      else entry.element.setAttribute('data-kuai-page-source',entry.sourceLayout);
+    }
     if(entry.titleLayout&&entry.element.getAttribute('data-kuai-title-layout')==='stacked')entry.element.removeAttribute('data-kuai-title-layout');
     if(entries.get(entry.element)===entry)entries.delete(entry.element);
     if(!entries.size){observer?.disconnect();observer=null;titleLayoutStyle?.remove();titleLayoutStyle=null;}
@@ -79,11 +84,11 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     }
     element.setAttribute('data-kuai-title-layout','stacked');entry.titleLayout=true;
   }
-  function lastSourceText(element: HTMLElement): Text | null{
+  function lastSourceText(element: HTMLElement,allowOriginal=false): Text | null{
     let last: Text|null=null;
     const visit=(node: Node): void=>{
       if(node.nodeType===3){if(/\S/u.test(node.nodeValue||''))last=node as Text;return;}
-      if(node.nodeType!==1||node!==element&&((node as HTMLElement).matches?.(BLOCK_SELECTOR)||!isReadable(node as HTMLElement,env)))return;
+      if(node.nodeType!==1||node!==element&&((node as HTMLElement).matches?.(BLOCK_SELECTOR)||!isReadable(node as HTMLElement,env,{allowOriginal})))return;
       for(const child of node.childNodes)visit(child);
     };
     visit(element);return last;
@@ -126,30 +131,54 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     }
     positionLoading(entry);
   }
+  /** Place this block's result after its own text, before any following nested block. */
+  function positionOutput(entry: PageEntry): void{
+    if(!entry.output)return;
+    let anchor: Node|null=lastSourceText(entry.element,true);
+    if(!anchor)return;
+    while(anchor.parentNode&&anchor.parentNode!==entry.element)anchor=anchor.parentNode;
+    if(anchor.parentNode!==entry.element)return;
+    const next=Array.from(entry.element.childNodes)[Array.from(entry.element.childNodes).indexOf(anchor as ChildNode)+1]||null;
+    if(next!==entry.output)entry.element.insertBefore(entry.output,next);
+  }
   function ensureOutput(entry: PageEntry): asserts entry is PageEntry & {output:HTMLElement} {
     if(entry.output)return;
-    const output = document.createElement('span');
-    output.setAttribute('data-kuai-owned',''); output.setAttribute('data-kuai-page-translation','');
-    output.setAttribute('lang',getSettings().targetLanguage || '');
-    output.setAttribute('role','status');output.setAttribute('aria-live','polite');
-    output.style.cssText = 'display:block!important;margin:.35em 0 .5em;white-space:pre-wrap;overflow-wrap:anywhere;';
-    entry.element.append(output);entry.output=output;
+    const output=document.createElement('kuai-translator'),inner=document.createElement('font'),sheet=document.createElement('style');
+    output.className='kuai-translator-wrapper notranslate';
+    output.setAttribute('data-kuai-owned','');output.setAttribute('data-kuai-page-translation','');
+    output.setAttribute('role','status');output.setAttribute('aria-live','polite');output.setAttribute('translate','no');
+    inner.className='kuai-translator-inner kuai-text-'+(++nextOutputId);
+    inner.setAttribute('lang',getSettings().targetLanguage||'');
+    sheet.setAttribute('data-kuai-owned','');sheet.setAttribute('data-kuai-page-style','');
+    output.append(document.createElement('br'),inner);entry.element.append(output);document.documentElement.append(sheet);
+    entry.output=output;entry.inner=inner;entry.sheet=sheet;positionOutput(entry);
   }
   function present(entry: PageEntry): void {
-    if(!entry.output)return;
-    const settings=getSettings(),style=settings.pageStyle||{};
-    if(entry.status==='pending'){
-      restoreOriginal(entry);
-      entry.output.style.cssText='display:none!important;';appendLoading(entry);
+    if(!entry.output||!entry.inner||!entry.sheet)return;
+    positionOutput(entry);
+    const settings=getSettings(),style=settings.pageStyle||{},selector='.'+entry.inner.className.split(' ').at(-1);
+    const pending=entry.status==='pending',translationOnly=settings.pageDisplayMode==='translation_only'&&entry.status==='success';
+    const theme=entry.status==='success'?style:{...style,preset:style.preset==='blur'?'plain':style.preset,opacity:100};
+    const css='kuai-translator.kuai-translator-wrapper{display:inline!important;white-space:normal;overflow-wrap:anywhere}'+
+      'kuai-translator[data-state=pending]{display:none!important}'+
+      'kuai-translator[data-kuai-only]>br{display:none!important}'+
+      '[data-kuai-page-source=expanded]{-webkit-line-clamp:unset!important;max-height:none!important;height:auto!important}'+
+      selector+'{white-space:pre-wrap;overflow-wrap:anywhere}'+pageStyleRule(selector,theme);
+    // Avoid observer churn when a presentation refresh leaves the theme unchanged.
+    if(entry.sheet.textContent!==css)entry.sheet.textContent=css;
+    if(pending){
+      restoreOriginal(entry);appendLoading(entry);
       entry.output.setAttribute('aria-label',labels().loading);return;
     }
-    removeLoading(entry);entry.output.style.cssText='display:block!important;margin:.35em 0 .5em;white-space:pre-wrap;overflow-wrap:anywhere;';
-    entry.output.removeAttribute('aria-label');stackYouTubeTitle(entry);
+    removeLoading(entry);entry.output.removeAttribute('aria-label');stackYouTubeTitle(entry);
+    if(entry.sourceLayout===undefined)entry.sourceLayout=entry.element.getAttribute('data-kuai-page-source');
+    entry.element.setAttribute('data-kuai-page-source','expanded');
     if(entry.status==='success')refreshPageLinks(entry.links,document,env);
-    applyPageStyle(entry.output,entry.status==='success'?style:{...style,preset:style.preset==='blur'?'plain':style.preset,opacity:100});
-    if(settings.pageDisplayMode==='translation_only'&&entry.status==='success')hideOriginal(entry,document,env);
-    else restoreOriginal(entry);
+    if(theme.preset==='blur')entry.inner.setAttribute('tabindex','0');else entry.inner.removeAttribute('tabindex');
+    if(translationOnly){entry.output.setAttribute('data-kuai-only','');hideOriginal(entry,document,env);}
+    else{entry.output.removeAttribute('data-kuai-only');restoreOriginal(entry);}
   }
+
   function current(entry: PageEntry): boolean {
     if(entries.get(entry.element)!==entry)return false;
     if(entry.url!==route()||entry.key!==pageTranslationKey(getSettings())||!entry.validate()||
@@ -169,19 +198,19 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     return !!entry&&current(entry)&&entry.source===source&&['pending','success'].includes(entry.status);
   }
   function show(entry: PageEntry, text: string, state: PageEntryStatus): void {
-    ensureOutput(entry);entry.status = state;entry.output.setAttribute('data-state',state);entry.output.setAttribute('aria-busy',String(state==='pending'));entry.output.replaceChildren();
+    ensureOutput(entry);entry.status = state;entry.output.setAttribute('data-state',state);entry.output.setAttribute('aria-busy',String(state==='pending'));entry.inner!.replaceChildren();
     entry.links=[];
-    if(state!=='pending'&&entry.output.parentNode!==entry.element)entry.element.append(entry.output);
+    if(state!=='pending')positionOutput(entry);
     if(state==='pending')appendLoading(entry);
-    else if(state==='success')entry.links=renderPageContent(entry.output,entry.content,entry.parts,{document,env,valid:()=>current(entry)});
-    else entry.output.append(document.createTextNode(text));
+    else if(state==='success')entry.links=renderPageContent(entry.inner!,entry.content,entry.parts,{document,env,valid:()=>current(entry)});
+    else entry.inner!.append(document.createTextNode(text));
     if (state === 'error' || state === 'cancelled') {
       const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = labels().retry;
       retry.style.cssText = 'font:inherit;margin-left:.5em;padding:.1em .5em;cursor:pointer;';
       retry.addEventListener('click',event => {
         event.preventDefault();event.stopPropagation();
         if(current(entry))void translateBlocks([{element:entry.element,text:entry.source}],{validate:entry.validate}).catch(reportError);
-      });entry.output.append(retry);
+      });entry.inner!.append(retry);
     }
     present(entry);if(state!=='pending')finish(entry);
   }
