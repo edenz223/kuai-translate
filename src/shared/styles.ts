@@ -26,7 +26,7 @@ function pageMask(element:HTMLElement,preset:string) {
   state.render!();
 }
 
-export function applyPageStyle(element:HTMLElement,input?:unknown) {
+function pageStyleProperties(input?:unknown) {
   const style=normalizePageStyle(input),preset=style.preset;
   const accent=style.accentColor,background=style.backgroundColor;
   const properties:Record<string,string|number>={
@@ -49,7 +49,22 @@ export function applyPageStyle(element:HTMLElement,input?:unknown) {
   }
   if(preset==='marker')properties.background=`linear-gradient(transparent 45%, ${background} 45%, ${background} 90%, transparent 90%)`;
   if(preset==='dashed-border'){properties.border=properties['border-left']='1px dashed '+accent;properties.padding='.25em .5em';properties['padding-left']='.5em';properties['border-radius']='.25em';}
-  apply(element,properties);element.setAttribute('data-kuai-preset',preset);pageMask(element,preset);
+  return {style,properties};
+}
+
+/** Class-based page output shares the same validated theme values as previews. */
+export function pageStyleRule(selector:string,input?:unknown) {
+  const {style,properties}=pageStyleProperties(input);
+  // Filters need a paintable box; ordinary inline font elements ignore them.
+  if(style.preset==='blur'){properties.display='inline-block';properties['max-width']='100%';}
+  const declarations=Object.entries(properties).map(([key,value])=>key+':'+value+'!important').join(';');
+  return selector+'{'+declarations+';filter:'+(style.preset==='blur'?'blur(4px)':'none')+'!important}'+
+    (style.preset==='blur'?selector+':hover,'+selector+':focus{filter:none!important}':'');
+}
+
+export function applyPageStyle(element:HTMLElement,input?:unknown) {
+  const {style,properties}=pageStyleProperties(input);
+  apply(element,properties);element.setAttribute('data-kuai-preset',style.preset);pageMask(element,style.preset);
   return style;
 }
 

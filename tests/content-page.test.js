@@ -1,4 +1,5 @@
 import test from 'node:test';
+const sheet=h=>h.doc.querySelector('[data-kuai-page-style]')?.textContent||'';
 import assert from 'node:assert/strict';
 import { fixture } from './helpers/content-dom.cjs';
 import { createPageTranslator } from '../dist/src/content/page-translator.js';
@@ -20,7 +21,7 @@ test('page translation sends only viewport paragraphs and excludes controls/code
 
 test('nested blocks are not translated twice and provider markup is displayed as plain text', async()=>{
  const h=fixture();const outer=h.paragraph('','div'), inner=h.doc.createElement('p');inner.textContent='Nested';outer.append(inner);h.respond(async()=>({translations:['<script>bad()</script>译文']}));
- const controller=createPageTranslator(h.dependencies);await controller.translatePage();assert.deepEqual(h.requests[0].texts,['Nested']);assert.equal(output(outer),output(inner));assert.equal(output(inner).textContent,'<script>bad()</script>译文');assert.equal(output(inner).children.length,0);
+ const controller=createPageTranslator(h.dependencies);await controller.translatePage();assert.deepEqual(h.requests[0].texts,['Nested']);assert.equal(output(outer),output(inner));assert.equal(output(inner).textContent,'<script>bad()</script>译文');assert.equal(output(inner).querySelector('font').children.length,0);
 });
 
 test('empty or malformed output retains the source and displays a retryable failure', async()=>{
@@ -53,7 +54,7 @@ test('changing page style preserves a successful translation and does not send a
  const translated=output(p),text=translated.firstChild;
  h.settings.pageStyle={preset:'highlight',textColor:'#123456',fontSize:125};
  assert.equal(typeof controller.refreshPresentation,'function');controller.refreshPresentation();
- assert.strictEqual(output(p),translated);assert.strictEqual(translated.firstChild,text);assert.equal(translated.style.color,'#123456');assert.equal(translated.style['font-size'],'125%');assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);
+ assert.strictEqual(output(p),translated);assert.strictEqual(translated.firstChild,text);assert.ok(sheet(h).includes('color:#123456!important'));assert.ok(sheet(h).includes('font-size:125%!important'));assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);
 });
 test('translation-only waits for success, preserves source node identity and restores inline listeners',async()=>{
  const h=fixture(),p=h.paragraph('Hello '),source=p.firstChild,strong=h.doc.createElement('strong');strong.textContent='world';p.append(strong);let clicks=0;strong.addEventListener('click',()=>clicks++);
@@ -122,16 +123,16 @@ for(const mode of ['bilingual','translation_only'])test('pending '+mode+' transl
  const h=fixture(),p=h.paragraph('Original text'),source=p.firstChild;h.settings.pageDisplayMode=mode;h.settings.pageStyle={preset:'border'};let finish;
  h.respond(()=>new Promise(resolve=>{finish=resolve;}));const page=createPageTranslator(h.dependencies),work=page.translatePage(),pending=output(p);
  assert.equal(p.textContent,'Original text');assert.strictEqual(p.firstChild,source);assert.equal(source.parentNode,p);
- assert.match(pending.style.cssText,/display:none!important/);
+ assert.match(sheet(h),/display:none!important/);
  const spinner=h.doc.querySelector('[data-kuai-page-loading]');assert.ok(spinner);assert.ok(spinner.shadowRoot);assert.equal(pending.getAttribute('aria-busy'),'true');
- finish({translations:['Translated text']});await work;assert.equal(h.doc.querySelector('[data-kuai-page-loading]'),null);assert.equal(output(p).textContent,'Translated text');assert.match(output(p).style.cssText,/display:block!important/);page.stop();
+ finish({translations:['Translated text']});await work;assert.equal(h.doc.querySelector('[data-kuai-page-loading]'),null);assert.equal(output(p).textContent,'Translated text');assert.match(sheet(h),/display:inline!important/);page.stop();
 });
 
 
 test('pending YouTube title spinner stays outside layout without adding a flex column',async()=>{
  const h=fixture(),{heading,source}=youtubeTitle(h);let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));
  const page=createPageTranslator(h.dependencies),work=page.translatePage(),pending=output(heading);
- assert.equal(pending.parentNode,heading);assert.match(pending.style.cssText,/display:none!important/);assert.equal(h.doc.querySelector('[data-kuai-page-loading]').parentNode,h.doc.documentElement);assert.equal(heading.hasAttribute('data-kuai-title-layout'),false);
+ assert.equal(pending.parentNode,heading);assert.match(sheet(h),/display:none!important/);assert.equal(h.doc.querySelector('[data-kuai-page-loading]').parentNode,h.doc.documentElement);assert.equal(heading.hasAttribute('data-kuai-title-layout'),false);
  finish({translations:['Translated title']});await work;assert.equal(output(heading).parentNode,heading);assert.equal(heading.getAttribute('data-kuai-title-layout'),'stacked');page.stop();
 });
 
@@ -139,7 +140,7 @@ test('pending YouTube title spinner stays outside layout without adding a flex c
 test('loading in a direct-text flex container uses an outside overlay and follows scroll',async()=>{
  const h=fixture(),p=h.paragraph('Flex title','h1'),source=p.firstChild;let finish;p.style.cssText='display:flex;gap:20px;justify-content:space-between';
  h.respond(()=>new Promise(resolve=>{finish=resolve;}));const page=createPageTranslator(h.dependencies),work=page.translatePage();
- const spinner=h.doc.querySelector('[data-kuai-page-loading]');assert.equal(spinner.parentNode,h.doc.documentElement);assert.match(output(p).style.cssText,/display:none!important/);assert.strictEqual(p.firstChild,source);
+ const spinner=h.doc.querySelector('[data-kuai-page-loading]');assert.equal(spinner.parentNode,h.doc.documentElement);assert.match(sheet(h),/display:none!important/);assert.strictEqual(p.firstChild,source);
  p._rect={left:10,top:90,right:440,bottom:120,width:430,height:30};h.emit(h.doc,'scroll');assert.equal(spinner.style.left,'444px');assert.equal(spinner.style.top,'107px');
  finish({translations:['Translated']});await work;assert.equal(h.doc.querySelector('[data-kuai-page-loading]'),null);page.stop();
 });
@@ -153,4 +154,16 @@ test('loading overlay stays hidden when the text end is clipped by a scroll cont
  h.respond(()=>new Promise(resolve=>{finish=resolve;}));const page=createPageTranslator(h.dependencies),work=page.translatePage(),spinner=h.doc.querySelector('[data-kuai-page-loading]');
  assert.equal(spinner.style.display,'none');bottom=180;h.emit(container,'scroll');assert.equal(spinner.style.display,'block');
  finish({translations:['Translated']});await work;page.stop();
+});
+
+test('mixed container page translations stay after their respective source text',async()=>{
+ const h=fixture(),container=h.paragraph('First comment','div'),source=container.firstChild,p=h.doc.createElement('p');
+ p.textContent='Second paragraph';container.append(p);
+ const page=createPageTranslator(h.dependencies);await page.translatePage();
+ const parentOutput=container.children.find(node=>node.hasAttribute('data-kuai-page-translation'));
+ assert.deepEqual(h.requests[0].texts,['First comment','Second paragraph']);
+ assert.deepEqual(container.childNodes,[source,parentOutput,p]);
+ assert.equal(parentOutput.textContent,'译：First comment');assert.equal(output(p).textContent,'译：Second paragraph');
+ page.refreshPresentation();assert.deepEqual(container.childNodes,[source,parentOutput,p]);
+ page.restore();assert.deepEqual(container.childNodes,[source,p]);assert.equal(p.textContent,'Second paragraph');
 });

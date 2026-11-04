@@ -17,8 +17,33 @@ const server=createServer(async(req,res)=>{
     res.writeHead(200,{'Content-Type':'application/json'});
     res.end(JSON.stringify({code:200,data:'测试译文 '+JSON.parse(body).text}));return;
   }
-  res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});
-  res.end('<!doctype html><html lang="en"><title>Kuai smoke fixture</title><body><p id="fixture">Hello from the TypeScript migration.</p></body></html>');
+  res.writeHead(200,{'Content-Type':'text/html;charset=utf-8',...(process.env.SMOKE_STRICT_CSP?{'Content-Security-Policy':"style-src 'none'"}:{})});
+  if(process.env.SMOKE_HN){
+    res.end('<!doctype html><html lang="en"><title>HN mixed comment</title><body><div id="fixture" class="commtext c00">Hello from the TypeScript migration.<p id="fixture-next">Second paragraph.</p><p>Look at the PHP situation:</p><p>- HTTP details.</p><p>- PHP details.</p></div><div id="other-comment">Another user comment.</div></body></html>');return;
+  }
+  if(process.env.SMOKE_SLOTTED){
+    res.end(`<!doctype html><html lang="en"><title>Slotted title fixture</title><body>
+      <article><shreddit-post>
+        <a slot="full-post-link" href="/post"><faceplate-screen-reader-content>What do you think of Justin’s style?</faceplate-screen-reader-content></a>
+        <span slot="credit-bar"><time>11h ago</time></span>
+        <a slot="title" id="fixture" href="/post"><span>What do you think of Justin’s style?</span></a>
+        <p slot="body" id="fixture-body">I am just curious.</p>
+      </shreddit-post></article>
+      <script>
+        customElements.define('shreddit-post',class extends HTMLElement{
+          constructor(){super();this.attachShadow({mode:'open'}).innerHTML='<slot name="full-post-link"></slot><slot name="credit-bar"></slot><h2><slot name="title"></slot></h2><slot name="body"></slot>';}
+        });
+        if(${!!process.env.SMOKE_CARD}){
+          const post=document.querySelector('shreddit-post'),overlay=post.querySelector('[slot="full-post-link"]');
+          post.style.cssText='display:block;position:relative;padding-bottom:40px';
+          overlay.style.cssText='position:absolute;inset:0;display:block';
+        }
+        for(const node of document.querySelectorAll('faceplate-screen-reader-content')){
+          node.style.position='absolute';node.style.width='1px';node.style.height='1px';node.style.overflow='hidden';node.style.clip='rect(0,0,0,0)';node.style.clipPath='inset(50%)';
+        }
+      </script></body></html>`);return;
+  }
+  res.end('<!doctype html><html lang="en"><title>Kuai smoke fixture</title><body><div id="fixture">Hello from the TypeScript migration.<p id="fixture-next">Second paragraph.</p></div></body></html>');
 });
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(read,label){
@@ -76,16 +101,70 @@ try{
   const initial=await getSettings();assert.equal(initial.ok,true);assert.equal(initial.value.providers.length,4);
   const configured=structuredClone(initial.value);
   configured.providers.push({id:'smoke-local',type:'deeplx',name:'Local smoke fixture',enabled:true,baseUrl:fixtureURL+'api',apiKey:'',model:'',region:'',temperature:null});
-  configured.activeProviderId='smoke-local';configured.sourceLanguage='en';
+  configured.pageStyle={preset:'blur'};configured.hoverEnabled=!!(process.env.SMOKE_SLOTTED||process.env.SMOKE_HN);configured.hoverOptions={trigger:process.env.SMOKE_CARD||process.env.SMOKE_HN?'shift':'alt',delay:50};configured.activeProviderId='smoke-local';configured.sourceLanguage='en';
   const saved=await evaluate(popup,'chrome.runtime.sendMessage('+JSON.stringify({type:'KUAI_SAVE_SETTINGS',settings:configured,baseSettings:initial.value})+')');
   assert.equal(saved.ok,true);
   const action=type=>evaluate(popup,'(async()=>{const [tab]=await chrome.tabs.query({url:'+JSON.stringify(fixtureURL+'*')+'});return chrome.tabs.sendMessage(tab.id,{type:'+JSON.stringify(type)+'},{frameId:0});})()');
   await until(async()=>{const reply=await action('KUAI_PAGE_STATUS');return reply?.ok&&reply.value?.phase==='ready';},'content bootstrap and message response');
-  assert.equal((await action('KUAI_PAGE_TRANSLATE')).ok,true);
+  if(process.env.SMOKE_SLOTTED||process.env.SMOKE_HN){
+    await fixture('Page.bringToFront');
+    const point=await evaluate(fixture,process.env.SMOKE_HN?
+      "(()=>{const range=document.createRange();range.selectNodeContents(document.querySelector('#fixture').firstChild);const rect=range.getBoundingClientRect();return {x:rect.x+10,y:rect.y+5}})()":process.env.SMOKE_CARD?
+      "(()=>{const rect=document.querySelector('shreddit-post').getBoundingClientRect();return {x:rect.x+10,y:rect.bottom-15}})()":
+      "(()=>{const rect=document.querySelector('#fixture span').getBoundingClientRect();return {x:rect.x+10,y:rect.y+5}})()");
+    if(process.env.SMOKE_CARD)assert.equal(await evaluate(fixture,'document.elementFromPoint('+point.x+','+point.y+').getAttribute("slot")'),'full-post-link');
+    await fixture('Input.dispatchMouseEvent',{type:'mouseMoved',...point});
+    const key=(process.env.SMOKE_CARD||process.env.SMOKE_HN)?'Shift':'Alt',code=(process.env.SMOKE_CARD||process.env.SMOKE_HN)?'ShiftLeft':'AltLeft',virtualKey=(process.env.SMOKE_CARD||process.env.SMOKE_HN)?16:18,modifiers=(process.env.SMOKE_CARD||process.env.SMOKE_HN)?8:1;
+    await fixture('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:virtualKey,modifiers});
+    await fixture('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:virtualKey,modifiers:0});
+  }else assert.equal((await action('KUAI_PAGE_TRANSLATE')).ok,true);
   await until(()=>evaluate(fixture,'document.querySelector("[data-kuai-page-translation][data-state=success]")?.textContent.includes("测试译文")'),'real browser translation');
+  const layout=await evaluate(fixture,`(()=>{
+    const host=document.querySelector('[data-kuai-page-translation]'),inner=host.querySelector('font');
+    const source=host.parentElement;source.style.cssText='-webkit-line-clamp:1;max-height:5px;height:5px';
+    const computed=getComputedStyle(source);
+    return {followingParagraph:host.nextElementSibling?.id,tag:host.localName,children:[...host.children].map(node=>node.localName),
+      inlineStyles:host.hasAttribute('style')||inner.hasAttribute('style'),
+      lineClamp:computed.webkitLineClamp,maxHeight:computed.maxHeight,innerDisplay:getComputedStyle(inner).display,
+      translatedLine:inner.getBoundingClientRect().top>source.firstChild.parentElement.getBoundingClientRect().top};
+  })()`);
+  assert.equal(layout.followingParagraph,process.env.SMOKE_SLOTTED?undefined:'fixture-next');assert.equal(layout.tag,'kuai-translator');assert.deepEqual(layout.children,['br','font']);
+  assert.equal(layout.inlineStyles,false);assert.equal(layout.lineClamp,'none');assert.equal(layout.maxHeight,'none');
+  assert.equal(layout.translatedLine,true);assert.equal(layout.innerDisplay,'inline-block');
+  await fixture('Page.bringToFront');
+  assert.equal(await evaluate(fixture,"document.querySelector('kuai-translator font').focus();getComputedStyle(document.querySelector('kuai-translator font')).filter"),'none');
+  if(process.env.SMOKE_SLOTTED){
+    const result=await evaluate(fixture,`(()=>{
+      const title=document.querySelector('#fixture'),host=title.querySelector('kuai-translator'),font=host?.querySelector('font');
+      const source=document.createRange();source.selectNodeContents(title.firstChild);
+      return {count:document.querySelectorAll('kuai-translator').length,parent:host?.parentElement.id,
+        text:font?.textContent,below:font.getBoundingClientRect().top>=source.getBoundingClientRect().bottom-1,
+        nestedLinks:host.querySelectorAll('a').length};
+    })()`);
+    assert.equal(result.count,process.env.SMOKE_CARD?2:1);assert.equal(result.parent,'fixture');assert.equal(result.below,true);
+    assert.equal(result.text,'测试译文 What do you think of Justin’s style?');assert.equal(result.nestedLinks,0);
+    if(process.env.SMOKE_CARD){
+      const body=await evaluate(fixture,`(()=>{
+        const p=document.querySelector('#fixture-body'),font=p.querySelector('kuai-translator font'),source=document.createRange();
+        source.selectNodeContents(p.firstChild);return {text:font?.textContent,below:font.getBoundingClientRect().top>=source.getBoundingClientRect().bottom-1,
+          metadataOutput:document.querySelector('[slot="credit-bar"] kuai-translator')!==null};
+      })()`);
+      assert.equal(body.text,'测试译文 I am just curious.');assert.equal(body.below,true);assert.equal(body.metadataOutput,false);
+    }
+  }
+  if(process.env.SMOKE_HN){
+    const comment=await evaluate(fixture,`(()=>{
+      const root=document.querySelector('#fixture'),outputs=[...root.querySelectorAll('kuai-translator')];
+      return {count:outputs.length,parents:outputs.map(node=>node.parentElement.tagName),
+        below:outputs.every(node=>{const range=document.createRange();range.selectNodeContents(node.parentElement.firstChild);return node.querySelector('font').getBoundingClientRect().top>=range.getBoundingClientRect().bottom-1}),
+        outside:document.querySelector('#other-comment kuai-translator')!==null};
+    })()`);
+    assert.equal(comment.count,5);assert.deepEqual(comment.parents,['DIV','P','P','P','P']);assert.equal(comment.below,true);assert.equal(comment.outside,false);
+  }
   const translated=await evaluate(fixture,'document.querySelector("[data-kuai-page-translation]").textContent');
   assert.equal((await action('KUAI_PAGE_RESTORE')).ok,true);
   await until(()=>evaluate(fixture,'!document.querySelector("[data-kuai-page-translation]")'),'page restore');
+  assert.equal(await evaluate(fixture,"getComputedStyle(document.querySelector('#fixture')).maxHeight"),'5px');
   const pages={};
   for(const name of ['options.html','text.html']){
     const cdp=await page(extensionOrigin+'/'+name);

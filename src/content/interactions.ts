@@ -12,7 +12,7 @@ interface Popup {host:HTMLDivElement;section:HTMLElement;header:HTMLElement;pin:
 type TextResult = {cancelled:true} | {skipped:true} | {translation:string;applied:boolean};
 
 import {appendIcon} from './icons.js';
-import {batches,BLOCK_SELECTOR,blockText,collectBlocks,configurationKey,isChinese,isEditable,isOwnedUI,isReadable,makeId,parentElement,requestOptions,splitText,translationsOf} from './dom.js';
+import {batches,BLOCK_SELECTOR,blockText,configurationKey,isChinese,isEditable,isOwnedUI,isReadable,makeId,parentElement,requestOptions,splitText,translationsOf} from './dom.js';
 import {normalizeInteractionOptions,normalizeKey,resolveFeatureSettings,isSiteListed} from '../shared/interactions.js';
 import {isPageSiteBlocked} from './page-policy.js';
 import {createHeldKeys,matchesShortcut} from './shortcuts.js';
@@ -236,13 +236,23 @@ export function createInteractions({document,env=globalThis,translate,cancel=()=
   function hoverRoot(): HTMLElement | null{
     const element=parentElement(lastPointer);
     const block=element?.closest?.<HTMLElement>(BLOCK_SELECTOR);
+    // Feed cards use a full-card overlay link and render content in named shadow slots.
+    // Resolve that surface to the card's content, rather than its ancestor's metadata.
+    const card=element?.closest<HTMLElement>('shreddit-post')||(block?.tagName==='ARTICLE'?block.querySelector<HTMLElement>('shreddit-post'):null);
+    if(card&&isReadable(card,env)&&(featureOptions('hover').mode==='area'||element===card||!block||!card.contains(block)||!blockText(block,env)||element?.closest('[slot="full-post-link"],[slot="credit-bar"]')))return card;
     const root=featureOptions('hover').mode==='area'?element?.closest?.<HTMLElement>('article,section,main,div')||block:block;
     return root&&isReadable(root,env)?root:null;
   }
   function hoverBlocks(root: HTMLElement): PageBlock[]{
-    if(featureOptions('hover').mode==='area')return collectBlocks(document,env).filter(block=>block.element===root||root.contains(block.element));
-    const text=blockText(root,env);return text?[{element:root,text}]:[];
+    // Match the outlined region: retain its own text and each nested paragraph as
+    // separate source units so every translation stays next to its original.
+    const regions=root.tagName==='SHREDDIT-POST'
+      ?Array.from(root.querySelectorAll<HTMLElement>('[slot="title"],[slot="text-body"],[slot="body"]')):[root];
+    const elements=new Set(regions.flatMap(region=>[region,...region.querySelectorAll<HTMLElement>(BLOCK_SELECTOR)]));
+    return [...elements].filter(element=>isReadable(element,env)).map(element=>({element,text:blockText(element,env)}))
+      .filter(block=>/[\p{L}\p{N}]/u.test(block.text));
   }
+
   const blocksKey=(blocks: readonly PageBlock[]): string=>blocks.map(item=>item.text).join('\n');
   const sameBlocks=(left: readonly PageBlock[],right: readonly PageBlock[]): boolean=>left.length===right.length&&left.every((block,index)=>block.element===right[index].element&&block.text===right[index].text);
   function indicateHover(root: HTMLElement): void{

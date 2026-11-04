@@ -6,7 +6,7 @@ export type CodedError = Error & {code?: string};
 export interface PageBlock {element: HTMLElement; text: string}
 
 /** Browser-facing helpers shared by the native page and selection controllers. */
-export const BLOCK_SELECTOR = 'p,div,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dt,dd,article,section';
+export const BLOCK_SELECTOR = 'p,div,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dt,dd,article,section,[slot="title"],[role="heading"]';
 const EXCLUDED_TAGS = new Set(['SCRIPT','STYLE','NOSCRIPT','PRE','CODE','TEXTAREA','INPUT','SELECT','OPTION','BUTTON','SVG','MATH','VIDEO','AUDIO','CANVAS']);
 
 export function parentElement(node: unknown): HTMLElement | null {
@@ -40,6 +40,9 @@ export function isReadable(element: HTMLElement | null | undefined, env: Browser
         ancestor.getAttribute?.('translate') === 'no' || ancestor.getAttribute?.('aria-hidden') === 'true' ||
         ancestor.className?.split?.(/\s+/).includes('html5-video-player') || isEditable(ancestor)) return false;
     const style = env.getComputedStyle?.(ancestor);
+    // Accessibility-only copies can have a layout box while all their pixels are clipped.
+    const clip=style?.clip?.match(/^rect\(([^)]+)\)$/)?.[1].split(/[\s,]+/).filter(Boolean).map(value=>parseFloat(value));
+    if(clip?.length===4&&['absolute','fixed'].includes(style?.position||'')&&(clip[1]<=clip[3]||clip[2]<=clip[0])||/^inset\(50%(?:\s+50%){0,3}\)$/.test(style?.clipPath||''))return false;
     if (ancestor.hidden || style?.display === 'none' || ['hidden','collapse'].includes(style?.visibility as string)) return false;
   }
   return hiddenByTranslation || !element.getClientRects || element.getClientRects().length > 0;

@@ -1,4 +1,5 @@
 import test from 'node:test';
+const sheet=h=>h.doc.querySelector('[data-kuai-page-style]')?.textContent||'';
 import assert from 'node:assert/strict';
 import {fixture} from './helpers/content-dom.cjs';
 import {createPageTranslator} from '../dist/src/content/page-translator.js';
@@ -25,7 +26,7 @@ test('translated identical link labels retain their separate source destinations
   assert.deepEqual(h.requests[0].texts,['Read','guide','and','guide']);
   const result=output(p),links=result.querySelectorAll('a');assert.equal(links.length,2);
   assert.deepEqual(links.map(node=>[node.textContent,node.getAttribute('href')]),[['指南','https://example.org/first'],['指南','https://example.org/second']]);
-  assert.equal(result.textContent,'阅读 指南 以及 指南.');assert.equal(result.firstChild.nodeType,3);
+  assert.equal(result.textContent,'阅读 指南 以及 指南.');assert.equal(result.querySelector('font').firstChild.nodeType,3);
   assert.equal(first.parentNode,p);assert.equal(second.parentNode,p);page.stop();
 });
 
@@ -108,7 +109,7 @@ test('adding a link around unchanged source text invalidates an earlier plain re
 test('style and display-mode refresh preserve translated anchor and text identity',async()=>{
   const h=fixture(),p=h.paragraph(''),a=link(h,'Guide','/guide');p.append(a);const page=createPageTranslator(h.dependencies);await page.translatePage();const translated=output(p).querySelector('a');assert.ok(translated);const text=translated.firstChild;
   h.settings.pageStyle={preset:'highlight',fontSize:125};h.settings.pageDisplayMode='translation_only';page.refreshPresentation();
-  assert.equal(output(p).querySelector('a'),translated);assert.equal(translated.firstChild,text);assert.equal(output(p).style['font-size'],'125%');assert.equal(h.requests.length,1);
+  assert.equal(output(p).querySelector('a'),translated);assert.equal(translated.firstChild,text);assert.ok(sheet(h).includes('font-size:125%!important'));assert.equal(h.requests.length,1);
   h.settings.pageDisplayMode='bilingual';page.refreshPresentation();assert.equal(output(p).querySelector('a'),translated);assert.equal(a.parentNode,p);page.stop();
 });
 
