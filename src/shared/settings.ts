@@ -36,7 +36,7 @@ export function normalizeSubtitleTrackPreference(input?:unknown):SubtitleTrackPr
 
 export function defaultSettings() {
   return {
-    schemaVersion:1, inputDefaultsVersion:2, paragraphDefaultsVersion:1, subtitleStyleDefaultsVersion:1, providerRevision:0, providers:structuredClone(FREE_PROVIDERS) as Provider[],
+    schemaVersion:1, inputDefaultsVersion:2, paragraphDefaultsVersion:1, subtitleStyleDefaultsVersion:2, providerRevision:0, providers:structuredClone(FREE_PROVIDERS) as Provider[],
     activeProviderId:'microsoft', subtitleProviderId:'follow_page',
     sourceLanguage:'auto', targetLanguage:'zh-Hans', interfaceLanguage:'auto',
     subtitlesEnabled:true, selectionEnabled:false, hoverEnabled:true, showOriginal:true,
@@ -94,8 +94,13 @@ export function normalizeSettings(input:unknown):Settings {
   let styleInput=input.subtitleStyle;
   if(input.schemaVersion===1&&version(input.subtitleStyleDefaultsVersion,0)<1&&plain(styleInput)&&!Object.hasOwn(styleInput,'backgroundMode')){
     const keys=Object.keys(legacySubtitleVisual),wasDefault=keys.every(key=>styleInput[key]===legacySubtitleVisual[key]);
-    if(wasDefault)styleInput={...styleInput,...Object.fromEntries(keys.map(key=>[key,SUBTITLE_STYLE_DEFAULTS[key as keyof typeof SUBTITLE_STYLE_DEFAULTS]])),backgroundMode:'line'};
+    if(wasDefault)styleInput={...styleInput,...Object.fromEntries(keys.map(key=>[key,SUBTITLE_STYLE_DEFAULTS[key as keyof typeof SUBTITLE_STYLE_DEFAULTS]])),backgroundMode:SUBTITLE_STYLE_DEFAULTS.backgroundMode,fontSizeMode:'responsive'};
     else if(keys.some(key=>Object.hasOwn(styleInput,key)))styleInput={...styleInput,backgroundMode:'panel'};
+  }
+  if(input.schemaVersion===1&&version(input.subtitleStyleDefaultsVersion,0)<2&&plain(styleInput)&&!Object.hasOwn(styleInput,'fontSizeMode')){
+    const prior={sourceFontSize:24,targetFontSize:24,sourceColor:'#ffffff',targetColor:'#ffffff',sourceWeight:400,targetWeight:400,sourceStroke:'none',targetStroke:'none',fontFamily:'system-ui, sans-serif',backgroundColor:'#000000',backgroundOpacity:50,backgroundMode:'line'};
+    const wasDefault=Object.entries(prior).every(([key,value])=>styleInput[key]===value);
+    styleInput=wasDefault?{...styleInput,fontSizeMode:'responsive',sourceStroke:'soft',targetStroke:'soft',backgroundMode:'panel'}:{...styleInput,fontSizeMode:'fixed'};
   }
   const subtitleStyle=normalizeSubtitleStyle(styleInput);
   if (!['bilingual','translation_only'].includes(input.subtitleStyle?.displayMode))
@@ -109,7 +114,7 @@ export function normalizeSettings(input:unknown):Settings {
   if(input.schemaVersion===1&&version(input.paragraphDefaultsVersion,0)<1&&input.hoverOptions?.trigger==='alt')
     interactionInput={...interactionInput,hoverOptions:{...input.hoverOptions,trigger:'shift'}};
   return {
-    schemaVersion:1,inputDefaultsVersion:version(input.inputDefaultsVersion,2),paragraphDefaultsVersion:version(input.paragraphDefaultsVersion,1),subtitleStyleDefaultsVersion:version(input.subtitleStyleDefaultsVersion,1),providerRevision:Number.isSafeInteger(input.providerRevision)&&input.providerRevision>=0?input.providerRevision:0,providers,activeProviderId:active,
+    schemaVersion:1,inputDefaultsVersion:version(input.inputDefaultsVersion,2),paragraphDefaultsVersion:version(input.paragraphDefaultsVersion,1),subtitleStyleDefaultsVersion:version(input.subtitleStyleDefaultsVersion,2),providerRevision:Number.isSafeInteger(input.providerRevision)&&input.providerRevision>=0?input.providerRevision:0,providers,activeProviderId:active,
     subtitleProviderId:input.subtitleProviderId==='follow_page' || !enabled(input.subtitleProviderId) ? 'follow_page' : input.subtitleProviderId,
     sourceLanguage:language(input.sourceLanguage,'auto',true),targetLanguage:language(input.targetLanguage,'zh-Hans'),
     interfaceLanguage:['auto','en','zh-CN'].includes(input.interfaceLanguage) ? input.interfaceLanguage : 'auto',

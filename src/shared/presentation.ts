@@ -9,9 +9,9 @@ export const PAGE_STYLE_DEFAULTS = Object.freeze({
 });
 export const SUBTITLE_STYLE_DEFAULTS = Object.freeze({
   displayMode:'bilingual',displayOrder:'original_on_top',hideTranslation:false,
-  sourceFontSize:24,targetFontSize:24,sourceColor:'#ffffff',targetColor:'#ffffff',
-  sourceWeight:400,targetWeight:400,sourceStroke:'none',targetStroke:'none',
-  fontFamily:'system-ui, sans-serif',backgroundColor:'#000000',backgroundOpacity:50,backgroundMode:'line',
+  fontSizeMode:'responsive',sourceFontSize:24,targetFontSize:24,sourceColor:'#ffffff',targetColor:'#ffffff',
+  sourceWeight:400,targetWeight:400,sourceStroke:'soft',targetStroke:'soft',
+  fontFamily:'system-ui, sans-serif',backgroundColor:'#000000',backgroundOpacity:50,backgroundMode:'panel',
   position:'bottom-center',offset:70,maxWidth:88,
 });
 
@@ -44,11 +44,12 @@ export function normalizePageStyle(input?: unknown) {
 }
 
 export function normalizeSubtitleStyle(input?: unknown) {
-  const value=record(input), defaults=SUBTITLE_STYLE_DEFAULTS, strokes=['none','light','normal','bold','shadow45'];
+  const value=record(input), defaults=SUBTITLE_STYLE_DEFAULTS, strokes=['none','soft','light','normal','bold','shadow45'];
   return {
     displayMode:choice(value.displayMode,['bilingual','translation_only'],defaults.displayMode),
     displayOrder:choice(value.displayOrder,['original_on_top','translation_on_top'],defaults.displayOrder),
     hideTranslation:boolean(value.hideTranslation,defaults.hideTranslation),
+    fontSizeMode:choice(value.fontSizeMode,['responsive','fixed'],Object.hasOwn(value,'sourceFontSize')||Object.hasOwn(value,'targetFontSize')?'fixed':defaults.fontSizeMode),
     sourceFontSize:bound(value.sourceFontSize,12,72,defaults.sourceFontSize),targetFontSize:bound(value.targetFontSize,12,72,defaults.targetFontSize),
     sourceColor:color(value.sourceColor,defaults.sourceColor),targetColor:color(value.targetColor,defaults.targetColor),
     sourceWeight:bound(value.sourceWeight,100,900,defaults.sourceWeight),targetWeight:bound(value.targetWeight,100,900,defaults.targetWeight),

@@ -1,6 +1,6 @@
-interface CaptureRawTrack {baseUrl?:unknown;languageCode?:unknown;kind?:unknown;vssId?:unknown;name?:{simpleText?:unknown;runs?:{text?:unknown}[]}}
+interface CaptureRawTrack {baseUrl?:unknown;url?:unknown;languageCode?:unknown;kind?:unknown;vssId?:unknown;name?:{simpleText?:unknown;runs?:{text?:unknown}[]}}
 interface CapturePlayerResponse {videoDetails?:{videoId?:string};captions?:{playerCaptionsTracklistRenderer?:{captionTracks?:CaptureRawTrack[]}}}
-interface CapturePlayer extends Element {getPlayerResponse?:()=>unknown;getOption?:(module:string,key:string)=>{languageCode?:string}}
+interface CapturePlayer extends Element {getPlayerResponse?:()=>unknown;getOption?:(module:string,key:string)=>CaptureRawTrack;getAudioTrack?:()=>{captionTracks?:CaptureRawTrack[]};setOption?:(module:string,key:string,value:unknown)=>void}
 interface CaptureRequest {source?:unknown;kind?:string;requestId?:string;videoId?:string;url?:unknown}
 interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown}
 /* Runs only on YouTube in MAIN world. Reads caption data; has no extension API or provider secrets. */
@@ -10,6 +10,31 @@ interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown
   window.__kuaiCaptionCapture=true;
   const nativeFetch=window.fetch.bind(window),MAX=4_000_000,active=new Map<string,AbortController>();
   let lastSignature='';
+  const captures=new Map<string,{videoId:string;languageCode:string;trackUrl:string;body:string}>();
+  function remember(url:URL,body:string){
+    if(!body.trim()||!timedURL(url.href))return;
+    const data={videoId:videoId(),languageCode:url.searchParams.get('lang')||'',trackUrl:url.href,body};
+    captures.delete(url.href);captures.set(url.href,data);
+    while(captures.size>4)captures.delete(captures.keys().next().value!);
+    emit({kind:'captions',...data});
+  }
+  function hasCaptionText(body:string){
+    if(!body.trim())return false;
+    if(body.trimStart().startsWith('{'))try{
+      const data=JSON.parse(body);
+      return Array.isArray(data.events)&&data.events.some((event:{segs?:{utf8?:unknown}[]})=>Array.isArray(event?.segs)&&event.segs.some(segment=>typeof segment?.utf8==='string'&&segment.utf8.trim()));
+    }catch{return false;}
+    return /(?:^WEBVTT|-->)/m.test(body)||/<(?:text|p)\b[^>]*>[\s\S]*?[^>\s][\s\S]*?<\/(?:text|p)>/i.test(body);
+  }
+  function players(){return Array.from(document.querySelectorAll<CapturePlayer>('.html5-video-player'));}
+  function runtimeTracks(){
+    return players().flatMap(player=>{try{
+      const response=player.getPlayerResponse?.() as CapturePlayerResponse|undefined;
+      if(response?.videoDetails?.videoId&&response.videoDetails.videoId!==videoId())return [];
+      return (player.getAudioTrack?.()?.captionTracks||[]).slice(0,100).map(track=>({...track,baseUrl:track.baseUrl||track.url}));
+    }catch{return [];}});
+  }
+  function sameTrack(a:URL,b:URL){return ['v','lang','kind','name','tlang'].every(key=>(a.searchParams.get(key)||'')===(b.searchParams.get(key)||''));}
   function videoId(){try{const url=new URL(location.href);return url.searchParams.get('v')||url.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)/)?.[1]||'';}catch{return '';}}
   function emit(data:Record<string,unknown>){window.postMessage({source:'kuai-youtube-data',...data},location.origin);}
   function timedURL(value:unknown,id=videoId()) {
@@ -18,7 +43,12 @@ interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown
   function tracksFrom(response:unknown,force=false,selectedLanguage='') {
     const id=(response as CapturePlayerResponse|null)?.videoDetails?.videoId,raw=(response as CapturePlayerResponse|null)?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
     if(!id||id!==videoId()||!Array.isArray(raw))return false;
-    const tracks=raw.slice(0,100).filter(track=>timedURL(track.baseUrl,id)).map(track=>({
+    const runtime=runtimeTracks();
+    const tracks=raw.slice(0,100).map(track=>{
+      const base=timedURL(track.baseUrl,id);
+      const live=runtime.find(item=>{const url=timedURL(item.baseUrl,id);return base&&url&&sameTrack(base,url)&&(!track.vssId||!item.vssId||track.vssId===item.vssId);});
+      return live?{...track,baseUrl:live.baseUrl}:track;
+    }).filter(track=>timedURL(track.baseUrl,id)).map(track=>({
       baseUrl:track.baseUrl,languageCode:String(track.languageCode||'auto').slice(0,32),kind:track.kind==='asr'?'asr':'',
       vssId:String(track.vssId||'').slice(0,100),name:String(track.name?.simpleText||track.name?.runs?.map(run=>run.text||'').join('')||track.languageCode||'').slice(0,160),
     }));
@@ -30,7 +60,7 @@ interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown
     if(document.visibilityState==='hidden'&&!force)return;
     for(const player of document.querySelectorAll<CapturePlayer>('.html5-video-player')){
       // The live player owns the current track selection. Initial page data is only a fallback.
-      try{if(tracksFrom(player.getPlayerResponse?.(),force,player.getOption?.('captions','track')?.languageCode||''))return;}catch{}
+      try{if(tracksFrom(player.getPlayerResponse?.(),force,String(player.getOption?.('captions','track')?.languageCode||'')))return;}catch{}
     }
     try{tracksFrom(window.ytInitialPlayerResponse,force);}catch{}
   }
@@ -51,7 +81,7 @@ interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown
     try {
       if(timedURL(url.href)){
         const id=url.searchParams.get('v'),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
-        try {const body=await readBounded(response.clone(),controller.signal);if(id===videoId())emit({kind:'captions',videoId:id,languageCode:url.searchParams.get('lang')||'',trackUrl:url.href,body});}finally{clearTimeout(timer);}
+        try {const body=await readBounded(response.clone(),controller.signal);if(id===videoId())remember(url,body);}finally{clearTimeout(timer);}
       } else if(url.pathname==='/youtubei/v1/player'){
         const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
         try{tracksFrom(JSON.parse(await readBounded(response.clone(),controller.signal)));}finally{clearTimeout(timer);}
@@ -71,7 +101,7 @@ interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown
           const url=new URL(this.responseURL||urls.get(this)!,location.href);
           if(timedURL(url.href)){
             const body=this.responseType==='json'?JSON.stringify(this.response):this.responseText;
-            if(typeof body==='string'&&body.length<=MAX)emit({kind:'captions',videoId:url.searchParams.get('v'),languageCode:url.searchParams.get('lang')||'',trackUrl:url.href,body});
+            if(typeof body==='string'&&body.length<=MAX)remember(url,body);
           }else if(/(^|\.)youtube\.com$/i.test(url.hostname)&&url.pathname==='/youtubei/v1/player'){
             const value=this.responseType==='json'?this.response:this.responseText.length<=MAX?JSON.parse(this.responseText):null;tracksFrom(value);
           }
@@ -83,7 +113,7 @@ interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown
   window.addEventListener('message',async event=>{
     if(event.source!==window||event.origin!==location.origin||event.data?.source!=='kuai-youtube-request')return;
     const data=event.data as CaptureRequest;
-    if(data.kind==='request-tracks'){discover(true);return;}
+    if(data.kind==='request-tracks'){discover(true);for(const capture of captures.values())if(capture.videoId===videoId())emit({kind:'captions',...capture});return;}
     if(!['fetch-track','cancel-track'].includes(data.kind!)||typeof data.requestId!=='string'||data.requestId.length>100||data.videoId!==videoId())return;
     if(data.kind==='cancel-track'){
       const controller=active.get(data.requestId!);
@@ -95,14 +125,39 @@ interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown
     url.searchParams.set('fmt','json3');
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);active.set(data.requestId!,controller);
     try {
-      const response=await nativeFetch(url.href,{credentials:'include',signal:controller.signal});
-      if(!response.ok)throw new Error('Caption HTTP error');
-      const body=await readBounded(response,controller.signal);
-      if(data.videoId===videoId()&&active.get(data.requestId!)===controller&&!controller.signal.aborted)emit({kind:'captions',videoId:data.videoId,requestId:data.requestId,languageCode:url.searchParams.get('lang')||'',trackUrl:url.href,body});
+      const attempted=new Set<string>();
+      let body='',received=url;
+      // Runtime/captured URLs may include fresh proof tokens absent from page metadata.
+      for(let pass=0;pass<2;pass++){
+        const candidates=[...Array.from(captures.values()).reverse().filter(item=>item.videoId===data.videoId).map(item=>item.trackUrl),...runtimeTracks().map(item=>item.baseUrl),url.href];
+        for(const value of candidates){
+          const candidate=timedURL(value,data.videoId);
+          if(!candidate||!sameTrack(url,candidate))continue;
+          candidate.searchParams.set('fmt','json3');
+          if(attempted.has(candidate.href))continue;attempted.add(candidate.href);
+          if(controller.signal.aborted||data.videoId!==videoId())throw new Error('Stale caption request');
+          const response=await nativeFetch(candidate.href,{credentials:'include',signal:controller.signal});
+          if(!response.ok){if(response.status===429)throw new Error('Caption rate limited');continue;}
+          body=await readBounded(response,controller.signal);received=candidate;
+          if(hasCaptionText(body))break;
+        }
+        if(hasCaptionText(body))break;
+        if(pass===0){
+          const before=JSON.stringify(runtimeTracks());
+          for(const player of players())try{player.setOption?.('captions','reload',true);}catch{}
+          // Native reload is asynchronous; allow its token-bearing request to arrive.
+          if(before===JSON.stringify(runtimeTracks()))await new Promise<void>((resolve,reject)=>{
+            const cancel=()=>{clearTimeout(wait);reject(new Error('Caption request cancelled'));};
+            const wait=setTimeout(()=>{controller.signal.removeEventListener('abort',cancel);resolve();},500);
+            if(controller.signal.aborted)cancel();else controller.signal.addEventListener('abort',cancel,{once:true});
+          });
+        }
+      }
+      if(data.videoId===videoId()&&active.get(data.requestId!)===controller&&!controller.signal.aborted)emit({kind:'captions',videoId:data.videoId,requestId:data.requestId,languageCode:received.searchParams.get('lang')||'',trackUrl:received.href,body});
     }catch{if(data.videoId===videoId()&&active.get(data.requestId!)===controller)emit({kind:'caption-error',videoId:data.videoId,requestId:data.requestId});}
     finally{clearTimeout(timer);if(active.get(data.requestId!)===controller)active.delete(data.requestId!);}
   });
-  document.addEventListener('yt-navigate-start',()=>{lastSignature='';for(const controller of active.values())controller.abort();active.clear();});
+  document.addEventListener('yt-navigate-start',()=>{lastSignature='';captures.clear();for(const controller of active.values())controller.abort();active.clear();});
   document.addEventListener('yt-navigate-finish',()=>discover(true));
   window.addEventListener('pageshow',()=>discover(true));
   setInterval(()=>discover(),2000);

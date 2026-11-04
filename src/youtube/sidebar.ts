@@ -141,11 +141,18 @@ function createController(bridge:SubtitleBridge, env = root) {
       return { parent: fullscreen.contains(player) ? player : fullscreen, type: "drawer" };
     }
     const watch = video.closest?.("ytd-watch-flexy");
+    // YouTube moves the early player into the watch layout asynchronously.
+    // Defer a saved-open panel until that layout exists instead of painting a drawer.
+    if(!watch&&new URL(env.location.href).pathname==='/watch')return {parent:null,type:"column"};
     const secondary = watch?.querySelector("#secondary-inner") || watch?.querySelector("#secondary");
     if (secondary?.isConnected) {
       const box = secondary.getBoundingClientRect(), style = env.getComputedStyle?.(secondary);
       if (box.width > 0 && style?.display !== "none" && style?.visibility !== "hidden") return { parent: secondary, type: "column" };
     }
+    const watchPage=new URL(env.location.href).pathname==='/watch';
+    const loading=doc.readyState==='loading'||doc.readyState==='interactive';
+    if(watchPage&&!watch?.hasAttribute('theater')&&(loading||watch?.hasAttribute('is-two-columns_')))
+      return {parent:null,type:"column"};
     return { parent: player, type: "drawer" };
   }
 
@@ -242,16 +249,18 @@ function createController(bridge:SubtitleBridge, env = root) {
       if (env.ResizeObserver) {
         entry.resizeObserver = new env.ResizeObserver(schedule);
         entry.resizeObserver.observe(list);
+        const watch=entry.video.closest?.('ytd-watch-flexy');
+        if(watch)entry.resizeObserver.observe(watch);
       }
     }
     const target = placement(entry);
+    entry.panel.dataset.placement = target.type;
     if (target.parent && entry.panel.parentNode !== target.parent) {
       if (target.type === "column") target.parent.insertBefore(entry.panel, target.parent.firstChild);
       else target.parent.appendChild(entry.panel);
     }
-    entry.panel.dataset.placement = target.type;
-    entry.panel.hidden = false;
-    return entry.panel.isConnected;
+    entry.panel.hidden = !target.parent;
+    return !!target.parent&&entry.panel.isConnected;
   }
 
   function resetTimeline(entry:SidebarEntry, source:CaptionCue[]|undefined) {
@@ -395,7 +404,7 @@ function createController(bridge:SubtitleBridge, env = root) {
     if (!entry.open) { if (entry.panel) entry.panel.hidden = true; return; }
     // Moving even a shadow host can invalidate the browser's live selection.
     if (held(entry)) { stopFollowing(entry); return; }
-    if (!mountPanel(entry)) return;
+    if (!mountPanel(entry)) {entry.panel.hidden=true;return;}
     entry.panel.setAttribute("aria-label", text.title);
     setText(entry.title, text.title);
     entry.closeButton.title = text.close; entry.closeButton.setAttribute("aria-label", text.close);
@@ -443,7 +452,7 @@ function createController(bridge:SubtitleBridge, env = root) {
         if (!entry.video.isConnected || anchor !== entry.anchor || (anchor && !entry.toggleHost?.isConnected) || (entry.open && (!entry.panel?.isConnected || (target && target !== entry.panel.parentNode)))) schedule();
       });
       const watch = entry.video.closest?.("ytd-watch-flexy") || entry.video.closest?.(".html5-video-player") || entry.video.parentElement;
-      if (watch) entry.observer.observe(watch, { childList: true, subtree: true });
+      if (watch) entry.observer.observe(watch, { childList: true, subtree: true, attributes:true, attributeFilter:["theater","is-two-columns_"] });
     }
     return entry;
   }
@@ -511,6 +520,7 @@ function createController(bridge:SubtitleBridge, env = root) {
     if (started || stopped) return controller;
     started = true;
     unsubscribe = bridge.subscribe?.(schedule);
+    doc.addEventListener("readystatechange", schedule);
     doc.addEventListener("fullscreenchange", schedule);
     doc.addEventListener("visibilitychange", schedule);
     env.addEventListener("resize", schedule);
@@ -524,6 +534,7 @@ function createController(bridge:SubtitleBridge, env = root) {
     stopped = true; pendingPreference = null; preferenceVersion++; unsubscribe?.();
     if (frame !== null) env.cancelAnimationFrame?.(frame);
     frame = null;
+    doc.removeEventListener("readystatechange", schedule);
     doc.removeEventListener("fullscreenchange", schedule);
     doc.removeEventListener("visibilitychange", schedule);
     env.removeEventListener("resize", schedule);

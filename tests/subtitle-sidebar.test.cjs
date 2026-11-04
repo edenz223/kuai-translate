@@ -530,3 +530,35 @@ test('teardown removes controls and subscriptions while BFCache pagehide preserv
   assert.equal(f.subscribers.size, 0);
   assert.deepEqual(f.controller.getSelectionRoots(f.session.id), []);
 });
+
+test('saved open list waits for the watch layout instead of flashing over the player',async()=>{
+  const f=fixture({secondary:false});f.watch.remove();f.document.body.append(f.player);
+  f.controller.toggle(f.session.id,true);await f.flush();
+  assert.ok(!f.panel()?.isConnected||f.panel().hidden,'unresolved watch layout must not paint a drawer');
+  f.document.body.append(f.watch);f.watch.append(f.player,f.right);
+  f.controller.sync();await f.flush();
+  assert.equal(f.panel().parentElement,f.right);
+  assert.equal(f.panel().hidden,false);
+  f.controller.stop();
+});
+
+test('an initial watch shell waits for its late right column without painting a drawer',async()=>{
+  const f=fixture({secondary:false});f.document.readyState='loading';
+  f.controller.toggle(f.session.id,true);await f.flush();
+  assert.ok(!f.panel()?.isConnected||f.panel().hidden);
+  f.watch.append(f.right);f.controller.sync();await f.flush();
+  assert.equal(f.panel().parentElement,f.right);assert.equal(f.panel().hidden,false);
+  f.controller.stop();
+});
+test('a zero-width desktop right column waits for layout while settled theater can use a drawer',async()=>{
+  const f=fixture();f.watch.setAttribute('is-two-columns_','');const rect=f.right.getBoundingClientRect.bind(f.right);
+  f.right.getBoundingClientRect=()=>({...rect(),width:0});
+  f.controller.toggle(f.session.id,true);await f.flush();
+  assert.ok(!f.panel()?.isConnected||f.panel().hidden);
+  f.right.getBoundingClientRect=rect;f.controller.sync();await f.flush();
+  assert.equal(f.panel().parentElement,f.right);
+  f.right.remove();f.watch.removeAttribute('is-two-columns_');f.watch.setAttribute('theater','');
+  f.controller.sync();await f.flush();
+  assert.equal(f.panel().parentElement,f.player);assert.equal(f.panel().hidden,false);
+  f.controller.stop();
+});
