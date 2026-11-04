@@ -46,7 +46,7 @@ export function pageTranslationKey(settings: Partial<Settings>): string{
 }
 
 function blockAllowed({element,text}: PageBlock,value: ReturnType<typeof options>): boolean{
-  if(!element?.isConnected||typeof text!=='string'||[...text.trim()].length<value.minTextLength)return false;
+  if(!element?.isConnected||typeof text!=='string'||!/\p{L}/u.test(text)||[...text.trim()].length<value.minTextLength)return false;
   if(languageListed(declaredLanguage(element),value.neverLanguages))return false;
   if(!value.translateFullPage&&element.closest?.('footer,[role="contentinfo"]'))return false;
   for(const selector of value.excludeSelectors){try{
