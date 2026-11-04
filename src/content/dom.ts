@@ -82,7 +82,7 @@ export function collectBlocks(document: Document, env: BrowserEnvironment, {visi
   return [document.body, ...document.body.querySelectorAll<HTMLElement>(BLOCK_SELECTOR)]
     .filter(element => (!visibleOnly||isInViewport(element,env))&&isReadable(element, env))
     .map(element => ({ element, text:blockText(element, env) }))
-    .filter(item => item.text && /[\p{L}\p{N}]/u.test(item.text));
+    .filter(item => item.text && /\p{L}/u.test(item.text));
 }
 
 /** Split by Unicode characters rather than cutting a surrogate pair. */

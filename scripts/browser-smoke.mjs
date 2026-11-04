@@ -100,6 +100,11 @@ try{
     return cdp;
   }
   const fixture=await page(fixtureURL);
+  if(process.env.SMOKE_LINK_COLOR)await evaluate(fixture,`(()=>{
+    const link=document.createElement('a');link.href='/openai';link.textContent='OpenAI';link.style.color='rgb(220, 0, 0)';
+    document.querySelector('#fixture').insertBefore(link,document.querySelector('#fixture-next'));
+  })()`);
+
   const popup=await page(extensionOrigin+'/popup.html');
   await until(()=>evaluate(popup,'document.querySelector("#provider")?.options.length===4'),'popup initialization');
   const getSettings=()=>evaluate(popup,'chrome.runtime.sendMessage({type:"KUAI_GET_SETTINGS",includeSecrets:true})');
@@ -124,6 +129,13 @@ try{
     await fixture('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:virtualKey,modifiers:0});
   }else assert.equal((await action('KUAI_PAGE_TRANSLATE')).ok,true);
   await until(()=>evaluate(fixture,'document.querySelector("[data-kuai-page-translation][data-state=success]")?.textContent.includes("测试译文")'),'real browser translation');
+  if(process.env.SMOKE_LINK_COLOR){
+    const color=await evaluate(fixture,`(()=>{
+      const source=document.querySelector('#fixture > a'),translated=document.querySelector('kuai-translator a');
+      return {source:getComputedStyle(source).color,translated:getComputedStyle(translated).color,href:translated.href};
+    })()`);
+    assert.equal(color.source,'rgb(220, 0, 0)');assert.equal(color.translated,color.source);assert.equal(color.href,fixtureURL+'openai');
+  }
   const layout=await evaluate(fixture,`(()=>{
     const host=document.querySelector('[data-kuai-page-translation]'),inner=host.querySelector('font');
     const source=host.parentElement;source.style.cssText='-webkit-line-clamp:1;max-height:5px;height:5px';

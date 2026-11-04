@@ -77,3 +77,20 @@ for(const pageDisplayMode of ['bilingual','translation_only'])test(`${pageDispla
   assert.equal(h.requests.length,1);assert.equal(!!paragraph.querySelector('[data-kuai-page-translation]'),false);
   assert.equal(paragraph.textContent,'こんにちは世界');assert.equal(source.parentNode,paragraph);assert.equal(page.status().translated,0);
 });
+
+for(const mode of ['page','paragraph'])test(mode+' skips numeric-only blocks while retaining sentences with numbers',async t=>{
+  const h=fixture(),skipped=['123','2026-11-04','2026/11/04','04.11.2026','12:30','99.5%','￥1,234.50','１２３','١٢٣','—'];
+  const nodes=skipped.map(text=>h.paragraph(text)),normal=h.paragraph('Updated on 2026-11-04'),localized=h.paragraph('2026年11月4日');
+  const page=createPageTranslator(h.dependencies);t.after(()=>page.stop());
+  if(mode==='page')await page.translatePage();
+  else await page.translateBlocks([...nodes,normal,localized].map(element=>({element,text:element.textContent})));
+  assert.deepEqual(h.requests.flatMap(request=>request.texts),['Updated on 2026-11-04','2026年11月4日']);
+  for(const [i,node] of nodes.entries()){assert.equal(node.textContent,skipped[i]);assert.equal(node.querySelector('[data-kuai-page-translation]'),null);}
+});
+
+test('numeric-only link labels remain clickable without sending them to translation',async t=>{
+  const h=fixture(),p=h.paragraph('Published on '),date=h.doc.createElement('a');date.setAttribute('href','/archive');date.textContent='2026-11-04';p.append(date);
+  const page=createPageTranslator(h.dependencies);t.after(()=>page.stop());await page.translatePage();
+  assert.deepEqual(h.requests.flatMap(request=>request.texts),['Published on']);
+  const translated=p.querySelector('[data-kuai-page-translation]').querySelector('a');assert.equal(translated.textContent,'2026-11-04');assert.equal(translated.getAttribute('href'),'https://example.org/archive');
+});

@@ -156,3 +156,16 @@ for(const decoration of ['none','underline'])test('translated links follow sourc
  assert.equal(translated.style['text-decoration-line'],decoration);assert.equal(translated.getAttribute('href'),'https://example.org/guide');
  sourceDecoration=decoration==='none'?'underline':'none';page.refreshPresentation();assert.equal(translated.style['text-decoration-line'],sourceDecoration);assert.strictEqual(translated.firstChild,text);assert.equal(h.requests.length,1);page.stop();
 });
+
+test('translated links preserve distinct source colors and refresh them without retranslating',async()=>{
+  const h=fixture(),p=h.paragraph('He said '),red=link(h,'OpenAI','/openai'),blue=link(h,'Hugging Face','/hugging-face');
+  p.append(red,h.doc.createTextNode(' and '),blue);
+  const computed=h.env.getComputedStyle;let redColor='rgb(220, 0, 0)';
+  h.env.getComputedStyle=node=>({...computed(node),color:node===red?redColor:node===blue?'rgb(0, 0, 200)':'rgb(0, 0, 0)'});
+  const page=createPageTranslator(h.dependencies);await page.translatePage();
+  const [first,second]=output(p).querySelectorAll('a'),text=first.firstChild;
+  assert.equal(first.style.color,'rgb(220, 0, 0)');assert.equal(second.style.color,'rgb(0, 0, 200)');
+  assert.equal(first.getAttribute('href'),'https://example.org/openai');
+  redColor='rgb(180, 0, 0)';h.settings.pageDisplayMode='translation_only';page.refreshPresentation();
+  assert.equal(first.style.color,'rgb(180, 0, 0)');assert.equal(first.firstChild,text);assert.equal(h.requests.length,1);page.stop();
+});

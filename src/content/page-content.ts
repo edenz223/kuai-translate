@@ -38,7 +38,7 @@ export function capturePageContent(element: HTMLElement,env: BrowserEnvironment)
   if(!linked)return {source,runs,linked,units:splitText(source)};
   for(const run of runs){
     run.indices=[];
-    if(!/[\p{L}\p{N}]/u.test(run.text))continue;
+    if(!/\p{L}/u.test(run.text))continue;
     run.before=run.text.startsWith(' ')?' ':'';run.after=run.text.endsWith(' ')?' ':'';
     for(const part of splitText(run.text.trim())){run.indices!.push(units.length);units.push(part);}
   }
@@ -76,8 +76,9 @@ function syncLink(binding: PageLinkBinding,document: Document,env: BrowserEnviro
     if(value===null||value===undefined){if(binding.node.hasAttribute(name))binding.node.removeAttribute(name);}
     else if(binding.node.getAttribute(name)!==value)binding.node.setAttribute(name,value);
   }
-  binding.node.style.color='inherit';
-  const decoration=attributes?env.getComputedStyle?.(binding.source)?.textDecorationLine||'none':'none';
+  const sourceStyle=env.getComputedStyle?.(binding.source);
+  binding.node.style.setProperty('color',sourceStyle?.color||'inherit','important');
+  const decoration=attributes?sourceStyle?.textDecorationLine||'none':'none';
   binding.node.style.setProperty('text-decoration-line',decoration,'important');
   return !!attributes;
 }
