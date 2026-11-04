@@ -8,7 +8,7 @@ test('page and subtitle styles have independent safe defaults suitable for visib
   assert.equal(typeof presentation.normalizeSubtitleStyle,'function');
   const page=presentation.normalizePageStyle(),subtitle=presentation.normalizeSubtitleStyle();
   assert.deepEqual(page,{preset:'border',fontSize:100,fontWeight:400,fontFamily:'inherit',textColor:'inherit',accentColor:'#4285d4',backgroundColor:'#eef5ff',opacity:100,italic:false,lineHeight:1.6});
-  assert.deepEqual(subtitle,{displayMode:'bilingual',displayOrder:'original_on_top',hideTranslation:false,sourceFontSize:24,targetFontSize:24,sourceColor:'#ffffff',targetColor:'#ffffff',sourceWeight:400,targetWeight:400,sourceStroke:'none',targetStroke:'none',fontFamily:'system-ui, sans-serif',backgroundColor:'#000000',backgroundOpacity:50,backgroundMode:'line',position:'bottom-center',offset:70,maxWidth:88});
+  assert.deepEqual(subtitle,{displayMode:'bilingual',displayOrder:'original_on_top',hideTranslation:false,fontSizeMode:'responsive',sourceFontSize:24,targetFontSize:24,sourceColor:'#ffffff',targetColor:'#ffffff',sourceWeight:400,targetWeight:400,sourceStroke:'soft',targetStroke:'soft',fontFamily:'system-ui, sans-serif',backgroundColor:'#000000',backgroundOpacity:50,backgroundMode:'panel',position:'bottom-center',offset:70,maxWidth:88});
   page.opacity=0;subtitle.targetFontSize=70;
   assert.equal(presentation.normalizePageStyle().opacity,100);
   assert.equal(presentation.normalizeSubtitleStyle().targetFontSize,24);

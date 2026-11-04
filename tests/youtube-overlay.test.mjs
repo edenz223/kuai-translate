@@ -298,3 +298,18 @@ test('subtitle text gestures retain native selection defaults and real pause own
   h.emit(box,'pointerdown',{pointerId:9,clientY:100});h.emit(h.env,'pointermove',{pointerId:9,clientY:60});h.emit(h.env,'pointercancel',{pointerId:9});
   h.setRange(textNode,0);h.emit(h.doc,'selectionchange');h.advance(0);assert.equal(video.playCount,1,'background drag cancellation must never resume a formerly owned selection');
 });
+
+test('Kiss-like defaults scale caption text with the player and keep one translucent background',t=>{
+  const {view,player,box}=setup();t.after(()=>view.destroy());
+  const source=box.querySelector('.original-text'),target=box.querySelector('.translation-text');
+  view.render({});
+  assert.equal(source.style['font-size'],'19.2px');
+  assert.equal(target.style['text-shadow'],'1px 1px 2px #000');
+  assert.equal(box.style['background-color'],'rgba(0, 0, 0, 0.5)');
+  assert.equal(target.style['background-color'],'transparent');
+  assert.equal(box.style['border-radius'],'0');
+  player._rect={left:0,top:0,width:2400,height:1350,right:2400,bottom:1350};view.render({});
+  assert.equal(source.style['font-size'],'48px');
+  view.render({subtitleStyle:{fontSizeMode:'fixed',sourceFontSize:30,targetFontSize:32}});
+  assert.equal(source.style['font-size'],'30px');assert.equal(target.style['font-size'],'32px');
+});

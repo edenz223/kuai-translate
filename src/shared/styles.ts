@@ -55,18 +55,21 @@ export function applyPageStyle(element:HTMLElement,input?:unknown) {
 
 function stroke(value:string) {
   if(value==='none')return 'none';
+  if(value==='soft')return '1px 1px 2px #000';
   if(value==='shadow45')return '2px 2px 2px #000, 0 1px 3px #000';
   const size=({light:.5,normal:1,bold:2} as Record<string,number>)[value]||0;
   return [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]].map(([x,y])=>`${x*size}px ${y*size}px 1px #000`).join(', ');
 }
 
-export function applySubtitleTextStyle(element:HTMLElement,input?:unknown,kind='target') {
+export function applySubtitleTextStyle(element:HTMLElement,input?:unknown,kind='target',containerWidth=1200) {
   const style=normalizeSubtitleStyle(input),prefix=kind==='source'?'source':'target';
+  const size=style[(prefix+'FontSize') as 'sourceFontSize'|'targetFontSize'];
+  const pixels=style.fontSizeMode==='responsive'?Math.round(Math.max(16,Math.min(48,containerWidth*0.02))*size/24*100)/100:size;
   // Caption sources carry layout line breaks; reflow them without rewriting cue text.
   apply(element,{
-    color:style[(prefix+'Color') as 'sourceColor'|'targetColor'],'font-size':style[(prefix+'FontSize') as 'sourceFontSize'|'targetFontSize']+'px','font-weight':style[(prefix+'Weight') as 'sourceWeight'|'targetWeight'],
+    color:style[(prefix+'Color') as 'sourceColor'|'targetColor'],'font-size':pixels+'px','font-weight':style[(prefix+'Weight') as 'sourceWeight'|'targetWeight'],
     'font-family':style.fontFamily,'font-style':'normal','text-shadow':stroke(style[(prefix+'Stroke') as 'sourceStroke'|'targetStroke']),
-    'line-height':'1.4','white-space':'normal','overflow-wrap':'anywhere',
+    'line-height':'1.3','white-space':'normal','overflow-wrap':'anywhere',
     'background-color':style.backgroundMode==='line'?subtitleBackground(style):'transparent',
     padding:style.backgroundMode==='line'?'0 10px':'0','border-radius':'0',
     'box-decoration-break':'clone','-webkit-box-decoration-break':'clone',
@@ -81,7 +84,7 @@ function subtitleBackground(style:SubtitleStyle) {
 
 export function applySubtitleBoxStyle(element:HTMLElement,input?:unknown) {
   const style=normalizeSubtitleStyle(input),panel=style.backgroundMode==='panel';
-  apply(element,{'background-color':panel?subtitleBackground(style):'transparent','border-radius':panel?'10px':'0',padding:panel?'8px 14px':'3px 6px','box-shadow':panel?'0 2px 8px #0006':'none'});
+  apply(element,{'background-color':panel?subtitleBackground(style):'transparent','border-radius':'0',padding:panel?'0.5em 1em':'3px 6px','box-shadow':'none',color:'#ffffff','line-height':'1.3'});
   return style;
 }
 

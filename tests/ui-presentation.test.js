@@ -82,10 +82,10 @@ test('preset colors are saved in their controls and subsequent explicit color ch
 
 test('caption background mode is saved, previewed and reset without changing subtitle language',async t=>{
   const h=options(t);await h.start();const mode=h.node('subtitle-style-backgroundMode');assert.ok(mode);
-  assert.equal(mode.value,'line');assert.equal(h.node('subtitle-preview-box').style.backgroundColor,'transparent');
-  assert.equal(h.node('subtitle-preview-target').style.backgroundColor,'rgba(0, 0, 0, 0.5)');
-  mode.value='panel';await mode.fire('change');await h.settle();assert.equal(h.stored.subtitleStyle.backgroundMode,'panel');
-  assert.equal(h.node('subtitle-preview-box').style.backgroundColor,'rgba(0, 0, 0, 0.5)');assert.equal(h.node('subtitle-preview-target').style.backgroundColor,'transparent');
+  assert.equal(mode.value,'panel');assert.equal(h.node('subtitle-preview-box').style.backgroundColor,'rgba(0, 0, 0, 0.5)');
+  assert.equal(h.node('subtitle-preview-target').style.backgroundColor,'transparent');
+  mode.value='line';await mode.fire('change');await h.settle();assert.equal(h.stored.subtitleStyle.backgroundMode,'line');
+  assert.equal(h.node('subtitle-preview-box').style.backgroundColor,'transparent');assert.equal(h.node('subtitle-preview-target').style.backgroundColor,'rgba(0, 0, 0, 0.5)');
   h.node('subtitle-target-language').value='ja';await h.node('subtitle-target-language').fire('change');
-  await h.node('reset-subtitle-style').fire('click');await h.settle();assert.equal(mode.value,'line');assert.equal(h.stored.subtitleTargetLanguage,'ja');
+  await h.node('reset-subtitle-style').fire('click');await h.settle();assert.equal(mode.value,'panel');assert.equal(h.stored.subtitleTargetLanguage,'ja');
 });

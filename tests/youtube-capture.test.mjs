@@ -4,12 +4,12 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 const file=new URL('../dist/src/youtube/capture-main.js',import.meta.url);
 const track={baseUrl:'https://www.youtube.com/api/timedtext?v=abcdef12345&lang=en',languageCode:'en',name:{simpleText:'English'}};
-function harness({withInitialResponse=false,selectedLanguage='en',fetcher}={}) {
+function harness({withInitialResponse=false,selectedLanguage='en',fetcher,runtimeTracks=[],selectedTrack,setOption=()=>{}}={}) {
   assert.ok(fs.existsSync(file),'the actual MAIN-world caption capture must exist');
   const outputs=[],requests=[],intervals=[];
   const response={videoDetails:{videoId:'abcdef12345'},captions:{playerCaptionsTracklistRenderer:{captionTracks:[track]}},unrelatedPrivateData:'must-not-be-copied'};
   const win=new EventTarget();win.postMessage=data=>outputs.push(data);
-  const player={getPlayerResponse:()=>response,getOption:()=>({languageCode:selectedLanguage})};
+  const player={getPlayerResponse:()=>response,getOption:()=>selectedTrack||({languageCode:selectedLanguage}),getAudioTrack:()=>({captionTracks:runtimeTracks}),setOption};
   if(withInitialResponse)win.ytInitialPlayerResponse=response;
   const doc=new EventTarget();doc.querySelectorAll=()=>[player];
   const context={window:win,document:doc,location:{href:'https://www.youtube.com/watch?v=abcdef12345',origin:'https://www.youtube.com'},
@@ -77,4 +77,58 @@ test('captured response carries its own validated URL identity through a same-la
   h.response.captions.playerCaptionsTracklistRenderer.captionTracks=[{...track,kind:'',name:{simpleText:'Manual'}}];h.periodic();
   finish(new Response('{"events":[]}'));await reading;await settle();await settle();
   const result=h.outputs.find(item=>item.kind==='captions');assert.equal(result.trackUrl,asr);
+});
+
+
+test('runtime signed caption URLs take precedence over stale response URLs',async()=>{
+  const runtime={...track,baseUrl:track.baseUrl+'&pot=fresh-token'};
+  const h=harness({runtimeTracks:[runtime]});
+  assert.equal(h.outputs.find(item=>item.kind==='tracks').tracks[0].baseUrl,runtime.baseUrl);
+  h.message({kind:'fetch-track',videoId:'abcdef12345',requestId:'runtime',url:track.baseUrl});
+  await settle();await settle();
+  assert.equal(new URL(h.requests[0]).searchParams.get('pot'),'fresh-token');
+});
+test('empty caption responses refresh the native module once and try a fresh runtime URL',async()=>{
+  let reloads=0;const runtime=[];
+  const h=harness({runtimeTracks:runtime,setOption:(module,key,value)=>{
+    assert.deepEqual([module,key,value],['captions','reload',true]);
+    reloads++;runtime.push({...track,baseUrl:track.baseUrl+'&pot=renewed'});
+  },fetcher:url=>new Response(new URL(url).searchParams.has('pot')?'{"events":[{"tStartMs":0,"dDurationMs":1000,"segs":[{"utf8":"Recovered"}]}]}':'')});
+  h.message({kind:'fetch-track',videoId:'abcdef12345',requestId:'refresh',url:track.baseUrl});
+  await settle();await settle();await settle();
+  assert.equal(reloads,1);
+  assert.match(h.outputs.find(item=>item.requestId==='refresh')?.body||'',/Recovered/);
+});
+test('early page captures replay after the isolated controller requests metadata',async()=>{
+  const h=harness();
+  await h.context.window.fetch(track.baseUrl);await settle();await settle();
+  h.outputs.length=0;h.message({kind:'request-tracks'});
+  assert.ok(h.outputs.some(item=>item.kind==='captions'&&item.body.includes('Hi')));
+  h.context.location.href='https://www.youtube.com/watch?v=different01';
+  h.outputs.length=0;h.message({kind:'request-tracks'});
+  assert.equal(h.outputs.some(item=>item.kind==='captions'),false);
+});
+test('same-language runtime tracks never replace a different automatic track',()=>{
+  const h=harness({runtimeTracks:[{...track,kind:'asr',baseUrl:track.baseUrl+'&kind=asr&pot=wrong'}]});
+  assert.equal(h.outputs.find(item=>item.kind==='tracks').tracks[0].baseUrl,track.baseUrl);
+});
+
+test('asynchronous native reload can publish its signed URL before recovery completes',async()=>{
+  const runtime=[];let reloads=0;
+  const h=harness({runtimeTracks:runtime,setOption:()=>{
+    reloads++;setImmediate(()=>runtime.push({...track,baseUrl:track.baseUrl+'&pot=async-token'}));
+  },fetcher:url=>new Response(new URL(url).searchParams.has('pot')?'{"events":[{"tStartMs":0,"dDurationMs":1000,"segs":[{"utf8":"Async recovery"}]}]}':'')});
+  h.message({kind:'fetch-track',videoId:'abcdef12345',requestId:'async-refresh',url:track.baseUrl});
+  await new Promise(resolve=>setTimeout(resolve,550));
+  assert.equal(reloads,1);
+  assert.match(h.outputs.find(item=>item.requestId==='async-refresh')?.body||'',/Async recovery/);
+});
+
+test('empty JSON caption events refresh instead of stopping recovery at a nonblank body',async()=>{
+  const runtime=[];
+  const h=harness({runtimeTracks:runtime,setOption:()=>runtime.push({...track,baseUrl:track.baseUrl+'&pot=json-recovery'}),
+    fetcher:url=>new Response(new URL(url).searchParams.has('pot')?'{"events":[{"tStartMs":0,"dDurationMs":1000,"segs":[{"utf8":"JSON recovered"}]}]}':'{"events":[]}')});
+  h.message({kind:'fetch-track',videoId:'abcdef12345',requestId:'json-refresh',url:track.baseUrl});
+  await settle();await settle();await settle();
+  assert.match(h.outputs.find(item=>item.requestId==='json-refresh')?.body||'',/JSON recovered/);
 });

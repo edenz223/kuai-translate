@@ -76,6 +76,9 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
       record.loadedTrack='';record.failedTrack='';record.timelineSignature='';record.domText='';
       record.session.setCues([]);
     }
+    // The logical track can keep its ID while YouTube renews its proof/signature.
+    // A previous empty response must not block the newly usable URL.
+    if(record.track?.id===selected?.id&&record.track?.baseUrl!==selected?.baseUrl){clearPending(record);record.failedTrack='';}
     record.tracks=tracks;record.track=selected;
     record.view.setTracks(tracks,preference.languageCode?selected?.id:'');
     return selected;
@@ -220,6 +223,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     try {
       const cues=parseTimedText(data.body,{kind:ownTrack?.kind});
       if(cues.length){
+        if(!data.requestId)clearPending(record);
         record.failedTrack='';record.session.state.errorMessage='';installCues(record,cues,trackId,{live:record.session.video.duration===Infinity});return;
       }
     }catch{}

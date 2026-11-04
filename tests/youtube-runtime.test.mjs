@@ -136,3 +136,33 @@ test('an empty fetched track keeps available native captions without the unreada
  h.message({kind:'captions',videoId:'abcdef12345',requestId:request.requestId,body:JSON.stringify({events:[]})});await settle();
  const state=h.bridge.getSessions()[0].state;assert.equal(state.errorMessage,'');assert.equal(state.currentCaption.original,'Native captions');h.manager.stop();
 });
+
+test('a renewed signed URL retries a failed logical track without discarding fallback cues',t=>{
+  const h=setup();t.after(()=>h.manager.stop());
+  tracks(h,'en');const first=requests(h).at(-1);
+  h.message({kind:'captions',videoId:'abcdef12345',requestId:first.requestId,body:''});
+  nativeCues(h,'Fallback');h.manager.sync();
+  const session=h.bridge.getSessions()[0],source=session.state.subtitlesList;
+  h.message({kind:'tracks',videoId:'abcdef12345',selectedLanguage:'en',tracks:[{...track('en'),baseUrl:track('en').baseUrl+'&pot=renewed'}]});
+  assert.equal(requests(h).length,2);
+  assert.equal(new URL(requests(h).at(-1).url).searchParams.get('pot'),'renewed');
+  assert.strictEqual(session.state.subtitlesList,source);
+});
+
+test('a complete passive capture cancels a pending replay before its late body can replace the timeline',t=>{
+  const h=setup();t.after(()=>h.manager.stop());tracks(h,'en');const first=requests(h).at(-1);
+  h.message({kind:'captions',videoId:'abcdef12345',trackUrl:track('en').baseUrl,languageCode:'en',body:'WEBVTT\n\n00:00.000 --> 00:03.000\nNative complete'});
+  assert.ok(h.outbound.some(item=>item.kind==='cancel-track'&&item.requestId===first.requestId));
+  caption(h,first.requestId,'Late replay');
+  assert.equal(h.bridge.getSessions()[0].state.subtitlesList[0].text,'Native complete');
+});
+
+test('signed URL renewal replaces an old in-flight request before its empty response can block recovery',t=>{
+  const h=setup();t.after(()=>h.manager.stop());tracks(h,'en');const first=requests(h).at(-1);
+  h.message({kind:'tracks',videoId:'abcdef12345',selectedLanguage:'en',tracks:[{...track('en'),baseUrl:track('en').baseUrl+'&pot=inflight-renewed'}]});
+  assert.equal(requests(h).length,2);
+  assert.ok(h.outbound.some(item=>item.kind==='cancel-track'&&item.requestId===first.requestId));
+  h.message({kind:'captions',videoId:'abcdef12345',requestId:first.requestId,body:''});
+  const next=requests(h).at(-1);caption(h,next.requestId,'Renewed complete');
+  assert.equal(h.bridge.getSessions()[0].state.subtitlesList[0].text,'Renewed complete');
+});

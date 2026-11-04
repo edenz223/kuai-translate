@@ -138,7 +138,7 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     if(dragState&&(dragState.layout!==nextLayout||!currentDrag()))cancelDrag();
     const layoutChanged=layoutKey!==undefined&&layoutKey!==nextLayout;layoutKey=nextLayout;if(layoutChanged)cancelSelection(session.id,'subtitle-layout');
     if(positionKey!==undefined&&positionKey!==nextPosition)dragOffset=null;positionKey=nextPosition;presentation=nextStyle;
-    applySubtitleTextStyle(original,presentation,'source');applySubtitleTextStyle(translation,presentation,'target');applySubtitleBoxStyle(box,presentation);
+    applySubtitleTextStyle(original,presentation,'source',player.getBoundingClientRect().width||1200);applySubtitleTextStyle(translation,presentation,'target',player.getBoundingClientRect().width||1200);applySubtitleBoxStyle(box,presentation);
     position();
     if(session.state.isSubtitleSelectionHeld)return;
     const caption=session.state.currentCaption,enabled=session.isEnabled();
