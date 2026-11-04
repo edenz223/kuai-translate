@@ -2,12 +2,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import ts from 'typescript';
 
 export const projectRoot = fileURLToPath(new URL('../',import.meta.url));
 const runtimeExtensions = new Set(['.js','.mjs','.json','.html','.css','.svg','.png','.ico','.txt']);
-const sourceExtensions = new Set([...runtimeExtensions,'.cjs','.md','.yml','.yaml']);
+const buildExtensions = new Set([...runtimeExtensions,'.ts']);
+const sourceExtensions = new Set([...buildExtensions,'.cjs','.md','.yml','.yaml']);
 const sourceDirectories = ['src','public','scripts','tests','docs','.github'];
-const sourceRootFiles = ['package.json','package-lock.json','README.md','README.zh-CN.md','LICENSE','PRIVACY.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md','ARCHITECTURE.md','.gitignore'];
+const sourceRootFiles = ['package.json','pnpm-lock.yaml','tsconfig.json','tsconfig.types.json','README.md','README.zh-CN.md','LICENSE','PRIVACY.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md','ARCHITECTURE.md','.gitignore'];
 const sort = values => values.sort((a,b)=>a < b ? -1 : a > b ? 1 : 0);
 
 async function exists(file) { try {await fs.access(file);return true;}catch{return false;} }
@@ -27,10 +29,22 @@ export async function walkFiles(root, directory = '', extensions = runtimeExtens
   return sort(files);
 }
 
+// TypeScript canonicalizes separators even on Windows.
+export function compilerPathKey(fileName, paths=path, caseSensitive=ts.sys.useCaseSensitiveFileNames) {
+  const absolute=paths.resolve(fileName);
+  return caseSensitive ? absolute : absolute.toLowerCase();
+}
+export function emittedRuntimePath(fileName, output, paths=path) {
+  const resolved=paths.resolve(fileName),publicRoot=paths.join(paths.resolve(output),'public');
+  const relative=paths.relative(publicRoot,resolved);
+  return relative && relative!=='..' && !relative.startsWith('..'+paths.sep) && !paths.isAbsolute(relative)
+    ? paths.join(output,relative) : resolved;
+}
+
 export async function buildProject(root = projectRoot) {
   const runtime=[];
-  for(const directory of ['src','public']) for(const relative of await walkFiles(root,directory))
-    runtime.push({from:relative,to:directory==='public' ? relative.slice(7) : relative});
+  for(const directory of ['src','public']) for(const relative of await walkFiles(root,directory,buildExtensions))
+    if(!relative.endsWith('.ts')) runtime.push({from:relative,to:directory==='public' ? relative.slice(7) : relative});
   if(await exists(path.join(root,'LICENSE'))) {
     const license=await fs.lstat(path.join(root,'LICENSE'));
     if(license.isSymbolicLink())throw Error('Symbolic links are not allowed in public artifacts: LICENSE');
@@ -40,6 +54,33 @@ export async function buildProject(root = projectRoot) {
   const output=path.join(root,'dist');
   await fs.rm(output,{recursive:true,force:true});await fs.mkdir(output,{recursive:true});
   for(const file of runtime) {const target=path.join(output,file.to);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(path.join(root,file.from),target);}
+  const configFile=path.join(root,'tsconfig.json');
+  const config=await exists(configFile) ? ts.readConfigFile(configFile,ts.sys.readFile) : {config:{}};
+  if(config.error)throw Error(ts.flattenDiagnosticMessageText(config.error.messageText,'\n'));
+  const parsed=ts.parseJsonConfigFileContent(config.config,ts.sys,root,{
+    rootDir:root,outDir:output,allowJs:true,checkJs:false,noEmit:false,noEmitOnError:true,
+    target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,
+  });
+  // Fixtures need the same compiler while keeping their independent source root.
+  const names=(await walkFiles(root,'src',buildExtensions)).filter(file=>file.endsWith('.ts')).map(file=>path.join(root,file));
+  for(const file of await walkFiles(root,'public',buildExtensions))if(file.endsWith('.ts'))names.push(path.join(root,file));
+  if(names.some(file=>!file.endsWith('.d.ts'))) {
+    const program=ts.createProgram(names,parsed.options);
+    const diagnostics=ts.getPreEmitDiagnostics(program);
+    if(diagnostics.length)throw Error(ts.formatDiagnosticsWithColorAndContext(diagnostics,{
+      getCanonicalFileName:file=>file,getCurrentDirectory:()=>root,getNewLine:()=> '\n',
+    }));
+    const writes=[],sourceNames=new Set(names.map(file=>compilerPathKey(file)));
+    for(const source of program.getSourceFiles()) {
+      if(source.isDeclarationFile || !sourceNames.has(compilerPathKey(source.fileName)))continue;
+      program.emit(source,(fileName,data)=>{
+        // Classic bootstrap lives at the extension root, just as before migration.
+        const destination=emittedRuntimePath(fileName,output);
+        writes.push(fs.mkdir(path.dirname(destination),{recursive:true}).then(()=>fs.writeFile(destination,data)));
+      });
+    }
+    await Promise.all(writes);
+  }
   return output;
 }
 

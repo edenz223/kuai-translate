@@ -4,7 +4,7 @@
 
 Kuai translate is an independently implemented browser extension for bilingual web pages, selected text, user-configured translation APIs, and YouTube captions with an adjacent subtitle list. Microsoft, Google, Tencent Transmart and Yandex web translation adapters are available without entering an API key. You can also use only your own API services.
 
-The project uses **native JavaScript ESM, HTML, CSS and Manifest V3**. Building, testing and packaging require **Node.js 24 or later** and use only built-in modules. There are **no third-party dependencies**, framework installation, bundler or application server. The extension has no account system, subscriptions, promotions, telemetry or uninstall landing page.
+The project uses **TypeScript, native ESM, HTML, CSS and Manifest V3**. Building, testing and packaging require **Node.js 24 or later, pnpm and TypeScript**. Chrome/Node declarations are development dependencies. The browser runtime has **no third-party dependencies** and needs no framework, bundler or application server. The extension has no account system, subscriptions, promotions, telemetry or uninstall landing page.
 
 This is a new source project with its own extension identity. It does not include the earlier product's compiled bundles or claim to reconstruct that product's full original source and feature set. See [provenance](provenance.md).
 
@@ -40,16 +40,16 @@ Download or clone the source, enter the directory containing `package.json`, and
 
 ```bash
 node --version
-npm test
-npm run build
-npm run check
+pnpm test
+pnpm build
+pnpm check
 ```
 
-**Do not run `npm install` or `npm ci`: there are no dependencies to install.** The build commands do not download npm packages.
+Run `pnpm install --frozen-lockfile` first to install TypeScript and Chrome/Node declarations. `pnpm verify` runs strict type checks, builds the extension, executes regression tests against `dist/`, and checks resources. Browser runtime has no third-party dependencies.
 
 Open `chrome://extensions` or `edge://extensions`, enable developer mode, choose **Load unpacked**, and select the generated **`dist/`** directory. Refresh pages that were already open.
 
-After editing the source, run `npm run build`, reload the extension on its management page, and refresh the target web page. Do not edit generated files in `dist/`; the next build replaces them.
+After editing the source, run `pnpm build`, reload the extension on its management page, and refresh the target web page. Do not edit generated files in `dist/`; the next build replaces them.
 
 ### Install a packaged ZIP
 
@@ -235,10 +235,10 @@ See [PRIVACY.md](../PRIVACY.md) for permissions and data handling, and [SECURITY
 
 | Command | Purpose |
 | --- | --- |
-| `npm test` | Run automated tests with Node's built-in test runner |
-| `npm run build` | Copy runtime source/static assets into loadable `dist/` |
-| `npm run check` | Check an existing build's resources, module references and JavaScript syntax |
-| `npm run package` | Rebuild, check and write installation/source archives and SHA-256 hashes |
+| `pnpm test` | Run automated tests with Node's built-in test runner |
+| `pnpm build` | Compile TypeScript and copy static assets into loadable `dist/` |
+| `pnpm check` | Check an existing build's resources, module references and JavaScript syntax |
+| `pnpm package` | Rebuild, check and write installation/source archives and SHA-256 hashes |
 
 For version 1.0.0, output is written to `release/`:
 

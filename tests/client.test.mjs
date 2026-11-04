@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {request,translate} from '../src/shared/client.js';
-import * as client from '../src/shared/client.js';
-import {createBackground} from '../src/background/controller.js';
-import {defaultSettings,SETTINGS_KEY} from '../src/shared/settings.js';
+import {request,translate} from '../dist/src/shared/client.js';
+import * as client from '../dist/src/shared/client.js';
+import {createBackground} from '../dist/src/background/controller.js';
+import {defaultSettings,SETTINGS_KEY} from '../dist/src/shared/settings.js';
 test('request unwraps the common response envelope and preserves error codes',async()=>{
   assert.deepEqual(await request('KUAI_GET_SETTINGS',{}, {runtime:{sendMessage:async()=>({ok:true,value:{targetLanguage:'ja'}})}}),{targetLanguage:'ja'});
   await assert.rejects(request('KUAI_GET_SETTINGS',{}, {runtime:{sendMessage:async()=>({ok:false,error:{code:'DENIED',message:'Not allowed'}})}}),{code:'DENIED'});

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaultSettings,normalizeSettings,publicSettings,exportSettings,importSettings} from '../src/shared/settings.js';
-import {normalizeInteractionOptions,resolveFeatureSettings} from '../src/shared/interactions.js';
-import {mergeSettings} from '../src/background/settings-merge.js';
+import {defaultSettings,normalizeSettings,publicSettings,exportSettings,importSettings} from '../dist/src/shared/settings.js';
+import {normalizeInteractionOptions,resolveFeatureSettings} from '../dist/src/shared/interactions.js';
+import {mergeSettings} from '../dist/src/background/settings-merge.js';
 
 test('new and missing input options use English and a dot independently of the page target',()=>{
   for(const settings of [defaultSettings(),normalizeSettings({targetLanguage:'fr'})]){

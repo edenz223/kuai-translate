@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createBackground } from '../src/background/controller.js';
-import { defaultSettings, SETTINGS_KEY } from '../src/shared/settings.js';
-import { createSettingsEditor } from '../src/ui/state.js';
+import { createBackground } from '../dist/src/background/controller.js';
+import { defaultSettings, SETTINGS_KEY } from '../dist/src/shared/settings.js';
+import { createSettingsEditor } from '../dist/src/ui/state.js';
 
 const extensionId='kuai-extension';
 const page={id:extensionId,url:'https://example.com/article',tab:{id:4},frameId:0,documentId:'document-a'};

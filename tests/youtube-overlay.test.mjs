@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import dom from './helpers/content-dom.cjs';
-import {createController as createSelectionController} from '../src/youtube/selection.js';
-let api={};try{api=await import('../src/youtube/overlay.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
+import {createController as createSelectionController} from '../dist/src/youtube/selection.js';
+let api={};try{api=await import('../dist/src/youtube/overlay.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
 function setup(options={}){
   assert.equal(typeof api.createCaptionView,'function');
   const h=dom.fixture(),player=h.doc.createElement('div');player.className='html5-video-player';h.doc.body.append(player);

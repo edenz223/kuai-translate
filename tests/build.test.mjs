@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {inflateRawSync} from 'node:zlib';
-import {buildProject,checkDist,sourceFiles,projectRoot} from '../scripts/project.mjs';
+import {buildProject,checkDist,sourceFiles,projectRoot,compilerPathKey,emittedRuntimePath} from '../scripts/project.mjs';
 import {createZip} from '../scripts/zip.mjs';
 
 async function fixture() {
@@ -89,4 +89,29 @@ test('ZIP output is deterministic, ordered and readable by a standard deflate de
   assert.equal(first.readUInt32LE(first.length-22),0x06054b50);
   assert.throws(()=>createZip([{name:'../secret',data:Buffer.from('x')}]),/path|路径/);
   assert.throws(()=>createZip([{name:'same',data:Buffer.from('x')},{name:'same',data:Buffer.from('y')}]),/Duplicate|重复/);
+});
+
+test('mixed JS and TS build preserves runtime paths and omits type-only inputs', async()=>{
+  const value=await fixture();
+  try {
+    await fs.writeFile(path.join(value.root,'src/typed.ts'),"export const value: number = 42;\n");
+    await fs.writeFile(path.join(value.root,'src/model.d.ts'),"interface Model { value: number }\n");
+    await fs.writeFile(path.join(value.root,'src/background.js'),"export {value} from './typed.js';");
+    await buildProject(value.root);await checkDist(value.root);
+    const emitted=await fs.readFile(path.join(value.root,'dist/src/typed.js'),'utf8');
+    assert.match(emitted,/value = 42/);assert.doesNotMatch(emitted,/: number/);
+    assert.deepEqual((await fs.readdir(path.join(value.root,'dist/src'))).sort(),['background.js','typed.js']);
+    assert.equal(await fs.readFile(path.join(value.root,'dist/src/background.js'),'utf8'),"export {value} from './typed.js';");
+  } finally {await value.dispose();}
+});
+
+test('compiler paths accept TypeScript slash normalization on Windows',()=>{
+  assert.equal(compilerPathKey('C:/fixture/src/typed.ts',path.win32,false),
+    compilerPathKey('c:\\fixture\\src\\typed.ts',path.win32,false));
+  assert.equal(emittedRuntimePath('C:/fixture/dist/public/content-loader.js','C:\\fixture\\dist',path.win32),
+    'C:\\fixture\\dist\\content-loader.js');
+  assert.equal(emittedRuntimePath('C:/fixture/dist/src/background/index.js','C:\\fixture\\dist',path.win32),
+    'C:\\fixture\\dist\\src\\background\\index.js');
+  assert.equal(emittedRuntimePath('/fixture/dist/public/content-loader.js','/fixture/dist',path.posix),
+    '/fixture/dist/content-loader.js');
 });

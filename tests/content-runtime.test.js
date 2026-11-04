@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, Event } from './helpers/content-dom.cjs';
-import { createContentRuntime } from '../src/content/index.js';
+import { createContentRuntime } from '../dist/src/content/index.js';
 
 function setup(options={}){
  const h=fixture(),listeners=new Set(),subscribers=new Set(),youtubeCalls=[],youtubeSettings=[];let youtubeStops=0,persisted;

@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {runtimeStructure} from '../scripts/runtime-structure.mjs';
+const baseline=JSON.parse(await fs.readFile(new URL('./fixtures/runtime.before-typescript.json',import.meta.url),'utf8'));
+const root=new URL('../',import.meta.url);
+
+test('migration preserves the complete manifest and every permission byte-for-byte',async()=>{
+  const before=await fs.readFile(new URL('./fixtures/manifest.before-typescript.json',import.meta.url));
+  assert.deepEqual(await fs.readFile(new URL('public/manifest.json',root)),before);
+  assert.deepEqual(await fs.readFile(new URL('dist/manifest.json',root)),before);
+});
+
+test('migration preserves all public UI, styles, locales and image assets',async()=>{
+  for(const [name,hash] of Object.entries(baseline.assets)) {
+    const emitted=await fs.readFile(new URL('dist/'+name.slice('public/'.length),root));
+    assert.equal(createHash('sha256').update(emitted).digest('hex'),hash,name);
+  }
+});
+
+test('every migrated runtime preserves its original executable structure',async()=>{
+  for(const [name,hash] of Object.entries(baseline.runtime)) {
+    const target=name==='public/content-loader.js'?'content-loader.js':name;
+    assert.equal(runtimeStructure(await fs.readFile(new URL('dist/'+target,root),'utf8')),hash,name);
+  }
+});
+
+test('classic injections contain no ESM imports or exports after compilation',async()=>{
+  for(const name of ['content-loader.js','src/youtube/capture-main.js']) {
+    const source=await fs.readFile(new URL('dist/'+name,root),'utf8');
+    assert.doesNotMatch(source,/^\s*(?:import|export)\s/m,name);
+  }
+});

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTextDocument, createTextTranslator } from '../src/ui/text-model.js';
+import { parseTextDocument, createTextTranslator } from '../dist/src/ui/text-model.js';
 
 test('SRT translation changes cue text while retaining cue numbers and exact timings', async () => {
   const source='1\r\n00:00:01,000 --> 00:00:02,500\r\nHello\r\n\r\n2\r\n00:00:04,000 --> 00:00:05,000\r\nWorld\r\n';

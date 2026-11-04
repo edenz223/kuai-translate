@@ -4,7 +4,7 @@
 
 Kuai translate 是一个独立实现的浏览器翻译扩展，提供网页双语翻译、划词翻译、自配 API，以及 YouTube 双语字幕和侧边字幕列表。默认可选择微软、谷歌、腾讯 Transmart 和 Yandex 的免 Key 网页翻译接口，也可以只使用你自己的 API 服务。
 
-项目采用 **原生 JavaScript ESM、HTML、CSS 和 Manifest V3**。开发与打包使用 **Node.js 24 及以上版本的内置模块，零第三方依赖**，不需要安装框架、打包器或运行项目服务器。没有登录、会员、推广、遥测或卸载跳转页面。
+项目采用 **TypeScript、原生 ESM、HTML、CSS 和 Manifest V3**。开发与打包使用 **Node.js 24 及以上版本、pnpm 和 TypeScript**；Chrome/Node 类型仅用于开发，浏览器运行时无第三方依赖，不需要框架、bundler 或项目服务器。没有登录、会员、推广、遥测或卸载跳转页面。
 
 这是新的源码项目，具有独立的扩展身份；它不包含此前成品扩展的编译包，也不声称恢复了旧产品的全部源码和功能。来源与许可边界见 [实现来源](docs/provenance.md)。
 
@@ -42,18 +42,18 @@ Kuai translate 是一个独立实现的浏览器翻译扩展，提供网页双�
 
 ```bash
 node --version
-npm test
-npm run build
-npm run check
+pnpm test
+pnpm build
+pnpm check
 ```
 
-项目没有依赖，因此**不需要执行 `npm install` 或 `npm ci`**。这些命令不会为构建下载 npm 包。
+首次开发先运行 `pnpm install --frozen-lockfile` 安装编译器和 API 类型。`pnpm verify` 执行严格类型检查、构建、回归测试和产物检查；浏览器加载 `dist/`。
 
 4. 打开 `chrome://extensions` 或 `edge://extensions`，开启开发者模式。
 5. 选择“加载已解压的扩展程序”，选中生成的 **`dist/` 目录**。
 6. 刷新已经打开的网页，再点击 Kuai translate 的扩展图标。
 
-修改源码后，重新执行 `npm run build`，在扩展管理页点击重新加载，再刷新目标网页。不要直接修改生成的 `dist/`：下次构建会覆盖它。
+修改源码后，重新执行 `pnpm build`，在扩展管理页点击重新加载，再刷新目标网页。不要直接修改生成的 `dist/`：下次构建会覆盖它。
 
 ### 使用已打包的扩展 ZIP
 
@@ -262,10 +262,10 @@ API Key 保存在扩展的本地存储中，翻译时由后台直接请求所选
 
 | 命令 | 作用 |
 | --- | --- |
-| `npm test` | 使用 Node 内置测试运行器执行自动化测试 |
-| `npm run build` | 将 `src/` 和 `public/` 构建为可加载的 `dist/` |
-| `npm run check` | 检查现有 `dist/` 的清单资源、模块引用和 JavaScript 语法；需先构建 |
-| `npm run package` | 重新构建并检查，生成安装 ZIP、源码 ZIP 和 SHA-256 校验清单 |
+| `pnpm test` | 使用 Node 内置测试运行器执行自动化测试 |
+| `pnpm build` | 将 `src/` 和 `public/` 构建为可加载的 `dist/` |
+| `pnpm check` | 检查现有 `dist/` 的清单资源、模块引用和 JavaScript 语法；需先构建 |
+| `pnpm package` | 重新构建并检查，生成安装 ZIP、源码 ZIP 和 SHA-256 校验清单 |
 
 1.0.0 的打包输出位于 `release/`：
 
@@ -293,7 +293,7 @@ git remote add origin git@github.com:YOUR_USERNAME/YOUR_REPOSITORY.git
 git push -u origin main
 ```
 
-如果目录已经是 Git 仓库，保留现有历史，检查 `git remote -v` 后使用自己的远程仓库即可，不需要重复初始化。提交前检查 `git status` 和将提交的文件，确保没有个人备份或 API Key。要提供可直接加载的扩展，可手动创建 GitHub Release 并上传 `npm run package` 生成的 ZIP 和 `SHA256SUMS`。
+如果目录已经是 Git 仓库，保留现有历史，检查 `git remote -v` 后使用自己的远程仓库即可，不需要重复初始化。提交前检查 `git status` 和将提交的文件，确保没有个人备份或 API Key。要提供可直接加载的扩展，可手动创建 GitHub Release 并上传 `pnpm package` 生成的 ZIP 和 `SHA256SUMS`。
 
 ## 验证状态与问题反馈
 

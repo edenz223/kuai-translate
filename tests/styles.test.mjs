@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import dom from './helpers/content-dom.cjs';
-let api={};try{api=await import('../src/shared/styles.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
+let api={};try{api=await import('../dist/src/shared/styles.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
 function setup(name){assert.equal(typeof api[name],'function');const h=dom.fixture();return {h,node:h.paragraph('Readable translation')};}
 
 test('page presentation changes existing translated text without replacing its text node',()=>{

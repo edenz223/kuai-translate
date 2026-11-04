@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as stateModule from '../src/ui/state.js';
-import {fillSelect} from '../src/ui/common.js';
+import * as stateModule from '../dist/src/ui/state.js';
+import {fillSelect} from '../dist/src/ui/common.js';
 const {createSettingsEditor,bindProviderFields}=stateModule;
 
 const initial = () => ({providers:[{id:'custom',type:'openai',name:'My API',enabled:true,apiKey:'',model:'old'}],activeProviderId:'custom'});

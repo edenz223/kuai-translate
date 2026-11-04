@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as popup from '../src/ui/popup.js';
-import {defaultSettings} from '../src/shared/settings.js';
+import * as popup from '../dist/src/ui/popup.js';
+import {defaultSettings} from '../dist/src/shared/settings.js';
 import {createDocument} from './helpers/ui-document.cjs';
 
 test('popup page actions target only the main frame and unwrap the content response',async()=>{

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {startTextTool} from '../src/ui/text.js';
-import {defaultSettings} from '../src/shared/settings.js';
+import {startTextTool} from '../dist/src/ui/text.js';
+import {defaultSettings} from '../dist/src/shared/settings.js';
 import {createDocument} from './helpers/ui-document.cjs';
 
 async function setup(t) {

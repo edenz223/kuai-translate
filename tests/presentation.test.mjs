@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 let presentation={};
-try{presentation=await import('../src/shared/presentation.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
+try{presentation=await import('../dist/src/shared/presentation.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
 
 test('page and subtitle styles have independent safe defaults suitable for visible bilingual output',()=>{
   assert.equal(typeof presentation.normalizePageStyle,'function');

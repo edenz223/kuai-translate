@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture } from './helpers/content-dom.cjs';
-import { createPageTranslator } from '../src/content/page-translator.js';
+import { createPageTranslator } from '../dist/src/content/page-translator.js';
 
 const output = node => node.querySelector('[data-kuai-page-translation]');
 

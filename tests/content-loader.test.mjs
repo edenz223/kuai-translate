@@ -4,7 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 function run(failures,scenario={}) {
-  const path=fileURLToPath(new URL('../public/content-loader.js',import.meta.url));
+  const path=fileURLToPath(new URL('../dist/content-loader.js',import.meta.url));
   const program=`
     import vm from 'node:vm';import fs from 'node:fs';
     const scenario=${JSON.stringify(scenario)};

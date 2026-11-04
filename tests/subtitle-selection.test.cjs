@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createHarness } = require('./helpers/subtitle-selection-harness.cjs');
-const { createController } = require('../src/youtube/selection.js');
+const { createController } = require('../dist/src/youtube/selection.js');
 
 test('caption selection pauses a playing video once and ordinary deselection resumes once', () => {
   const h = createHarness(); const session = h.addSession();

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,Event} from './helpers/content-dom.cjs';
-import {createInteractions} from '../src/content/interactions.js';
-import {createController as createSubtitleSelection} from '../src/youtube/selection.js';
+import {createInteractions} from '../dist/src/content/interactions.js';
+import {createController as createSubtitleSelection} from '../dist/src/youtube/selection.js';
 
 const settle=async()=>{for(let n=0;n<16;n++)await Promise.resolve();};
 const button=(h,name)=>h.doc.getElementById(name)?.shadowRoot?.querySelector('button');

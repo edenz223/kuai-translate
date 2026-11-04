@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
-import {createBackground} from '../src/background/controller.js';
-import {createContentRuntime} from '../src/content/index.js';
-import {onSettingsChanged} from '../src/shared/client.js';
-import {defaultSettings,SETTINGS_KEY} from '../src/shared/settings.js';
-import {startPopup} from '../src/ui/popup.js';
+import {createBackground} from '../dist/src/background/controller.js';
+import {createContentRuntime} from '../dist/src/content/index.js';
+import {onSettingsChanged} from '../dist/src/shared/client.js';
+import {defaultSettings,SETTINGS_KEY} from '../dist/src/shared/settings.js';
+import {startPopup} from '../dist/src/ui/popup.js';
 import {fixture as contentDocument} from './helpers/content-dom.cjs';
 import {createDocument} from './helpers/ui-document.cjs';
 

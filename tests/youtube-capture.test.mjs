@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-const file=new URL('../src/youtube/capture-main.js',import.meta.url);
+const file=new URL('../dist/src/youtube/capture-main.js',import.meta.url);
 const track={baseUrl:'https://www.youtube.com/api/timedtext?v=abcdef12345&lang=en',languageCode:'en',name:{simpleText:'English'}};
 function harness({withInitialResponse=false,selectedLanguage='en',fetcher}={}) {
   assert.ok(fs.existsSync(file),'the actual MAIN-world caption capture must exist');

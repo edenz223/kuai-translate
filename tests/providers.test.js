@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { translateWithProvider, validateProvider } from '../src/providers/index.js';
-import { defaultSettings, normalizeSettings } from '../src/shared/settings.js';
+import { translateWithProvider, validateProvider } from '../dist/src/providers/index.js';
+import { defaultSettings, normalizeSettings } from '../dist/src/shared/settings.js';
 
 function responder(payloads) {
   const calls=[];

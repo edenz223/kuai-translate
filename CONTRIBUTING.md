@@ -4,12 +4,12 @@
 
 ## 开始开发
 
-需要 Node.js 24 或更高版本。没有第三方依赖，也不需要安装步骤。
+需要 Node.js 24 或更高版本及 pnpm 12.6.0。先运行 `pnpm install --frozen-lockfile`；TypeScript 与 API 类型是开发依赖，扩展运行时无第三方依赖。
 
 ```bash
-npm test
-npm run build
-npm run check
+pnpm test
+pnpm build
+pnpm check
 ```
 
 将 `dist/` 作为已解压扩展加载到支持 Manifest V3 的 Chromium 浏览器。源码修改后重新构建、重新加载扩展并刷新网页。结构、模块合同和定向测试命令见 [开发说明](docs/development.md)。
@@ -31,7 +31,7 @@ npm run check
 1. 为一个明确问题创建分支，保持改动范围集中。
 2. 对行为缺陷，先用实际模块和可控边界写出能复现问题的测试，再实现修复。
 3. 在 `src/` 或 `public/` 中修改源文件。不要把手工修改的 `dist/`、`release/` 或个人配置提交进仓库。
-4. 运行与改动相关的测试；提交 PR 前运行 `npm test` 和 `npm run package`。
+4. 运行与改动相关的测试；提交 PR 前运行 `pnpm verify` 和 `pnpm package`。
 5. 行为、配置字段或安装方式发生变化时，同步更新中英文说明及必要的变更记录。
 
 PR 说明应写清实际问题、为什么需要修改、修改后的行为以及做过哪些验证。若没有做真实浏览器或在线服务检查，直接说明；不要把模拟 HTTP 测试写成在线 API 验证。

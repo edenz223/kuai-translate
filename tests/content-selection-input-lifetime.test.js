@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './helpers/content-dom.cjs';
-import {createInteractions} from '../src/content/interactions.js';
+import {createInteractions} from '../dist/src/content/interactions.js';
 const popup=h=>h.doc.getElementById('kuai-translation-popup');
 const action=(h,name)=>popup(h)?.shadowRoot.querySelector(`[data-${name}]`);
 const feedback=(h,name)=>h.doc.getElementById('kuai-input-trigger')?.shadowRoot.querySelector(`[data-${name}]`);

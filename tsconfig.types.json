@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src/**/*",
+    "public/content-loader.ts",
+    "tests/types/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "release"
+  ]
+}

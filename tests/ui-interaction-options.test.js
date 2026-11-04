@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
-import {startOptions} from '../src/ui/options.js';
-import {defaultSettings,normalizeSettings} from '../src/shared/settings.js';
+import {startOptions} from '../dist/src/ui/options.js';
+import {defaultSettings,normalizeSettings} from '../dist/src/shared/settings.js';
 import {createDocument} from './helpers/ui-document.cjs';
 
 function options(t,change=()=>{},intercept=()=>{}) {

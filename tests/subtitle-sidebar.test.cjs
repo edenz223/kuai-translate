@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createFixture } = require('./helpers/subtitle-sidebar-harness.cjs');
-const modulePath = path.resolve(__dirname, '../src/youtube/sidebar.js');
+const modulePath = path.resolve(__dirname, '../dist/src/youtube/sidebar.js');
 const api = fs.existsSync(modulePath) ? require(modulePath) : {};
 
 function fixture(options) {

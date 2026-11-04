@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import dom from './helpers/content-dom.cjs';
-import {defaultSettings} from '../src/shared/settings.js';
-let api={};try{api=await import('../src/youtube/index.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
+import {defaultSettings} from '../dist/src/shared/settings.js';
+let api={};try{api=await import('../dist/src/youtube/index.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
 function setup(){
   assert.equal(typeof api.createYouTubeController,'function');
   const h=dom.fixture();h.env.location={href:'https://www.youtube.com/watch?v=abcdef12345',origin:'https://www.youtube.com'};

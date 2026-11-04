@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaultSettings,normalizeSettings,publicSettings,exportSettings,importSettings} from '../src/shared/settings.js';
-import {mergeSettings} from '../src/background/settings-merge.js';
+import {defaultSettings,normalizeSettings,publicSettings,exportSettings,importSettings} from '../dist/src/shared/settings.js';
+import {mergeSettings} from '../dist/src/background/settings-merge.js';
 import {fixture} from './helpers/content-dom.cjs';
-import {createPageTranslator} from '../src/content/page-translator.js';
-import {createInteractions} from '../src/content/interactions.js';
-import {applySubtitleTextStyle,applySubtitleBoxStyle} from '../src/shared/styles.js';
+import {createPageTranslator} from '../dist/src/content/page-translator.js';
+import {createInteractions} from '../dist/src/content/interactions.js';
+import {applySubtitleTextStyle,applySubtitleBoxStyle} from '../dist/src/shared/styles.js';
 
 const oldVisual={sourceFontSize:20,targetFontSize:24,sourceColor:'#e5e7eb',targetColor:'#ffffff',sourceWeight:400,targetWeight:600,sourceStroke:'none',targetStroke:'normal',fontFamily:'system-ui, sans-serif',backgroundColor:'#080c15',backgroundOpacity:86};
 function v140(){

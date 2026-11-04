@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './helpers/content-dom.cjs';
-import {createPageTranslator} from '../src/content/page-translator.js';
-import {createPageTriggers} from '../src/content/page-triggers.js';
+import {createPageTranslator} from '../dist/src/content/page-translator.js';
+import {createPageTriggers} from '../dist/src/content/page-triggers.js';
 
 const output = node => node.children.find(child => child.hasAttribute('data-kuai-page-translation')) || null;
 const settle = async () => {for(let i=0;i<16;i++)await Promise.resolve();};

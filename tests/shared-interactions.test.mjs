@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultSettings, normalizeSettings } from '../src/shared/settings.js';
+import { defaultSettings, normalizeSettings } from '../dist/src/shared/settings.js';
 
 let helpers={};
-try { helpers=await import('../src/shared/interactions.js'); }
+try { helpers=await import('../dist/src/shared/interactions.js'); }
 catch(error) { if(error.code!=='ERR_MODULE_NOT_FOUND') throw error; }
 const api=name=>{assert.equal(typeof helpers[name],'function',`${name} must be available`);return helpers[name];};
 

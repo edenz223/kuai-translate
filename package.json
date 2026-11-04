@@ -5,11 +5,22 @@
   "description": "Independent, dependency-free browser translation extension with free services, custom APIs and YouTube subtitle study tools.",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "test": "node --test",
+    "test": "pnpm run build && node --test",
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs",
-    "package": "node scripts/package.mjs"
-  }
+    "package": "node scripts/package.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.types.json",
+    "verify": "pnpm run typecheck && pnpm run test && pnpm run check",
+    "smoke": "node scripts/browser-smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.7",
+    "@types/node": "^24.19.2",
+    "typescript": "^6.0.3"
+  },
+  "packageManager": "pnpm@12.6.0"
 }

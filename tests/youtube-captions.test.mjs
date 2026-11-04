@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-let api={};try{api=await import('../src/youtube/captions.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
+let api={};try{api=await import('../dist/src/youtube/captions.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
 const parse=value=>{assert.equal(typeof api.parseTimedText,'function');return api.parseTimedText(value);};
 
 test('JSON3 subtitles preserve text, order, timing and combined segment words',()=>{

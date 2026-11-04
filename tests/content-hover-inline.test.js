@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './helpers/content-dom.cjs';
-import {createInteractions} from '../src/content/interactions.js';
-import {createPageTranslator} from '../src/content/page-translator.js';
-import {blockText,collectBlocks} from '../src/content/dom.js';
+import {createInteractions} from '../dist/src/content/interactions.js';
+import {createPageTranslator} from '../dist/src/content/page-translator.js';
+import {blockText,collectBlocks} from '../dist/src/content/dom.js';
 
 const settle=async()=>{for(let index=0;index<12;index++)await Promise.resolve();};
 const outputs=h=>h.doc.querySelectorAll('[data-kuai-page-translation]');

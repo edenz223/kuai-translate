@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaultSettings} from '../src/shared/settings.js';
-let api={};try{api=await import('../src/youtube/session.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
+import {defaultSettings} from '../dist/src/shared/settings.js';
+let api={};try{api=await import('../dist/src/youtube/session.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
 function fixture(translate=async texts=>({translations:texts.map(text=>'译:'+text)}),settings=defaultSettings()){
   assert.equal(typeof api.createSubtitleSession,'function');
   const video=new EventTarget();Object.assign(video,{isConnected:true,currentTime:1,duration:100,paused:true,ended:false,seekable:{length:0},closest:()=>null});

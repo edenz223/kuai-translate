@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, Event } from './helpers/content-dom.cjs';
-import { createInteractions } from '../src/content/interactions.js';
+import { createInteractions } from '../dist/src/content/interactions.js';
 
 const settle=async()=>{for(let index=0;index<8;index++)await Promise.resolve();};
 

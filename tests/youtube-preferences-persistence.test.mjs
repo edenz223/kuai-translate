@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {studyFixture} from './helpers/youtube-study.mjs';
-import {defaultSettings,normalizeSettings,publicSettings} from '../src/shared/settings.js';
-import {applyPreferencePatch} from '../src/background/preferences.js';
+import {defaultSettings,normalizeSettings,publicSettings} from '../dist/src/shared/settings.js';
+import {applyPreferencePatch} from '../dist/src/background/preferences.js';
 
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
 const videoId='abcdef12345';

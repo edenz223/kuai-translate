@@ -4,51 +4,53 @@
 
 ## 环境与常用命令
 
-使用 Node.js 24 或更高版本。项目没有第三方 npm 依赖，不需要 `npm install`、`npm ci`、本地 Web 服务器或 bundler。`package.json` 的 `private: true` 用来防止误发到 npm，不影响在 GitHub 公开源码。
+使用 Node.js 24 或更高版本及 pnpm 12.6.0。先执行 `pnpm install --frozen-lockfile` 安装 TypeScript 和 Chrome/Node 类型；扩展运行时仍无第三方依赖，不需要本地 Web 服务器或 bundler。`package.json` 的 `private: true` 用来防止误发到 npm，不影响在 GitHub 公开源码。
 
 ```bash
-npm test
-npm run build
-npm run check
-npm run package
+pnpm test
+pnpm build
+pnpm check
+pnpm package
 ```
 
 | 命令 | 输入与输出 |
 | --- | --- |
-| `npm test` | 运行仓库测试；不依赖在线翻译服务或个人密钥 |
-| `npm run build` | 清空并重新生成 `dist/`；`src/` 保留为 `dist/src/`，`public/` 内容放到 `dist/` 根目录，根 `LICENSE` 复制为 `dist/LICENSE.txt` |
-| `npm run check` | 检查已有 `dist/`；因此单独执行前需要先构建 |
-| `npm run package` | 内部依次重新构建、检查并写入 `release/`；不会自动运行测试 |
+| `pnpm typecheck` | 严格检查运行时代码和编译期消息契约 |
+| `pnpm verify` | 依次类型检查、构建、运行测试和检查产物 |
+| `pnpm test` | 先构建，再针对 `dist/` 运行仓库测试；不依赖在线翻译服务或个人密钥 |
+| `pnpm build` | 清空并重新生成 `dist/`；`src/` 保留为 `dist/src/`，`public/` 内容放到 `dist/` 根目录，根 `LICENSE` 复制为 `dist/LICENSE.txt` |
+| `pnpm check` | 检查已有 `dist/`；因此单独执行前需要先构建 |
+| `pnpm package` | 内部依次重新构建、检查并写入 `release/`；不会自动运行测试 |
 
-维护时执行 `npm test` 后再执行 `npm run package`。所有路径以项目根目录为基准。
+维护时执行 `pnpm verify` 后再执行 `pnpm package`。所有路径以项目根目录为基准。
 
 ## 源码布局
 
 | 路径 | 责任 |
 | --- | --- |
-| `src/background/index.js` | MV3 service worker 入口，同步注册事件监听 |
-| `src/background/controller.js` | 受信任发送方检查、配置读写、翻译任务、取消和上下文菜单 |
-| `src/background/settings-merge.js` | 配置保存的三向合并与并发冲突保护 |
-| `src/background/preferences.js` | 内容页面可修改的公共字幕偏好白名单 |
+| `src/background/index.ts` | MV3 service worker 入口，同步注册事件监听 |
+| `src/background/controller.ts` | 受信任发送方检查、配置读写、翻译任务、取消和上下文菜单 |
+| `src/background/settings-merge.ts` | 配置保存的三向合并与并发冲突保护 |
+| `src/background/preferences.ts` | 内容页面可修改的公共字幕偏好白名单 |
 | `src/providers/` | 各服务请求/响应适配、HTTP 边界和可公开错误 |
-| `src/shared/settings.js` | 配置 schema、规范化、默认值、公共配置及导入/导出 |
-| `src/shared/interactions.js` | 四组交互默认值、快捷键/网址规则规范化与匹配、功能独立服务/语言解析 |
-| `src/shared/presentation.js` | 网页与字幕样式的默认值、预设 ID 和数据规范化 |
-| `src/shared/styles.js` | 页面、字幕层及设置预览共用的固定 CSS 属性应用函数 |
-| `src/shared/client.js` | 扩展消息客户端与请求取消 |
+| `src/shared/settings.ts` | 配置 schema、规范化、默认值、公共配置及导入/导出 |
+| `src/shared/interactions.ts` | 四组交互默认值、快捷键/网址规则规范化与匹配、功能独立服务/语言解析 |
+| `src/shared/presentation.ts` | 网页与字幕样式的默认值、预设 ID 和数据规范化 |
+| `src/shared/styles.ts` | 页面、字幕层及设置预览共用的固定 CSS 属性应用函数 |
+| `src/shared/client.ts` | 扩展消息客户端与请求取消 |
 | `src/content/` | 网页段落翻译、划词/输入/悬停交互及内容入口 |
-| `src/content/page-policy.js` / `page-triggers.js` | 网页范围与语言/网址过滤、自动和动态调度、快捷键与停止归属 |
-| `src/content/input-editor.js` / `shortcuts.js` | 可编辑区域快照、单步安全恢复、精确动作快捷键与按住键跟踪 |
-| `src/content/input-feedback.js` | 输入圆点、轻量状态与操作、显式预览，以及独立于划词卡片的显示生命周期 |
-| `src/content/page-content.js` | 原文文本/链接分段、对应关系、纯文本批次索引与本地安全链接重建 |
-| `src/content/page-translator.js` | 段落与整页共用的译文注册表、渲染、逐段取消与重试、样式更新 |
-| `src/content/originals.js` | 仅译文模式下隐藏成功段落原文，以及保留节点的原位恢复 |
+| `src/content/page-policy.ts` / `page-triggers.ts` | 网页范围与语言/网址过滤、自动和动态调度、快捷键与停止归属 |
+| `src/content/input-editor.ts` / `shortcuts.ts` | 可编辑区域快照、单步安全恢复、精确动作快捷键与按住键跟踪 |
+| `src/content/input-feedback.ts` | 输入圆点、轻量状态与操作、显式预览，以及独立于划词卡片的显示生命周期 |
+| `src/content/page-content.ts` | 原文文本/链接分段、对应关系、纯文本批次索引与本地安全链接重建 |
+| `src/content/page-translator.ts` | 段落与整页共用的译文注册表、渲染、逐段取消与重试、样式更新 |
+| `src/content/originals.ts` | 仅译文模式下隐藏成功段落原文，以及保留节点的原位恢复 |
 | `src/youtube/` | 页面字幕捕获、字幕解析、播放会话、字幕层、侧栏和选择暂停控制 |
-| `src/youtube/asr-segmentation.js` | 明确自动生成的 JSON3 字幕本地分组、保守重复整理和时间边界 |
-| `src/youtube/preferences.js` / `navigation.js` | 播放器快捷设置与有效时间轴内的前后句导航 |
+| `src/youtube/asr-segmentation.ts` | 明确自动生成的 JSON3 字幕本地分组、保守重复整理和时间边界 |
+| `src/youtube/preferences.ts` / `navigation.ts` | 播放器快捷设置与有效时间轴内的前后句导航 |
 | `src/ui/` | 弹窗、设置页、文本工具及可测试状态逻辑 |
-| `src/ui/presentation.js` | 设置表单、样式恢复默认与本地预览接线 |
-| `src/ui/interaction-options.js` | 四组交互表单、条件控件、草稿校验与分区恢复默认 |
+| `src/ui/presentation.ts` | 设置表单、样式恢复默认与本地预览接线 |
+| `src/ui/interaction-options.ts` | 四组交互表单、条件控件、草稿校验与分区恢复默认 |
 | `public/` | manifest、静态 HTML/CSS、内容加载器、图标和语言资源 |
 | `tests/` | 实际模块的行为测试与可控浏览器/DOM/HTTP 边界 |
 | `scripts/` | 构建、资源检查与确定性 ZIP 打包 |
@@ -84,7 +86,7 @@ ESM 模块在构建中不被压缩或重写。后台和扩展页面原生加载�
 { ok: false, error: { code, message } }
 ```
 
-`src/shared/client.js` 的 `request()` 解包成功值，失败时抛出带 `code` 的 `Error`。
+`src/shared/client.ts` 的 `request()` 解包成功值，失败时抛出带 `code` 的 `Error`。
 
 | 消息 | 主要合同 |
 | --- | --- |
@@ -124,7 +126,7 @@ ESM 模块在构建中不被压缩或重写。后台和扩展页面原生加载�
 
 ### 交互配置与规范化
 
-准确默认值以 `src/shared/interactions.js` 为准；顶层继续保留 `selectionEnabled: true` 和 `hoverEnabled: false`：
+准确默认值以 `src/shared/interactions.ts` 为准；顶层继续保留 `selectionEnabled: true` 和 `hoverEnabled: false`：
 
 ```js
 const interactionDefaults = {
@@ -218,7 +220,7 @@ hoverOptions: {
 
 Popup 使用 `chrome.tabs.sendMessage` 向 **`frameId: 0`** 发送 `KUAI_PAGE_TRANSLATE`、`KUAI_PAGE_RESTORE`、`KUAI_PAGE_STATUS`，以及 `KUAI_YOUTUBE_OPEN_LIST`。字幕列表入口仅在识别出的 YouTube 视频 URL 启用，消息接收方仍需确认播放器就绪；成功打开返回 `{ opened: true }`，未就绪必须显示可操作错误。右键菜单针对实际点击所在 frame。网页翻译启动后立即返回状态，后续进度显示在页面上，不依赖 popup 保持打开。
 
-页面状态包含 `active`、`translated`、`errors`、`total`、`cancelled` 和 `isTranslated`。正文经过 `page-policy.js` 过滤后发送；手动、自动、动态与快捷键意图由 `page-triggers.js` 管理。自动翻译默认关闭，开启后网站/原文语言允许列表为 OR 关系，两者空则允许符合条件的页面；禁用规则和已识别的目标语言阻止自动开始。原文语言优先使用最近的 `lang`，否则使用可用的本地 Chrome 检测；未知结果不伪造匹配。popup 样式入口打开 `options.html#webpage`。
+页面状态包含 `active`、`translated`、`errors`、`total`、`cancelled` 和 `isTranslated`。正文经过 `page-policy.js` 过滤后发送；手动、自动、动态与快捷键意图由 `page-triggers.ts` 管理。自动翻译默认关闭，开启后网站/原文语言允许列表为 OR 关系，两者空则允许符合条件的页面；禁用规则和已识别的目标语言阻止自动开始。原文语言优先使用最近的 `lang`，否则使用可用的本地 Chrome 检测；未知结果不伪造匹配。popup 样式入口打开 `options.html#webpage`。
 
 仅译文模式要先得到有效、可显示的成功结果，再用自有隐藏容器包裹该段原节点。失败/等待/取消段落不隐藏原文。恢复时在当前位置解包，保留节点身份、处理器和网页后来的修改，不用旧 `innerHTML` 覆盖现场。既有译文被站点移除或移出原段落时，清理该记录并恢复原文。
 
@@ -272,7 +274,7 @@ JSON3/XML/VTT 解析和原生 TextTrack/DOM 回退可能携带换行。此前共
 
 侧栏采用独立的阅读字体、主题配色和双语顺序，不调用视频字幕的文字/背景样式函数。原文在上、译文在下，视频仅译文设置也不会隐藏列表原文；只有显式学习遮罩继续共享。手动滚动或选择后暂停自动跟随，“回到当前字幕”重新跟随并把焦点交回列表，不自动播放。保留虚拟列表测量锚点、选中文字节点和全屏重定位的原有约束。
 
-`preferences.js` 的快捷面板只写公共字幕 patch；完整设置链接使用 `KUAI_OPEN_OPTIONS` 的 `subtitles` 分区。`navigation.js` 根据当前有效时间轴计算上一句/下一句，尊重视频时长和 seekable 范围；有限时间轴缺失、直播即时字幕或越界时不执行跳转。按钮与 Ctrl+Alt+左右方向键只改变时间，不替用户播放；文字输入、组合输入和隐藏文档不接管快捷键。
+`preferences.js` 的快捷面板只写公共字幕 patch；完整设置链接使用 `KUAI_OPEN_OPTIONS` 的 `subtitles` 分区。`navigation.ts` 根据当前有效时间轴计算上一句/下一句，尊重视频时长和 seekable 范围；有限时间轴缺失、直播即时字幕或越界时不执行跳转。按钮与 Ctrl+Alt+左右方向键只改变时间，不替用户播放；文字输入、组合输入和隐藏文档不接管快捷键。
 
 字幕文字选择与播放控制通过明确的暂停归属协作：只有扩展因为本次有效字幕选择暂停了原本正在播放的视频，清除选择才可能恢复播放。用户自己的暂停、播放、跳转、视频切换或会话结束会使旧恢复资格失效。不要仅凭 `video.paused` 为真就执行 `play()`。
 
@@ -283,12 +285,13 @@ JSON3/XML/VTT 解析和原生 TextTrack/DOM 回退可能携带换行。此前共
 全部测试：
 
 ```bash
-npm test
+pnpm test
 ```
 
 根据问题运行对应模块，例如：
 
 ```bash
+pnpm build
 node --test tests/providers.test.js tests/background.test.js tests/settings.test.mjs
 node --test tests/shared-interactions.test.mjs tests/interaction-settings.test.mjs tests/client.test.mjs
 node --test tests/content-page.test.js tests/content-page-links.test.js tests/content-interactions.test.js tests/content-runtime.test.js
@@ -353,8 +356,8 @@ allowlist 限制可打包路径，但不能自动证明这些文件的正文没�
 ## 打包与发布
 
 ```bash
-npm test
-npm run package
+pnpm test
+pnpm package
 ```
 
 对于清单版本 1.0.0，生成：
@@ -366,9 +369,9 @@ npm run package
 ZIP 使用稳定排序、固定时间戳和权限以及固定压缩参数。验证重复构建时，可在同一 Node 版本下保存第一次哈希，再重新打包比较：
 
 ```bash
-npm run package
+pnpm package
 node --input-type=module -e "import fs from 'node:fs'; fs.copyFileSync('release/SHA256SUMS', 'release/SHA256SUMS.first');"
-npm run package
+pnpm package
 node --input-type=module -e "import fs from 'node:fs'; import assert from 'node:assert/strict'; assert.equal(fs.readFileSync('release/SHA256SUMS', 'utf8'), fs.readFileSync('release/SHA256SUMS.first', 'utf8')); console.log('Archive hashes match');"
 ```
 
@@ -381,3 +384,9 @@ node --input-type=module -e "import fs from 'node:fs'; import assert from 'node:
 ### 按可见区域翻译
 
 网页会话使用 collectBlocks 的 visibleOnly 模式，在读取原文前过滤视口外与滚动容器裁剪外的块。page-triggers 在已开始的会话中监听滚动与窗口变化，使用 120 ms 合并调度，并与动态内容请求共用单条等待队列。新追加的可见内容参与补译；已有内容变化的主动刷新仍遵循 translateDynamic。网页任务在每批发送前复验可见性并释放未发送的离屏条目，明确的段落操作仍可处理指定块。停止、还原、导航和后台状态取消调度；滚动不自动重试错误段落。统计通过扩展状态接口保留，不再创建浮动工具条。
+
+## TypeScript 维护约定
+
+源码使用 `.ts`，相对模块引用保留 `.js`，对应 `dist/` 的浏览器运行路径。`allowJs: true`、`checkJs: false` 支持渐进共存；全部扩展入口现已迁为 TS，`strict: true` 覆盖运行时和消息契约测试。`public/content-loader.ts` 与 YouTube `capture-main.ts` 保持 classic script；纯类型模块使用 `.d.ts`，不会打包到浏览器。构建脚本与 Node 回归测试保留原生 JS。
+
+详细基线、阶段证据、权限比较和加载方式见 [迁移记录](typescript-migration.md)。

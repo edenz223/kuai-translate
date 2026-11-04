@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,Event} from './helpers/content-dom.cjs';
-import {createInteractions} from '../src/content/interactions.js';
+import {createInteractions} from '../dist/src/content/interactions.js';
 
 const settle=async()=>{for(let n=0;n<16;n++)await Promise.resolve();};
 function field(h){const input=h.paragraph('','textarea');input.value='Keep hello tail';input.setSelectionRange(5,10);input.focus();h.respond(async()=>({translations:['你好']}));return input;}

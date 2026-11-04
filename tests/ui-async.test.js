@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as state from '../src/ui/state.js';
-import {startTextTool} from '../src/ui/text.js';
-import {startOptions} from '../src/ui/options.js';
-import {defaultSettings} from '../src/shared/settings.js';
+import * as state from '../dist/src/ui/state.js';
+import {startTextTool} from '../dist/src/ui/text.js';
+import {startOptions} from '../dist/src/ui/options.js';
+import {defaultSettings} from '../dist/src/shared/settings.js';
 import {createDocument} from './helpers/ui-document.cjs';
 
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done});return {promise,resolve};};

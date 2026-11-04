@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
-import {createContentRuntime} from '../src/content/index.js';
-import {defaultSettings} from '../src/shared/settings.js';
+import {createContentRuntime} from '../dist/src/content/index.js';
+import {defaultSettings} from '../dist/src/shared/settings.js';
 import {fixture,Event} from './helpers/content-dom.cjs';
 
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}

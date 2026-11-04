@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultSettings, exportSettings, importSettings, normalizeSettings, publicSettings } from '../src/shared/settings.js';
-import { mergeSettings } from '../src/background/settings-merge.js';
+import { defaultSettings, exportSettings, importSettings, normalizeSettings, publicSettings } from '../dist/src/shared/settings.js';
+import { mergeSettings } from '../dist/src/background/settings-merge.js';
 
 test('all four complete interaction groups survive public views and secret-free backup round trips',()=>{
   const value=defaultSettings();

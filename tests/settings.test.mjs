@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 let settings = {};
-try { settings = await import('../src/shared/settings.js'); } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error; }
+try { settings = await import('../dist/src/shared/settings.js'); } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error; }
 function defaults() { assert.equal(typeof settings.defaultSettings, 'function'); return settings.defaultSettings(); }
 
 test('a fresh installation selects a free Microsoft provider without any credential', () => {

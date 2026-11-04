@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
-import {startPopup} from '../src/ui/popup.js';
-import {defaultSettings,normalizeSettings} from '../src/shared/settings.js';
+import {startPopup} from '../dist/src/ui/popup.js';
+import {defaultSettings,normalizeSettings} from '../dist/src/shared/settings.js';
 import {createDocument} from './helpers/ui-document.cjs';
 
 function setup(t,{url='https://example.com/article',state={active:false,total:0,translated:0},onAction,onSave}={}) {

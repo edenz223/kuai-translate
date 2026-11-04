@@ -1,8 +1,8 @@
 import boundary from './subtitle-sidebar-harness.cjs';
-import {defaultSettings} from '../../src/shared/settings.js';
-import {createYouTubeController} from '../../src/youtube/index.js';
-import sidebarAPI from '../../src/youtube/sidebar.js';
-import selectionAPI from '../../src/youtube/selection.js';
+import {defaultSettings} from '../../dist/src/shared/settings.js';
+import {createYouTubeController} from '../../dist/src/youtube/index.js';
+import sidebarAPI from '../../dist/src/youtube/sidebar.js';
+import selectionAPI from '../../dist/src/youtube/selection.js';
 
 /** Real runtime, overlay, sidebar and selection controllers on a controlled DOM boundary. */
 export function studyFixture({settings={},rect,cc=true,save,openOptions,createView,onHarness}={}) {

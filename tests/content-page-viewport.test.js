@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './helpers/content-dom.cjs';
-import {createPageTranslator} from '../src/content/page-translator.js';
-import {createPageTriggers} from '../src/content/page-triggers.js';
+import {createPageTranslator} from '../dist/src/content/page-translator.js';
+import {createPageTriggers} from '../dist/src/content/page-triggers.js';
 const settle=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
 const rect=(top,left=10)=>({top,bottom:top+30,left,right:left+390,width:390,height:30});
 function setup(t){
