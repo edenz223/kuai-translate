@@ -1,0 +1,13 @@
+dist/
+release/
+node_modules/
+coverage/
+.build-test-*/
+.test-*/
+.env
+.env.*
+*.pem
+*.key
+*.log
+.DS_Store
+.worktrees/

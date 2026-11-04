@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kuai translate · 设置</title><link rel="stylesheet" href="ui.css"></head>
+<body class="settings-page"><div class="page"><header class="page-header"><div class="brand"><span class="brand-mark" aria-hidden="true">K</span><div><h1>Kuai translate</h1><p>你的语言，你的翻译服务</p></div></div><a href="text.html">文本 / 文件翻译 →</a></header>
+<nav class="settings-nav" aria-label="设置分区"><a href="#webpage">网页翻译</a><a href="#selection">划词翻译</a><a href="#input">输入翻译</a><a href="#subtitles">YouTube 字幕</a><a href="#providers">翻译服务 / API</a><a href="#backup">备份与导入</a></nav>
+<main>
+<section id="webpage" class="card settings-section" aria-labelledby="webpage-heading">
+  <div class="section-heading"><h2 id="webpage-heading">网页翻译</h2><p class="muted">选择网页服务、翻译范围与触发方式。网页按滚动位置翻译当前可见内容；划词和输入可使用独立的服务与语言。</p></div>
+  <div class="form-grid">
+    <label>网页翻译服务<select id="active-provider"></select></label>
+    <label>网页显示模式<select id="page-display-mode"></select></label>
+    <label>原文语言<select id="source-language"></select></label>
+    <label>目标语言<select id="target-language"></select></label>
+  </div>
+  <div class="checks">
+    <label class="check"><input id="page-option-autoTranslate" type="checkbox" aria-describedby="page-auto-help">打开符合规则的网页时自动翻译</label>
+    <label class="check"><input id="page-option-translateDynamic" type="checkbox" aria-describedby="page-dynamic-help">继续翻译动态新增或修改的内容</label>
+    <label class="check"><input id="page-option-translateFullPage" type="checkbox" aria-describedby="page-area-help">翻译整页可读区域（含页脚）</label>
+    <label class="check"><input id="page-option-contextMenuEnabled" type="checkbox">显示浏览器右键翻译菜单</label>
+  </div>
+  <p id="page-dynamic-help" class="muted">网页翻译会随滚动处理新出现的可见内容；开启此项还会自动更新已变化的正文。手动停止或恢复原文后不再继续。</p>
+  <div id="page-auto-rules" class="conditional-options" hidden>
+    <h3>自动翻译条件</h3>
+    <p id="page-auto-help" class="muted">下方两项都留空时，允许所有符合规则的网页自动翻译；填写后，网站或语言命中任意一项即可。禁用规则始终优先。</p>
+    <div class="form-grid">
+      <div><label for="page-option-alwaysSites">自动翻译的网站（每行一个）</label><textarea id="page-option-alwaysSites" class="rule-list" rows="4" maxlength="200100" placeholder="example.com&#10;https://news.example/articles/**" spellcheck="false" aria-describedby="site-rules-help page-option-alwaysSites-error"></textarea><p id="page-option-alwaysSites-error" class="field-error" role="alert" hidden></p></div>
+      <div><label for="page-option-alwaysLanguages">自动翻译的原文语言（每行一个代码）</label><textarea id="page-option-alwaysLanguages" class="rule-list" rows="4" maxlength="200100" placeholder="en&#10;ja" spellcheck="false" aria-describedby="language-rules-help page-option-alwaysLanguages-error"></textarea><p id="page-option-alwaysLanguages-error" class="field-error" role="alert" hidden></p></div>
+    </div>
+  </div>
+  <details class="advanced-style"><summary>禁用规则与翻译范围</summary>
+    <div class="form-grid">
+      <div><label for="page-option-neverSites">不翻译的网站（每行一个）</label><textarea id="page-option-neverSites" class="rule-list" rows="4" maxlength="200100" placeholder="private.example" spellcheck="false" aria-describedby="site-rules-help page-option-neverSites-error"></textarea><p id="page-option-neverSites-error" class="field-error" role="alert" hidden></p></div>
+      <div><label for="page-option-neverLanguages">不翻译的原文语言（每行一个代码）</label><textarea id="page-option-neverLanguages" class="rule-list" rows="4" maxlength="200100" placeholder="zh-Hans&#10;zh-Hant" spellcheck="false" aria-describedby="language-rules-help page-option-neverLanguages-error"></textarea><p id="page-option-neverLanguages-error" class="field-error" role="alert" hidden></p></div>
+      <div><label for="page-option-excludeSelectors">排除的 CSS 选择器（每行一个）</label><textarea id="page-option-excludeSelectors" class="rule-list" rows="4" maxlength="100050" placeholder=".advertisement&#10;[data-private]" spellcheck="false" aria-describedby="selector-rules-help page-option-excludeSelectors-error"></textarea><p id="page-option-excludeSelectors-error" class="field-error" role="alert" hidden></p></div>
+      <div><label for="page-option-minTextLength">段落最少字符数（1–200）</label><input id="page-option-minTextLength" type="number" min="1" max="200" step="1" aria-describedby="page-area-help page-option-minTextLength-error"><p id="page-option-minTextLength-error" class="field-error" role="alert" hidden></p><p id="page-area-help" class="muted">短于此长度的段落会跳过。关闭整页翻译时跳过页脚；编辑框、代码和扩展控件始终排除。</p></div>
+    </div>
+    <p id="site-rules-help" class="muted">网站最多 100 项，每行最多 2000 字符。域名包含其子域名；可填写 HTTP/HTTPS 地址，路径中的 * 匹配一层、** 可跨多层。这些规则同时用于整页与段落翻译。</p>
+    <p id="language-rules-help" class="muted">语言最多 100 项，例如 en、ja、zh-Hans。按识别出的原文语言判断；未知语言不会被猜测为某一项。</p>
+    <p id="selector-rules-help" class="muted">选择器最多 50 项，每行最多 2000 字符。匹配区域及其子元素不会参与整页或段落翻译；命中段落内的区域时，会跳过包含它的整个段落。</p>
+  </details>
+  <div class="interaction-subsection">
+    <h3>网页快捷键</h3>
+    <div class="form-grid">
+      <div><label for="page-option-shortcut">网页翻译 / 恢复原文</label><input id="page-option-shortcut" type="text" maxlength="120" placeholder="Alt+Z；留空关闭" autocomplete="off" spellcheck="false" aria-describedby="page-shortcut-help page-option-shortcut-error"><p id="page-option-shortcut-error" class="field-error" role="alert" hidden></p></div>
+      <div><label for="page-option-displayModeShortcut">切换双语 / 仅译文</label><input id="page-option-displayModeShortcut" type="text" maxlength="120" placeholder="例如 Alt+D；留空关闭" autocomplete="off" spellcheck="false" aria-describedby="page-shortcut-help page-option-displayModeShortcut-error"><p id="page-option-displayModeShortcut-error" class="field-error" role="alert" hidden></p></div>
+    </div>
+    <p id="page-shortcut-help" class="muted">在网页的非输入区域生效。填写一个或多个修饰键 + 一个 A–Z 字母，例如 Control+Shift+K；留空关闭。Control 可写 Ctrl，Meta 可写 Cmd；浏览器或系统已占用的组合可能无法使用。显示模式快捷键在尚无译文时会开始翻译。</p>
+    <div class="actions"><button id="reset-page-options" type="button">恢复网页交互默认值</button><span class="muted">保留网页服务、语言、显示模式与样式。</span></div>
+  </div>
+  <div id="hover" class="interaction-subsection paragraph-settings" aria-labelledby="hover-heading">
+  <div class="section-heading"><h3 id="hover-heading">段落快捷翻译</h3><p id="hover-service-summary" class="muted">鼠标指向段落，按一次快捷键翻译，再按一次关闭。服务、显示方式、样式与整页翻译共用。</p></div>
+  <label class="check"><input id="hover-enabled" type="checkbox">启用段落快捷翻译</label>
+  <div id="hover-options-panel" hidden>
+    <div class="form-grid">
+      <label>触发方式<select id="hover-option-trigger"></select></label>
+      <label>翻译范围<select id="hover-option-mode"></select></label>
+      <div id="hover-custom-keys-field" hidden><label for="hover-option-customKeys">自定义快捷键（一至两个按键）</label><input id="hover-option-customKeys" type="text" maxlength="40" placeholder="例如 Control + K，或 A + B" autocomplete="off" spellcheck="false" aria-describedby="hover-custom-keys-help hover-option-customKeys-error"><p id="hover-custom-keys-help" class="muted">可用 Control、Alt、Shift、Meta / Cmd 和 A–Z。两个不同按键用 + 分隔；组合按下并松开一次即可切换。</p><p id="hover-option-customKeys-error" class="field-error" role="alert" hidden></p></div>
+      <div id="hover-delay-field" hidden><label for="hover-option-delay">指向文字后等待（毫秒，50–3000）</label><input id="hover-option-delay" type="number" min="50" max="3000" step="50" aria-describedby="hover-option-delay-error"><p id="hover-option-delay-error" class="field-error" role="alert" hidden></p></div>
+      <div id="hover-hold-delay-field" hidden><label for="hover-option-holdDelay">鼠标左键按住时长（毫秒，200–3000）</label><input id="hover-option-holdDelay" type="number" min="200" max="3000" step="50" aria-describedby="hover-left-hold-help hover-option-holdDelay-error"><p id="hover-option-holdDelay-error" class="field-error" role="alert" hidden></p></div>
+    </div>
+    <p id="hover-trigger-help" class="muted">鼠标指向文字，按一次所选按键翻译，再按一次关闭；无需一直按住。整页翻译会复用这里的译文，恢复原文会一起清除。</p>
+    <p id="hover-left-hold-help" class="muted" hidden>左键需先达到按住时长，再等待悬停延迟；拖动选择文字时不会触发。</p>
+    <div class="form-grid"><label class="check"><input id="hover-option-showIndicator" type="checkbox">显示当前翻译范围提示框</label><label id="hover-border-color-field">提示框颜色<input id="hover-option-borderColor" type="color" value="#cfcfcf"></label></div>
+    <details class="advanced-style"><summary>网站例外</summary><div><label for="hover-option-disabledSites">只禁用段落快捷翻译的网站（每行一个，最多 100 项）</label><textarea id="hover-option-disabledSites" class="rule-list" rows="3" maxlength="200100" placeholder="chat.example" spellcheck="false" aria-describedby="hover-sites-help hover-option-disabledSites-error"></textarea><p id="hover-sites-help" class="muted">在网页禁用规则之外叠加生效。支持域名、HTTP/HTTPS 地址和路径通配符 * / **，每行最多 2000 字符。</p><p id="hover-option-disabledSites-error" class="field-error" role="alert" hidden></p></div></details>
+  </div>
+  <div class="actions"><button id="reset-hover-options" type="button">恢复段落快捷键默认值</button><span class="muted">保留启用状态、网页服务和样式。</span></div>
+</div>
+  <div class="interaction-subsection"><h3>网页显示与译文样式</h3><p class="muted">样式更改会更新已有译文，无需再次翻译。仅译文模式在翻译失败时仍保留原文。</p></div>
+  <div class="form-grid">
+    <label>译文样式<select id="page-style-preset"></select></label>
+    <label>字体大小（原文的 %）<input id="page-style-fontSize" type="number" min="50" max="200" step="5"></label>
+    <label>字体粗细<select id="page-style-fontWeight"></select></label>
+    <label>行高<input id="page-style-lineHeight" type="number" min="1" max="3" step="0.1"></label>
+  </div>
+  <details class="advanced-style"><summary>颜色、字体与透明度（整页与段落共用）</summary>
+    <div class="form-grid">
+      <label>文字颜色<input id="page-style-textColor" type="color" value="#182b3a"></label>
+      <label>边线 / 标记颜色<input id="page-style-accentColor" type="color" value="#4285d4"></label>
+      <label>背景颜色<input id="page-style-backgroundColor" type="color" value="#eef5ff"></label>
+      <label>文字不透明度（%）<input id="page-style-opacity" type="number" min="0" max="100" step="5"></label>
+      <label>字体名称或字体栈<input id="page-style-fontFamily" type="text" maxlength="120" placeholder="inherit 表示跟随原文" autocomplete="off"></label>
+    </div>
+    <div class="checks"><label class="check"><input id="page-color-inherit" type="checkbox">文字颜色跟随原文</label><label class="check"><input id="page-style-italic" type="checkbox">斜体</label></div>
+  </details>
+  <div class="preview-heading"><strong>网页效果预览</strong><span>本地示例，不调用翻译服务</span></div>
+  <div class="page-preview"><p id="page-preview-source" lang="en">A small step every day makes learning a language easier.</p><p id="page-preview-translation" lang="zh-CN" tabindex="0">每天进步一点，语言学习就会更轻松。</p></div>
+  <div class="actions"><button id="reset-page-style" type="button">恢复网页样式默认值</button><span class="muted">保留服务、语言和显示模式选择。</span></div>
+</section>
+<section id="selection" class="card settings-section" aria-labelledby="selection-heading">
+  <div class="section-heading"><h2 id="selection-heading">划词翻译</h2><p class="muted">选中文字后翻译，取消选择时关闭结果。点击结果中的图钉图标可固定位置，再拖动标题栏调整；固定后可继续选择其他文字。</p></div>
+  <label class="check"><input id="selection-enabled" type="checkbox">启用划词翻译</label>
+  <div id="selection-options-panel">
+    <div class="form-grid">
+      <label>划词翻译服务<select id="selection-option-providerId"></select></label>
+      <label>触发方式<select id="selection-option-triggerMode"></select></label>
+      <label>原文语言<select id="selection-option-sourceLanguage"></select></label>
+      <label>目标语言<select id="selection-option-targetLanguage"></select></label>
+      <label id="selection-trigger-action-field" hidden>图标 / 圆点的激活方式<select id="selection-option-triggerAction"></select></label>
+      <div id="selection-delay-field"><label for="selection-option-delay">触发前等待（毫秒，0–2000）</label><input id="selection-option-delay" type="number" min="0" max="2000" step="50" aria-describedby="selection-delay-help selection-option-delay-error"><p id="selection-option-delay-error" class="field-error" role="alert" hidden></p><p id="selection-delay-help" class="muted">自动、修饰键和悬停激活会等待；点击图标 / 圆点会立即翻译。</p></div>
+      <div><label for="selection-option-maxLength">最大选中文字数（1–50000）</label><input id="selection-option-maxLength" type="number" min="1" max="50000" step="1" aria-describedby="selection-length-help selection-option-maxLength-error"><p id="selection-option-maxLength-error" class="field-error" role="alert" hidden></p><p id="selection-length-help" class="muted">超过上限时不发起划词翻译请求。</p></div>
+    </div>
+    <div class="checks"><label class="check"><input id="selection-option-showOriginal" type="checkbox">在翻译卡片中显示原文</label><label class="check"><input id="selection-option-autoSpeak" type="checkbox" aria-describedby="selection-speech-help">自动朗读所选单词（本机语音）</label></div>
+    <p id="selection-speech-help" class="muted">自动朗读仅用于单个原文单词，并使用浏览器可用的本机语音；没有合适语音时跳过。</p>
+    <div><label for="selection-option-disabledSites">禁用划词翻译的网站（每行一个，最多 100 项）</label><textarea id="selection-option-disabledSites" class="rule-list" rows="3" maxlength="200100" placeholder="private.example" spellcheck="false" aria-describedby="selection-sites-help selection-option-disabledSites-error"></textarea><p id="selection-sites-help" class="muted">支持域名、HTTP/HTTPS 地址和路径通配符 * / **，每行最多 2000 字符。</p><p id="selection-option-disabledSites-error" class="field-error" role="alert" hidden></p></div>
+  </div>
+  <div class="actions"><button id="reset-selection-options" type="button">恢复划词交互默认值</button><span class="muted">保留划词启用状态及其他分区设置。</span></div>
+</section>
+<section id="input" class="card settings-section" aria-labelledby="input-heading">
+  <div class="section-heading"><h2 id="input-heading">输入翻译</h2><p class="muted">在可编辑区域使用快捷键、入口或右键菜单翻译。密码和明确标记的验证码、支付卡字段不会处理。</p></div>
+  <label class="check"><input id="input-option-enabled" type="checkbox">启用输入翻译</label>
+  <div id="input-options-panel">
+    <div class="form-grid">
+      <label>输入翻译服务<select id="input-option-providerId"></select></label>
+      <label>聚焦输入区域时显示<select id="input-option-icon"></select></label>
+      <label>原文语言<select id="input-option-sourceLanguage"></select></label>
+      <label>输出语言（默认英文）<select id="input-option-targetLanguage"></select></label>
+      <div><label for="input-option-shortcut">输入翻译 / 再次按下恢复</label><input id="input-option-shortcut" type="text" maxlength="120" placeholder="Alt+X；留空关闭" autocomplete="off" spellcheck="false" aria-describedby="input-shortcut-help input-option-shortcut-error"><p id="input-option-shortcut-error" class="field-error" role="alert" hidden></p></div>
+      <div><label for="input-option-restoreShortcut">恢复最近一次替换</label><input id="input-option-restoreShortcut" type="text" maxlength="120" placeholder="Control+Shift+Z；留空关闭" autocomplete="off" spellcheck="false" aria-describedby="input-shortcut-help input-option-restoreShortcut-error"><p id="input-option-restoreShortcut-error" class="field-error" role="alert" hidden></p></div>
+    </div>
+    <p id="input-shortcut-help" class="muted">仅在符合条件的输入区域中生效。填写修饰键 + A–Z 字母，留空关闭；两项须使用不同组合。译文未再被编辑时，再按翻译快捷键也可恢复最近一次替换。</p>
+    <div class="checks"><label class="check"><input id="input-option-autoApply" type="checkbox" aria-describedby="input-apply-help">翻译完成后自动写回输入区域</label><label class="check"><input id="input-option-includeOriginal" type="checkbox">写回时同时保留原文</label></div>
+    <p id="input-apply-help" class="muted">默认直接写回，不弹出结果卡；输入区内的小圆点默认不修改内容；先点击圆点展开翻译图标，再点击图标翻译成目标语言。完成后图标显示绿色勾，再点图标还原，不显示文字反馈弹窗。关闭自动写回后可先预览，再选择“应用”。输入内容、焦点或可编辑状态变化时停止写回，无法安全写入的译文仍可复制。</p>
+    <label id="input-display-order-field" hidden>原文与译文的写回顺序<select id="input-option-displayOrder"></select></label>
+    <div class="interaction-subsection"><label for="input-option-disabledSites">禁用输入翻译的网站（每行一个，最多 100 项）</label><textarea id="input-option-disabledSites" class="rule-list" rows="3" maxlength="200100" placeholder="billing.example" spellcheck="false" aria-describedby="input-sites-help input-option-disabledSites-error"></textarea><p id="input-sites-help" class="muted">支持域名、HTTP/HTTPS 地址和路径通配符 * / **，每行最多 2000 字符。</p><p id="input-option-disabledSites-error" class="field-error" role="alert" hidden></p></div>
+  </div>
+  <div class="actions"><button id="reset-input-options" type="button">恢复输入交互默认值</button><span class="muted">恢复本区的启用状态、服务、语言与交互选项；保留其他分区。</span></div>
+</section>
+
+<section id="subtitles" class="card settings-section" aria-labelledby="subtitles-heading">
+  <div class="section-heading"><h2 id="subtitles-heading">YouTube 字幕与学习</h2><p class="muted">播放器中使用“译”开关、字幕设置和列表按钮。视频需要提供可用字幕，并开启 CC。</p></div>
+  <label class="check"><input type="checkbox" id="subtitles-enabled">启用 YouTube 字幕翻译和侧边列表</label>
+  <div class="form-grid">
+    <label>字幕翻译服务<select id="subtitle-provider"></select></label>
+    <label>字幕目标语言<select id="subtitle-target-language"></select></label>
+    <label>视频字幕显示模式<select id="subtitle-style-displayMode"></select></label>
+    <label>视频字幕显示顺序<select id="subtitle-style-displayOrder"></select></label>
+  </div>
+  <label class="check"><input id="subtitle-style-hideTranslation" type="checkbox">学习时模糊译文，悬停或聚焦后显示</label>
+  <p class="muted">选中字幕文字会暂停播放并固定字幕；取消选中时恢复由本扩展暂停的播放。拖动视频字幕的空白背景可调整位置，文字区域仍用于选词。</p>
+  <p class="muted">右侧字幕列表使用独立的阅读样式，固定显示原文与译文。下面的字体、颜色、显示顺序和位置只影响视频浮层；“模糊译文”同时用于列表练习。</p>
+  <details class="advanced-style"><summary>视频浮层的字体、背景与位置</summary>
+    <div class="subtitle-font-grid">
+      <fieldset><legend>原文</legend><div class="form-grid">
+        <label>字号（px）<input id="subtitle-style-sourceFontSize" type="number" min="12" max="72" step="1"></label>
+        <label>文字颜色<input id="subtitle-style-sourceColor" type="color" value="#ffffff"></label>
+        <label>字体粗细<select id="subtitle-style-sourceWeight"></select></label>
+        <label>描边 / 阴影<select id="subtitle-style-sourceStroke"></select></label>
+      </div></fieldset>
+      <fieldset><legend>译文</legend><div class="form-grid">
+        <label>字号（px）<input id="subtitle-style-targetFontSize" type="number" min="12" max="72" step="1"></label>
+        <label>文字颜色<input id="subtitle-style-targetColor" type="color" value="#ffffff"></label>
+        <label>字体粗细<select id="subtitle-style-targetWeight"></select></label>
+        <label>描边 / 阴影<select id="subtitle-style-targetStroke"></select></label>
+      </div></fieldset>
+    </div>
+    <div class="form-grid">
+      <label>字体名称或字体栈<input id="subtitle-style-fontFamily" type="text" maxlength="120" placeholder="system-ui, sans-serif" autocomplete="off"></label>
+      <label>背景颜色<input id="subtitle-style-backgroundColor" type="color" value="#000000"></label>
+      <label>背景范围<select id="subtitle-style-backgroundMode"></select></label>
+      <label>背景不透明度（%）<input id="subtitle-style-backgroundOpacity" type="number" min="0" max="100" step="5"></label>
+      <label>字幕位置<select id="subtitle-style-position"></select></label>
+      <label>距上 / 下边缘（px）<input id="subtitle-style-offset" type="number" min="0" max="300" step="5"></label>
+      <label>最大宽度（播放器的 %）<input id="subtitle-style-maxWidth" type="number" min="40" max="100" step="1"></label>
+    </div>
+  </details>
+  <div class="preview-heading"><strong>视频字幕效果预览</strong><span>可悬停或用 Tab 聚焦译文</span></div>
+  <div class="subtitle-preview-stage"><div id="subtitle-preview-box" class="subtitle-preview-box"><div id="subtitle-preview-source-line" class="subtitle-preview-line"><span id="subtitle-preview-source" lang="en">Take a moment to read the words.</span></div><div id="subtitle-preview-target-line" class="subtitle-preview-line"><span id="subtitle-preview-target" lang="zh-CN" tabindex="0">停留片刻，读懂这些文字。</span></div></div></div>
+  <div class="actions"><button id="reset-subtitle-style" type="button">恢复字幕样式默认值</button><span class="muted">保留字幕服务和目标语言选择。</span></div>
+</section>
+<section id="providers" class="card settings-section"><div class="section-heading"><div><h2>翻译服务</h2><p class="muted">免费服务可直接使用。自配 API 可以添加多个独立实例。</p></div></div>
+<div class="provider-layout"><aside><div id="provider-list" class="provider-list" aria-label="翻译服务列表"></div><label>添加自配服务<select id="provider-type"><option value="openai">OpenAI 兼容 API</option><option value="gemini">Google Gemini</option><option value="anthropic">Anthropic Claude</option><option value="azure">Azure Translator</option><option value="deepl">DeepL API</option><option value="deeplx">DeepLX / 自建接口</option><option value="ollama">Ollama</option></select></label><button id="add-provider" type="button">＋ 添加实例</button></aside>
+<div id="provider-form"><p id="provider-kind" class="eyebrow"></p><label>显示名称<input id="provider-name" type="text" maxlength="100" autocomplete="off"></label><label class="check"><input id="provider-enabled" type="checkbox">在服务选择器中启用</label>
+<p id="free-notice" class="notice">无需账号或 API Key。免费网页接口的可用性和限流由服务方决定。</p>
+<div id="custom-fields"><label>API 地址<input id="provider-baseUrl" type="url" spellcheck="false" autocomplete="off"></label><p class="muted">留空使用该类型默认地址；DeepLX 需填写自己的接口地址。</p>
+<label>API Key<div class="input-action"><input id="provider-apiKey" type="password" autocomplete="off" spellcheck="false"><button id="show-key" type="button">显示</button></div></label><p id="key-help" class="muted"></p>
+<div class="form-grid"><label id="model-field">模型名<input id="provider-model" type="text" placeholder="手动填写完整模型名" autocomplete="off" spellcheck="false"></label><label id="temperature-field">温度<input id="provider-temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用服务默认"></label><label id="region-field">Azure 区域<input id="provider-region" type="text" placeholder="例如 eastasia" autocomplete="off" spellcheck="false"></label></div></div>
+<div class="actions"><button id="test-provider" type="button">测试连接</button><button id="delete-provider" class="danger" type="button">删除此实例</button></div><p id="test-status" class="status" role="status" aria-live="polite"></p></div></div></section>
+<section id="backup" class="card settings-section"><h2>本地备份与导入</h2><p class="muted">导出本机设置以备份或迁移。默认不包含 API Key；可导入 Kuai translate 或可识别的旧版翻译服务、快捷键和样式配置。</p><label class="check"><input id="include-secrets" type="checkbox">导出时包含 API Key（备份文件将明文保存密钥）</label><div class="actions"><button id="export-settings" type="button">导出设置</button><label class="file-button">导入设置<input id="import-settings" type="file" accept=".json,application/json"></label></div></section>
+<footer class="save-bar"><p id="status" class="status" role="status" aria-live="polite">加载设置…</p><button id="retry-save" type="button" hidden>重试保存</button><button id="reload-settings" type="button" hidden>重新读取（放弃未保存修改）</button></footer></main></div>
+<script type="module" src="src/ui/options.js"></script></body></html>

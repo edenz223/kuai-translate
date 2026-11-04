@@ -1,0 +1,15 @@
+{
+  "name": "kuai-translate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Independent, dependency-free browser translation extension with free services, custom APIs and YouTube subtitle study tools.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test",
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs",
+    "package": "node scripts/package.mjs"
+  }
+}
