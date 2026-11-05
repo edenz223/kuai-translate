@@ -62,6 +62,11 @@ async function connect(url){
   let next=0;const pending=new Map();
   ws.addEventListener('message',event=>{
     const message=JSON.parse(event.data);
+    if(message.method==='Fetch.requestPaused'){
+      ws.send(JSON.stringify({id:++next,method:'Fetch.fulfillRequest',params:{requestId:message.params.requestId,responseCode:200,
+        responseHeaders:[{name:'Content-Type',value:'text/html; charset=utf-8'}],
+        body:Buffer.from('<!doctype html><html><head><title>YouTube bootstrap fixture</title></head><body><p>YouTube homepage</p></body></html>').toString('base64')}}));
+    }
     if(message.method==='Runtime.exceptionThrown')exceptions.push(message.params.exceptionDetails);
     if(message.id&&pending.has(message.id)){
       const {resolve,reject,timer}=pending.get(message.id);pending.delete(message.id);clearTimeout(timer);
@@ -94,8 +99,18 @@ try{
   const worker=await until(async()=>(await targets()).find(target=>target.type==='service_worker'&&target.url.includes('/src/background/index.js')),'MV3 service worker');
   const extensionOrigin=new URL(worker.url).origin==='null'?worker.url.split('/').slice(0,3).join('/'):new URL(worker.url).origin;
   async function page(url){
-    const target=await fetch(base+'/json/new?'+encodeURIComponent(url),{method:'PUT'}).then(response=>response.json());
+    const target=await fetch(base+'/json/new?'+encodeURIComponent((process.env.SMOKE_BLOCK_MODULE_FETCH||process.env.SMOKE_YOUTUBE_BOOTSTRAP)?'about:blank':url),{method:'PUT'}).then(response=>response.json());
     const cdp=await connect(target.webSocketDebuggerUrl);await cdp('Runtime.enable');
+    if(process.env.SMOKE_BLOCK_MODULE_FETCH&&url===fixtureURL){
+      await cdp('Network.enable');
+      await cdp('Network.setBlockedURLs',{urls:['chrome-extension://*/src/*']});
+    }
+    if(process.env.SMOKE_YOUTUBE_BOOTSTRAP&&url==='https://www.youtube.com/'){
+      await cdp('Network.enable');
+      await cdp('Network.setBlockedURLs',{urls:['chrome-extension://*/src/*']});
+      await cdp('Fetch.enable',{patterns:[{urlPattern:'https://www.youtube.com/*',requestStage:'Request'}]});
+    }
+    if(process.env.SMOKE_BLOCK_MODULE_FETCH||process.env.SMOKE_YOUTUBE_BOOTSTRAP)await cdp('Page.navigate',{url});
     await until(()=>evaluate(cdp,'document.readyState==="complete"'),'document ready');
     return cdp;
   }
@@ -202,8 +217,16 @@ try{
     }
     pages[name]=await evaluate(cdp,'({title:document.title,controls:document.querySelectorAll("button,input,select,textarea").length})');
   }
+  if(process.env.SMOKE_YOUTUBE_BOOTSTRAP){
+    await page('https://www.youtube.com/');
+    await until(async()=>evaluate(popup,`(async()=>{
+      const [tab]=await chrome.tabs.query({url:'https://www.youtube.com/*'});
+      const reply=tab&&await chrome.tabs.sendMessage(tab.id,{type:'KUAI_PAGE_STATUS'},{frameId:0});
+      return reply?.ok&&reply.value?.phase==='ready';
+    })()`),'YouTube origin bootstrap with module fetch blocked');
+  }
   assert.deepEqual(exceptions,[]);
-  console.log(JSON.stringify({browser:'Chromium',serviceWorker:worker.url,popupProviders:4,settingsSave:true,modelDiscoveryAndSelection:true,pageTranslation:translated,pageRestore:true,pages,uncaughtExceptions:exceptions.length},null,2));
+  console.log(JSON.stringify({browser:'Chromium',serviceWorker:worker.url,popupProviders:4,settingsSave:true,moduleFetchBlocked:!!process.env.SMOKE_BLOCK_MODULE_FETCH,youtubeBootstrap:!!process.env.SMOKE_YOUTUBE_BOOTSTRAP,modelDiscoveryAndSelection:true,pageTranslation:translated,pageRestore:true,pages,uncaughtExceptions:exceptions.length},null,2));
 }finally{
   for(const socket of sockets)socket.close();
   if(browser){browser.kill('SIGTERM');await new Promise(resolve=>{if(browser.exitCode!==null)return resolve();browser.once('exit',resolve);setTimeout(resolve,2000);});}

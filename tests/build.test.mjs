@@ -115,3 +115,12 @@ test('compiler paths accept TypeScript slash normalization on Windows',()=>{
   assert.equal(emittedRuntimePath('/fixture/dist/public/content-loader.js','/fixture/dist',path.posix),
     '/fixture/dist/content-loader.js');
 });
+
+test('built content bootstrap runs without fetching cross-origin extension modules',async()=>{
+  const ts=await import('typescript');
+  const source=await fs.readFile(new URL('../dist/content-loader.js',import.meta.url),'utf8');
+  const tree=ts.default.createSourceFile('content-loader.js',source,ts.default.ScriptTarget.Latest,true);
+  const imports=[];
+  function visit(node){if(ts.default.isImportDeclaration(node)||node.kind===ts.default.SyntaxKind.ImportKeyword)imports.push(node.getText(tree));ts.default.forEachChild(node,visit);}
+  visit(tree);assert.deepEqual(imports,[],'Content bootstrap must be a self-contained classic script, including YouTube startup');
+});

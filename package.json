@@ -20,6 +20,7 @@
   "devDependencies": {
     "@types/chrome": "^0.3.7",
     "@types/node": "^24.19.2",
+    "esbuild": "^0.28.2",
     "typescript": "^6.0.3"
   },
   "packageManager": "pnpm@12.6.0"

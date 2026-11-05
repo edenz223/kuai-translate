@@ -4,9 +4,9 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 function run(failures,scenario={}) {
-  const path=fileURLToPath(new URL('../dist/content-loader.js',import.meta.url));
+  const path=fileURLToPath(new URL('../public/content-loader.ts',import.meta.url));
   const program=`
-    import vm from 'node:vm';import fs from 'node:fs';
+    import vm from 'node:vm';import fs from 'node:fs';import ts from 'typescript';
     const scenario=${JSON.stringify(scenario)};
     let attempts=0,imports=0,nextTimer=0,pagehidden=false;const timers=new Map(),delays=[],warnings=[],listeners=new Map(),cleared=[];
     const context=vm.createContext({chrome:{runtime:{getURL:()=> 'chrome-extension://kuai/src/content/index.js'}},console:{warn:(...args)=>warnings.push(args.join(' '))},
@@ -15,7 +15,7 @@ function run(failures,scenario={}) {
       removeEventListener:(type,fn)=>listeners.get(type)?.delete(fn)});
     const module=new vm.SyntheticModule(['start'],function(){this.setExport('start',async()=>{attempts++;if(attempts<=${failures}){const error=new Error('private-details-must-not-log');error.code=scenario.errorCode||'TEMPORARY';throw error;}return {ready:true};});},{context});
     await module.link(()=>{});await module.evaluate();
-    const script=new vm.Script(fs.readFileSync(${JSON.stringify(path)},'utf8'),{importModuleDynamically:async()=>{imports++;return module;}});
+    const script=new vm.Script(ts.transpileModule(fs.readFileSync(${JSON.stringify(path)},'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText,{importModuleDynamically:async()=>{imports++;return module;}});
     script.runInContext(context);script.runInContext(context);
     for(let i=0;i<20;i++){
       await new Promise(setImmediate);
