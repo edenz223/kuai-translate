@@ -1,6 +1,8 @@
 import type {CaptionCue,CaptionTrack,JsonCaptionEvent} from './types.js';
 interface RawTrack {baseUrl?:unknown;languageCode?:unknown;kind?:unknown;name?:string|{simpleText?:string;runs?:{text?:string}[]};vssId?:unknown;id?:unknown}
 import {segmentAutomaticEvents} from './asr-segmentation.js';
+import {groupAuthoredCues} from './cue-grouping.js';
+export {groupAuthoredCues} from './cue-grouping.js';
 /** Parse caption data, never markup into the page. All returned text is rendered as textContent. */
 const MAX_BODY=4_000_000;
 const entities:Record<string,string>={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",nbsp:' ',lrm:'\u200e',rlm:'\u200f'};
@@ -12,12 +14,19 @@ export function captionText(value:unknown,{trim=true}={}) {
     }).replace(/\r/g,'');
   return trim?text.trim():text;
 }
+export function captionVoice(value:unknown):string|undefined {
+  const voices=new Set<string>();
+  for(const match of String(value??'').matchAll(/<v(?:\.[\w-]+)*\s+([^>]+)>/giu)){
+    const name=captionText(match[1]).replace(/\s+/gu,' ').trim();if(name)voices.add(name);
+  }
+  return voices.size?[...voices].join('\n'):undefined;
+}
 function normalized(cues:CaptionCue[],{alreadyClean=false}={}):CaptionCue[] {
   const result:CaptionCue[]=[],seen=new Set<string>();
   for(const cue of cues.sort((a,b)=>a.start-b.start)) {
-    const text=alreadyClean?cue.text.trim():captionText(cue.text),key=cue.start+'|'+cue.end+'|'+text;
+    const text=alreadyClean?cue.text.trim():captionText(cue.text),key=cue.start+'|'+cue.end+'|'+text+'|'+(cue.voice||'');
     if(!Number.isFinite(cue.start)||!Number.isFinite(cue.end)||cue.start<0||cue.end<=cue.start||!text||seen.has(key))continue;
-    seen.add(key);result.push({start:cue.start,end:cue.end,text,translation:'',status:'pending'});
+    seen.add(key);result.push({start:cue.start,end:cue.end,text,...(cue.voice?{voice:cue.voice}:{}),translation:'',status:'pending'});
     if(result.length===50_000)break;
   }
   return result;
@@ -50,7 +59,7 @@ function vttCues(body:string) {
     const index=lines.findIndex(line=>line.includes('-->'));
     if(index<0)continue;
     const match=lines[index].match(/([\d:.,]+)\s+-->\s+([\d:.,]+)/);
-    if(match)cues.push({start:timestamp(match[1]),end:timestamp(match[2]),text:lines.slice(index+1).join('\n')});
+    if(match){const text=lines.slice(index+1).join('\n'),voice=captionVoice(text);cues.push({start:timestamp(match[1]),end:timestamp(match[2]),text,...(voice?{voice}:{})});}
   }
   return normalized(cues);
 }
@@ -64,14 +73,15 @@ function xmlCues(body:string) {
   }
   return normalized(cues);
 }
-export function parseTimedText(input:unknown,options?:{kind?:string}):CaptionCue[] {
-  if(input && typeof input==='object')return jsonCues(input as {events?:JsonCaptionEvent[]},options);
+export function parseTimedText(input:unknown,options?:{kind?:string;groupPhrases?:boolean}):CaptionCue[] {
+  const playback=(cues:CaptionCue[])=>options?.groupPhrases&&options.kind!=='asr'?groupAuthoredCues(cues):cues;
+  if(input && typeof input==='object')return playback(jsonCues(input as {events?:JsonCaptionEvent[]},options));
   if(typeof input!=='string'||input.length>MAX_BODY)throw new Error('字幕数据无效或过大');
   const body=input.trim();
   if(!body)return [];
-  if(body[0]==='{')return jsonCues(JSON.parse(body),options);
-  if(/^WEBVTT|\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}\s+-->/m.test(body))return vttCues(body);
-  if(/<(?:transcript|timedtext)\b/i.test(body))return xmlCues(body);
+  if(body[0]==='{')return playback(jsonCues(JSON.parse(body),options));
+  if(/^WEBVTT|\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}\s+-->/m.test(body))return playback(vttCues(body));
+  if(/<(?:transcript|timedtext)\b/i.test(body))return playback(xmlCues(body));
   throw new Error('无法识别字幕格式');
 }
 export function videoIdFromUrl(value:string|URL) {

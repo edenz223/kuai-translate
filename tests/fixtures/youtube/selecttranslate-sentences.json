@@ -1,0 +1,148 @@
+{
+  "source": "Local SelectTranslate content.js GXe; constants K1=12 and d3=120; extracted pure reference behavior, 2026-11-05",
+  "cases": [
+    {
+      "name": "unfinished sentence spans fourteen seconds",
+      "cues": [
+        {
+          "start": 0,
+          "end": 6,
+          "text": "The result depends on careful measurements"
+        },
+        {
+          "start": 6,
+          "end": 14,
+          "text": "and should stay together until the sentence ends."
+        }
+      ],
+      "expected": [
+        "The result depends on careful measurements and should stay together until the sentence ends."
+      ]
+    },
+    {
+      "name": "multiple sentences inside one source cue",
+      "cues": [
+        {
+          "start": 0,
+          "end": 8,
+          "text": "The first experiment confirmed the result. The second experiment used a different sample."
+        }
+      ],
+      "expected": [
+        "The first experiment confirmed the result.",
+        "The second experiment used a different sample."
+      ]
+    },
+    {
+      "name": "short sentences in one source window",
+      "cues": [
+        {
+          "start": 0,
+          "end": 5,
+          "text": "Yes. No. That is correct."
+        }
+      ],
+      "expected": [
+        "Yes. No. That is correct."
+      ]
+    },
+    {
+      "name": "complete short source sentences remain distinct",
+      "cues": [
+        {
+          "start": 0,
+          "end": 2,
+          "text": "Yes."
+        },
+        {
+          "start": 2,
+          "end": 4,
+          "text": "No."
+        },
+        {
+          "start": 4,
+          "end": 8,
+          "text": "That is correct."
+        }
+      ],
+      "expected": [
+        "Yes.",
+        "No.",
+        "That is correct."
+      ]
+    },
+    {
+      "name": "screenshot sentence across two source windows",
+      "cues": [
+        {
+          "start": 259,
+          "end": 261,
+          "text": "There you'd find a bunch of particles whizzing around"
+        },
+        {
+          "start": 261,
+          "end": 264,
+          "text": "as fast as tiny bullets."
+        }
+      ],
+      "expected": [
+        "There you'd find a bunch of particles whizzing around as fast as tiny bullets."
+      ]
+    },
+    {
+      "name": "long sentence uses comma and balanced cuts",
+      "cues": [
+        {
+          "start": 0,
+          "end": 15,
+          "text": "After reading about this online and troubleshooting it a few times, I realized that this wasn’t even a Graphene issue but more of an Android issue itself."
+        }
+      ],
+      "expected": [
+        "After reading about this online and troubleshooting it a few times,",
+        "I realized that this wasn’t even a Graphene issue but more of an Android issue itself."
+      ]
+    },
+    {
+      "name": "long unpunctuated sentence uses bounded chunks",
+      "cues": [
+        {
+          "start": 0,
+          "end": 20,
+          "text": "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour"
+        }
+      ],
+      "expected": [
+        "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen",
+        "sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour"
+      ]
+    },
+    {
+      "name": "sentence length ignores slow speech duration",
+      "cues": [
+        {
+          "start": 0,
+          "end": 18,
+          "text": "What I want you to remember is that the result depends on how carefully you check the data."
+        }
+      ],
+      "expected": [
+        "What I want you to remember is that the result depends on how carefully you check the data."
+      ]
+    },
+    {
+      "name": "decimal and thousands labels are not sentence boundaries",
+      "cues": [
+        {
+          "start": 0,
+          "end": 8,
+          "text": "The team recorded 3.14 units and 1,000 entries. The results were checked again."
+        }
+      ],
+      "expected": [
+        "The team recorded 3.14 units and 1,000 entries.",
+        "The results were checked again."
+      ]
+    }
+  ]
+}

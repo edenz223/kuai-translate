@@ -102,9 +102,9 @@ test('ASR timed multiline repetition at distinct anchors is actual repeated spee
   assert.deepEqual(api.parseTimedText(input,{kind:'asr'}).flatMap(c=>c.text.split(/\s+/)),['Go','Go','Go','Go']);
 });
 test('ASR partial offsets retain source order and text around a late anchor',()=>{
-  const input={events:[{tStartMs:0,dDurationMs:10000,segs:[{utf8:'First.',tOffsetMs:8000},{utf8:' Second.'}]}]};
+  const input={events:[{tStartMs:0,dDurationMs:10000,segs:[{utf8:'The first sentence.',tOffsetMs:8000},{utf8:' The second sentence.'}]}]};
   const cues=api.parseTimedText(input,{kind:'asr'});
-  assert.deepEqual(cues.map(c=>c.text),['First.','Second.']);
+  assert.deepEqual(cues.map(c=>c.text),['The first sentence.','The second sentence.']);
   assert.equal(cues[0].start,8);assert.equal(cues.at(-1).end,10);
   assert.ok(cues.every((c,i)=>c.end>c.start&&(!i||c.start>=cues[i-1].end)));
 });
@@ -182,16 +182,21 @@ test('ASR decimal punctuation split across timed segments is not a sentence brea
   assert.equal(cues.map(c=>c.text).join(' '),first+second);
   assert.ok(cues.some(c=>c.text.includes('3.14')));
 });
-test('ASR keeps a real numeric sentence ending separate from the next numbered sentence',()=>{
+test('ASR retains numeric sentence-like text according to native sentence segmentation',()=>{
   const cues=api.parseTimedText({events:[{tStartMs:0,dDurationMs:5000,segs:[{utf8:'The count is 3. 14 people came later.'}]}]},{kind:'asr'});
-  assert.deepEqual(cues.map(c=>c.text),['The count is 3.','14 people came later.']);
+  assert.deepEqual(cues.map(c=>c.text),['The count is 3. 14 people came later.']);
 });
-test('ASR large phrase output respects the parser cue cap without argument-stack overflow',()=>{
-  const body=JSON.stringify({events:[{tStartMs:0,dDurationMs:1500000000,segs:[{utf8:'甲'.repeat(150000)}]}]});
+test('ASR large punctuation-free phrases stay text-bounded without argument-stack overflow',()=>{
+  const text='甲'.repeat(150000);
+  const body=JSON.stringify({events:[{tStartMs:0,dDurationMs:1500000000,segs:[{utf8:text}]}]});
   const cues=api.parseTimedText(body,{kind:'asr'});
-  assert.equal(cues.length,50000);
-  assert.equal(cues[0].text,'甲');assert.equal(cues.at(-1).text,'甲');
-  assert.equal(cues[0].start,0);assert.equal(cues.at(-1).end,500000);
+  assert.equal(cues.map(c=>c.text).join(''),text);assert.ok(cues.every(c=>c.text.length<=120));
+  assert.equal(cues[0].start,0);assert.equal(cues.at(-1).end,1500000);
+});
+test('ASR parser retains its global cue count cap',()=>{
+  const events=Array.from({length:50001},(_,index)=>({tStartMs:index*100,dDurationMs:100,segs:[{utf8:'Hello.'}]}));
+  const cues=api.parseTimedText({events},{kind:'asr'});
+  assert.equal(cues.length,50000);assert.equal(cues[0].start,0);assert.equal(cues.at(-1).end,5000);
 });
 test('ASR ordinary spoken counting remains bounded without losing numeric words',()=>{
   for(const first of [1,100]){
@@ -230,4 +235,163 @@ test('ASR fullwidth-comma counting selects clause boundaries instead of one nume
   assert.ok(cues.every(c=>c.text.length<=120&&c.end-c.start<=8.001));
   assert.ok(cues.every((c,index)=>c.end>c.start&&(!index||c.start>=cues[index-1].end)));
   assert.equal(cues[0].start,0);assert.equal(cues.at(-1).end,12);
+});
+
+test('ASR retains a slow short sentence instead of splitting its subject from its predicate',()=>{
+  const text='What I want you to remember is that the result depends on how carefully you check the data';
+  const cues=api.parseTimedText({events:[{tStartMs:0,dDurationMs:10000,segs:[{utf8:text}]}]},{kind:'asr'});
+  assert.deepEqual(cues.map(c=>[c.start,c.end,c.text]),[[0,10,text]]);
+});
+test('ASR follows the reference 120-character target for long punctuation-free sentences',()=>{
+  const text='The reason we decided to postpone the release was that the team needed more time to verify all the changes before making them available to users';
+  const cues=api.parseTimedText({events:[{tStartMs:0,dDurationMs:7000,segs:[{utf8:text}]}]},{kind:'asr'});
+  assert.equal(cues.map(c=>c.text).join(' '),text);assert.equal(cues.length,2);assert.ok(cues.every(c=>c.text.length<=120));
+});
+test('ASR long clauses beyond the reference limit remain bounded without losing text',()=>{
+  const first='After carefully reviewing the source material and checking every reported issue with the people who originally collected the data,';
+  const second='we decided to repeat the experiment using a separate set of measurements.';
+  assert.ok(first.length>120&&first.length<=160);
+  const cues=api.parseTimedText({events:[{tStartMs:0,dDurationMs:9000,segs:[{utf8:first+' '+second}]}]},{kind:'asr'});
+  assert.equal(cues.map(c=>c.text).join(' '),first+' '+second);assert.ok(cues.every(c=>c.text.length<=120));
+});
+test('ASR long English speech follows reference lexical cut limits without losing words',()=>{
+  const text='The team examined every reported issue and collected useful measurements in order to understand what had happened and prepare a clear explanation for everyone involved';
+  const cues=api.parseTimedText({events:[{tStartMs:0,dDurationMs:14000,segs:[{utf8:text}]}]},{kind:'asr'});
+  assert.equal(cues.map(c=>c.text).join(' '),text);assert.ok(cues.length>1);
+  assert.ok(cues.every(c=>c.text.length<=120));
+});
+test('ASR forced Chinese cuts retain complete lexical words',()=>{
+  const text='数据'.repeat(91);
+  const cues=api.parseTimedText({events:[{tStartMs:0,dDurationMs:14000,segs:[{utf8:text}]}]},{kind:'asr'});
+  assert.equal(cues.map(c=>c.text).join(''),text);assert.ok(cues.length>1);
+  assert.ok(cues.every(c=>/^(数据)+$/.test(c.text)));
+  assert.ok(cues.every(c=>c.text.length<=160&&c.end-c.start<=10.001));
+});
+
+test('ASR soft extensions remain bounded across long speech with repeated clause markers',()=>{
+  const text=Array.from({length:80},()=> 'We examine the data carefully because the result matters to every person on the team').join(' ');
+  const cues=api.parseTimedText({events:[{tStartMs:0,dDurationMs:180000,segs:[{utf8:text}]}]},{kind:'asr'});
+  assert.equal(cues.map(c=>c.text).join(' '),text);assert.ok(cues.length>1);
+  assert.ok(cues.every(c=>c.text.length<=160&&c.end-c.start<=10.001));
+  assert.ok(cues.every((c,i)=>c.end>c.start&&(!i||c.start>=cues[i-1].end)));
+  assert.equal(cues[0].start,0);assert.equal(cues.at(-1).end,180);
+});
+
+test('ASR short phrases are never split solely because they last eighteen seconds',()=>{
+  for(const text of ['in order to','in order to finish','as well as the result']){
+    const cues=api.parseTimedText({events:[{tStartMs:0,dDurationMs:18000,segs:[{utf8:text}]}]},{kind:'asr'});
+    assert.equal(cues.map(c=>c.text).join(' '),text);
+    assert.equal(cues.length,1);assert.equal(cues[0].start,0);assert.equal(cues[0].end,18);
+    assert.ok(cues.every((c,i)=>c.end>c.start&&(!i||c.start>=cues[i-1].end)));
+  }
+});
+
+test('authored playback grouping joins the screenshot sentence without changing raw parsing',()=>{
+  const first="There you'd find a bunch of particles\nwhizzing around",last='as fast as tiny bullets.';
+  const input={events:[{tStartMs:259000,dDurationMs:2000,segs:[{utf8:first}]},{tStartMs:261000,dDurationMs:3000,segs:[{utf8:last}]}]};
+  assert.equal(api.parseTimedText(input).length,2);
+  const cues=api.parseTimedText(input,{groupPhrases:true});
+  assert.deepEqual(cues.map(c=>[c.start,c.end,c.text]),[[259,264,first+' '+last]]);
+});
+test('authored phrase grouping applies to fetched VTT and XML captions too',()=>{
+  const vtt='WEBVTT\n\n00:00.000 --> 00:02.000\nThere are particles\n\n00:02.000 --> 00:04.000\nmoving very quickly.';
+  const xml='<transcript><text start="0" dur="2">There are particles</text><text start="2" dur="2">moving very quickly.</text></transcript>';
+  for(const source of [vtt,xml])assert.deepEqual(api.parseTimedText(source,{groupPhrases:true}).map(c=>[c.start,c.end,c.text]),[[0,4,'There are particles moving very quickly.']]);
+});
+
+test('authored grouping preserves sentence, turn, silence and overlap boundaries',()=>{
+  const cases=[
+    [{start:0,end:2,text:'Already complete.'},{start:2,end:4,text:'A different sentence.'}],
+    [{start:0,end:2,text:'First thought'},{start:3,end:5,text:'after a pause.'}],
+    [{start:0,end:3,text:'First voice'},{start:2,end:4,text:'another voice.'}],
+    [{start:0,end:2,text:'First thought'},{start:2,end:4,text:'Bob: another voice.'}],
+    [{start:0,end:2,text:'First thought'},{start:2,end:4,text:'- Another voice.'}],
+    [{start:0,end:2,text:'First thought'},{start:2,end:4,text:'[Music]'}],
+    [{start:0,end:2,text:'Alice: First thought'},{start:2,end:4,text:'a continuation'}],
+  ];
+  for(const cues of cases){
+    const original=structuredClone(cues);
+    assert.deepEqual(api.groupAuthoredCues(cues).map(c=>[c.start,c.end,c.text]),original.map(c=>[c.start,c.end,c.text]));
+    assert.deepEqual(cues,original);
+  }
+});
+test('authored grouping keeps abbreviations and CJK adjacency while clearing stale translations',()=>{
+  const source=[{start:0,end:1,text:'Dr.',translation:'old',status:'success'},{start:1,end:2,text:'Smith works here.'}];
+  assert.deepEqual(api.groupAuthoredCues(source).map(c=>[c.text,c.translation,c.status]),[['Dr. Smith works here.','','pending']]);
+  assert.equal(source[0].text,'Dr.');
+  assert.deepEqual(api.groupAuthoredCues([{start:0,end:1,text:'我们正在'},{start:1,end:3,text:'检查数据。'}]).map(c=>c.text),['我们正在检查数据。']);
+});
+
+test('authored Korean cue joins retain the word separator',()=>{
+  const cues=api.groupAuthoredCues([{start:0,end:2,text:'우리는 데이터를'},{start:2,end:4,text:'분석합니다.'}]);
+  assert.deepEqual(cues.map(c=>c.text),['우리는 데이터를 분석합니다.']);
+});
+test('VTT voice annotations keep speaker turns separate during playback grouping',()=>{
+  const source='WEBVTT\n\n00:00.000 --> 00:02.000\n<v Alice>I was thinking\n\n00:02.000 --> 00:04.000\n<v Bob>That will not work.';
+  const cues=api.parseTimedText(source,{groupPhrases:true});
+  assert.deepEqual(cues.map(c=>[c.start,c.end,c.text]),[[0,2,'I was thinking'],[2,4,'That will not work.']]);
+  const sameVoice=api.parseTimedText(source.replace('<v Bob>','<v Alice>'),{groupPhrases:true});
+  assert.deepEqual(sameVoice.map(c=>c.text),['I was thinking That will not work.']);
+});
+
+const selectTranslateCases=JSON.parse(readFileSync(new URL('./fixtures/youtube/selecttranslate-sentences.json',import.meta.url),'utf8'));
+for(const fixture of selectTranslateCases.cases)test('SelectTranslate reference: '+fixture.name,()=>{
+  const source='WEBVTT\n\n'+fixture.cues.map(cue=>{
+    const time=seconds=>'00:'+String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0')+'.000';
+    return time(cue.start)+' --> '+time(cue.end)+'\n'+cue.text;
+  }).join('\n\n');
+  const cues=api.parseTimedText(source,{groupPhrases:true});
+  assert.deepEqual(cues.map(c=>c.text),fixture.expected);
+  assert.equal(cues[0].start,fixture.cues[0].start);assert.equal(cues.at(-1).end,fixture.cues.at(-1).end);
+  assert.ok(cues.every((c,i)=>c.end>c.start&&(!i||c.start>=cues[i-1].end)));
+});
+
+test('ASR replaces an overlapping growing caption window instead of repeating its prefix',()=>{
+  const events=[
+    {tStartMs:0,dDurationMs:3000,segs:[{utf8:'We are'}]},
+    {tStartMs:1000,dDurationMs:3000,segs:[{utf8:'We are learning.'}]},
+  ];
+  const cues=api.parseTimedText({events},{kind:'asr'});
+  assert.deepEqual(cues.map(c=>[c.start,c.end,c.text]),[[0,4,'We are learning.']]);
+});
+test('ASR growing-window cleanup does not remove repeated or independent speech',()=>{
+  for(const [first,second,wWinId] of [['go go','go go',0],['one','ones',0],['We are','We are learning.',1]]){
+    const cues=api.parseTimedText({events:[
+      {tStartMs:0,dDurationMs:3000,wWinId:0,segs:[{utf8:first}]},
+      {tStartMs:1000,dDurationMs:3000,wWinId,segs:[{utf8:second}]},
+    ]},{kind:'asr'});
+    assert.equal(cues.map(c=>c.text).join(' '),first+' '+second);
+  }
+});
+
+test('native sentence boundaries inside compact Latin text never absorb the next subject',()=>{
+  for(const punctuation of ['!','?','!”']){
+    const first='This is the first question'+punctuation,last='Another sentence follows.',text=first+last;
+    for(const cues of [
+      api.groupAuthoredCues([{start:0,end:10,text}]),
+      api.parseTimedText({events:[{tStartMs:0,dDurationMs:10000,segs:[{utf8:text}]}]},{kind:'asr'}),
+    ]){
+      assert.deepEqual(cues.map(c=>c.text),[first,last]);
+      assert.ok(cues[0].end<=cues[1].start);assert.equal(cues[0].start,0);assert.equal(cues[1].end,10);
+    }
+  }
+});
+
+test('SelectTranslate numeric joins reconnect a thousands group split across source cues',()=>{
+  for(const comma of [',','，']){
+    const first='The sample contained 1'+comma,last='000 entries altogether.';
+    const cues=api.groupAuthoredCues([{start:0,end:2,text:first},{start:2,end:4,text:last}]);
+    assert.deepEqual(cues.map(c=>c.text),['The sample contained 1'+comma+'000 entries altogether.']);
+  }
+  const counting=api.groupAuthoredCues([{start:0,end:2,text:'The list is 100'},{start:2,end:4,text:'101 102.'}]);
+  assert.equal(counting.map(c=>c.text).join(' '),'The list is 100 101 102.');
+});
+
+test('ASR growing multiline windows retain the earlier lines when replacing their prefix',()=>{
+  const cues=api.parseTimedText({events:[
+    {tStartMs:0,dDurationMs:3000,segs:[{utf8:'first line\nsecond line'}]},
+    {tStartMs:1000,dDurationMs:3000,segs:[{utf8:'first line\nsecond line\nthird line.'}]},
+  ]},{kind:'asr'});
+  assert.equal(cues.map(c=>c.text).join(' ').replace(/\s+/g,' '),'first line second line third line.');
+  assert.equal(cues[0].start,0);assert.equal(cues.at(-1).end,4);
 });
