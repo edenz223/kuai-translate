@@ -12,7 +12,7 @@ interface YouTubeDataMessage {source?:unknown;videoId?:unknown;kind?:unknown;tra
 type BrowserEventCallback=(event:any)=>void;
 import selectionAPI from './selection.js';
 import sidebarAPI from './sidebar.js';
-import {parseTimedText,validateTrack,videoIdFromUrl,captionText} from './captions.js';
+import {parseTimedText,validateTrack,videoIdFromUrl,captionText,captionVoice,groupAuthoredCues} from './captions.js';
 import {createSubtitleSession} from './session.js';
 import {createCaptionView} from './overlay.js';
 import {subtitleStyle,subtitleLayoutKey} from './presentation.js';
@@ -107,8 +107,8 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     try {
       const tracks=Array.from(record.session.video.textTracks||[]),track=tracks.find(item=>item.mode==='showing')||tracks.find(item=>item.mode==='hidden');
       if(track?.cues?.length){
-        const cues=Array.from(track.cues).map(cue=>({start:cue.startTime,end:cue.endTime,text:captionText((cue as VTTCue).text)}));
-        installCues(record,cues,'native:'+track.language,{live:record.session.video.duration===Infinity});return;
+        const cues=Array.from(track.cues).map(cue=>{const text=(cue as VTTCue).text,voice=captionVoice(text);return{start:cue.startTime,end:cue.endTime,text:captionText(text),...(voice?{voice}:{})};});
+        installCues(record,record.session.video.duration===Infinity?cues:groupAuthoredCues(cues),'native:'+track.language,{live:record.session.video.duration===Infinity});return;
       }
     }catch{}
     const player=record.session.video.closest?.('.html5-video-player');
@@ -221,7 +221,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     const trackId=data.requestId?record.pending?.trackId:record.track?.id||responseTrack?.id||'captured';
     if(data.requestId)clearPending(record,false);
     try {
-      const cues=parseTimedText(data.body,{kind:ownTrack?.kind});
+      const cues=parseTimedText(data.body,{kind:ownTrack?.kind,groupPhrases:true});
       if(cues.length){
         if(!data.requestId)clearPending(record);
         record.failedTrack='';record.session.state.errorMessage='';installCues(record,cues,trackId,{live:record.session.video.duration===Infinity});return;

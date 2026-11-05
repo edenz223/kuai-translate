@@ -1,6 +1,6 @@
 import type {Settings} from '../shared/settings.js';
 
-export interface CaptionCue {start:number; end:number; text:string; translation?:string; status?:'pending'|'translating'|'success'|'error'; errorMessage?:string}
+export interface CaptionCue {start:number; end:number; text:string; voice?:string; translation?:string; status?:'pending'|'translating'|'success'|'error'; errorMessage?:string}
 export interface CurrentCaption {start:number;end:number;original:string;translation:string;status?:CaptionCue['status'];errorMessage:string}
 export interface CaptionTrack {id:string;baseUrl:string;languageCode:string;kind:string;name:string}
 export interface JsonSegment {utf8:string;tOffsetMs?:unknown}

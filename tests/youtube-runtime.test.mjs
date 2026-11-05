@@ -75,7 +75,7 @@ test('an identical remote timeline promotes live DOM fallback without replacing 
 });
 
 const fragmented=JSON.stringify({events:[{tStartMs:0,dDurationMs:1000,segs:[{utf8:'We are'}]},{tStartMs:1000,dDurationMs:2000,segs:[{utf8:' learning.'}]}]});
-test('requested ASR metadata normalizes the shared timeline while authored metadata preserves cues',async t=>{
+test('requested ASR and authored metadata both feed a phrase-level playback timeline',async t=>{
   const h=setup();t.after(()=>h.manager.stop());
   h.message({kind:'tracks',videoId:'abcdef12345',tracks:[{...track('en'),kind:'asr'}]});
   h.message({kind:'captions',videoId:'abcdef12345',requestId:requests(h).at(-1).requestId,body:fragmented});await settle();
@@ -84,7 +84,7 @@ test('requested ASR metadata normalizes the shared timeline while authored metad
   assert.equal(state.currentCaption.original,'We are learning.');
   h.message({kind:'tracks',videoId:'abcdef12345',tracks:[track('en')]});
   h.message({kind:'captions',videoId:'abcdef12345',requestId:requests(h).at(-1).requestId,body:fragmented});await settle();
-  assert.deepEqual(state.subtitlesList.map(c=>c.text),['We are','learning.']);
+  assert.deepEqual(state.subtitlesList.map(c=>c.text),['We are learning.']);
 });
 test('late passive ASR response cannot overwrite a same-language manual track',async t=>{
   const h=setup();t.after(()=>h.manager.stop());
@@ -118,7 +118,7 @@ test('a reused track id with changed ASR kind cancels and replaces the previous 
   h.message({kind:'captions',videoId:'abcdef12345',requestId:old.requestId,body:fragmented});
   assert.equal(h.bridge.getSessions()[0].state.subtitlesList.length,0);
   h.message({kind:'captions',videoId:'abcdef12345',requestId:replacement.requestId,body:fragmented});await settle();
-  assert.deepEqual(h.bridge.getSessions()[0].state.subtitlesList.map(c=>c.text),['We are','learning.']);
+  assert.deepEqual(h.bridge.getSessions()[0].state.subtitlesList.map(c=>c.text),['We are learning.']);
 });
 
 
@@ -165,4 +165,44 @@ test('signed URL renewal replaces an old in-flight request before its empty resp
   h.message({kind:'captions',videoId:'abcdef12345',requestId:first.requestId,body:''});
   const next=requests(h).at(-1);caption(h,next.requestId,'Renewed complete');
   assert.equal(h.bridge.getSessions()[0].state.subtitlesList[0].text,'Renewed complete');
+});
+
+test('authored screenshot sentence stays whole in the overlay and shared reading timeline',async t=>{
+  const h=setup();t.after(()=>h.manager.stop());tracks(h,'en');h.video.currentTime=263;
+  const first="There you'd find a bunch of particles\nwhizzing around",last='as fast as tiny bullets.',full=first+' '+last;
+  h.message({kind:'captions',videoId:'abcdef12345',requestId:requests(h).at(-1).requestId,body:JSON.stringify({events:[
+    {tStartMs:259000,dDurationMs:2000,segs:[{utf8:first}]},
+    {tStartMs:261000,dDurationMs:3000,segs:[{utf8:last}]},
+    {tStartMs:264000,dDurationMs:4000,segs:[{utf8:'And the particles also attract each other.'}]},
+  ]})});await settle();
+  const [session]=h.bridge.getSessions(),state=h.bridge.getState(session.id),host=h.h.doc.getElementById('kuai-captions-window-'+session.id);
+  assert.equal(state.subtitlesList[0].text,full);assert.equal(state.subtitlesList[0].start,259);assert.equal(state.subtitlesList[0].end,264);
+  for(const time of [259.5,261.5,263.5]){
+    h.video.currentTime=time;session.update();await settle();
+    assert.equal(state.currentCaption.original,full);
+    assert.equal(host.shadowRoot.querySelector('.original-text').textContent,full);
+    assert.equal(host.shadowRoot.querySelector('.translation-text').textContent,'译:'+full);
+  }
+});
+
+test('finite native text-track fallback shares complete phrases with the video overlay',async t=>{
+  const h=setup();t.after(()=>h.manager.stop());h.video.currentTime=263;
+  const first="There you'd find a bunch of particles",last='whizzing around as fast as tiny bullets.';
+  h.video.textTracks=[{mode:'showing',language:'en',cues:[{startTime:259,endTime:261,text:first},{startTime:261,endTime:264,text:last}]}];
+  h.manager.sync();await settle();
+  const [session]=h.bridge.getSessions();
+  assert.equal(session.state.subtitlesList.length,1);assert.equal(session.state.currentCaption.original,first+' '+last);
+  const host=h.h.doc.getElementById('kuai-captions-window-'+session.id);
+  assert.equal(host.shadowRoot.querySelector('.original-text').textContent,first+' '+last);
+});
+
+test('finite native track voice annotations retain distinct speakers',async t=>{
+  const h=setup();t.after(()=>h.manager.stop());h.video.currentTime=3;
+  h.video.textTracks=[{mode:'showing',language:'en',cues:[
+    {startTime:0,endTime:2,text:'<v Alice>I was thinking'},
+    {startTime:2,endTime:4,text:'<v Bob>That will not work.'},
+  ]}];
+  h.manager.sync();await settle();const [session]=h.bridge.getSessions();
+  assert.deepEqual(session.state.subtitlesList.map(c=>c.text),['I was thinking','That will not work.']);
+  assert.equal(session.state.currentCaption.original,'That will not work.');
 });

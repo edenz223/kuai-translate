@@ -1,45 +1,219 @@
 [
   {
     "name": "sentence continues across independent ASR events and append segments",
-    "input": {"events": [
-      {"tStartMs": 0, "dDurationMs": 1000, "segs": [{"utf8": "We are"}]},
-      {"tStartMs": 1000, "dDurationMs": 1000, "segs": [{"utf8": " learning"}]},
-      {"tStartMs": 2000, "dDurationMs": 1000, "aAppend": 1, "segs": [{"utf8": " together."}]},
-      {"tStartMs": 3000, "dDurationMs": 1000, "segs": [{"utf8": "Next."}]}
-    ]},
-    "expected": [[0, 3, "We are learning together."], [3, 4, "Next."]]
+    "input": {
+      "events": [
+        {
+          "tStartMs": 0,
+          "dDurationMs": 1000,
+          "segs": [
+            {
+              "utf8": "We are"
+            }
+          ]
+        },
+        {
+          "tStartMs": 1000,
+          "dDurationMs": 1000,
+          "segs": [
+            {
+              "utf8": " learning"
+            }
+          ]
+        },
+        {
+          "tStartMs": 2000,
+          "dDurationMs": 1000,
+          "aAppend": 1,
+          "segs": [
+            {
+              "utf8": " together."
+            }
+          ]
+        },
+        {
+          "tStartMs": 3000,
+          "dDurationMs": 1000,
+          "segs": [
+            {
+              "utf8": "Next."
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      [
+        0,
+        3,
+        "We are learning together."
+      ],
+      [
+        3,
+        4,
+        "Next."
+      ]
+    ]
   },
   {
     "name": "offsets locate a sentence boundary within an event",
-    "input": {"events": [{"tStartMs": 1000, "dDurationMs": 4000, "segs": [
-      {"utf8": "Hello.", "tOffsetMs": 0}, {"utf8": " Next sentence.", "tOffsetMs": 2000}
-    ]}]},
-    "expected": [[1, 3, "Hello."], [3, 5, "Next sentence."]]
+    "input": {
+      "events": [
+        {
+          "tStartMs": 1000,
+          "dDurationMs": 4000,
+          "segs": [
+            {
+              "utf8": "Hello everyone.",
+              "tOffsetMs": 0
+            },
+            {
+              "utf8": " Next sentence.",
+              "tOffsetMs": 2000
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      [
+        1,
+        3,
+        "Hello everyone."
+      ],
+      [
+        3,
+        5,
+        "Next sentence."
+      ]
+    ]
   },
   {
     "name": "overlapping timed segments repeat the same words only once",
-    "input": {"events": [
-      {"tStartMs": 0, "dDurationMs": 2000, "wWinId": 1, "segs": [{"utf8": "We", "tOffsetMs": 0}, {"utf8": " learn", "tOffsetMs": 1000}]},
-      {"tStartMs": 1000, "dDurationMs": 2000, "wWinId": 1, "segs": [{"utf8": "learn", "tOffsetMs": 0}, {"utf8": " together.", "tOffsetMs": 1000}]}
-    ]},
-    "expected": [[0, 3, "We learn together."]]
+    "input": {
+      "events": [
+        {
+          "tStartMs": 0,
+          "dDurationMs": 2000,
+          "wWinId": 1,
+          "segs": [
+            {
+              "utf8": "We",
+              "tOffsetMs": 0
+            },
+            {
+              "utf8": " learn",
+              "tOffsetMs": 1000
+            }
+          ]
+        },
+        {
+          "tStartMs": 1000,
+          "dDurationMs": 2000,
+          "wWinId": 1,
+          "segs": [
+            {
+              "utf8": "learn",
+              "tOffsetMs": 0
+            },
+            {
+              "utf8": " together.",
+              "tOffsetMs": 1000
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      [
+        0,
+        3,
+        "We learn together."
+      ]
+    ]
   },
   {
     "name": "CJK fragments keep natural adjacency and real punctuation",
-    "input": {"events": [
-      {"tStartMs": 0, "dDurationMs": 1000, "segs": [{"utf8": "我们"}]},
-      {"tStartMs": 1000, "dDurationMs": 1000, "segs": [{"utf8": "学习。"}]},
-      {"tStartMs": 2000, "dDurationMs": 1000, "segs": [{"utf8": "很好！"}]}
-    ]},
-    "expected": [[0, 2, "我们学习。"], [2, 3, "很好！"]]
+    "input": {
+      "events": [
+        {
+          "tStartMs": 0,
+          "dDurationMs": 1000,
+          "segs": [
+            {
+              "utf8": "我们"
+            }
+          ]
+        },
+        {
+          "tStartMs": 1000,
+          "dDurationMs": 1000,
+          "segs": [
+            {
+              "utf8": "学习。"
+            }
+          ]
+        },
+        {
+          "tStartMs": 2000,
+          "dDurationMs": 1000,
+          "segs": [
+            {
+              "utf8": "很好！"
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      [
+        0,
+        2,
+        "我们学习。"
+      ],
+      [
+        2,
+        3,
+        "很好！"
+      ]
+    ]
   },
   {
     "name": "a strong silence separates unfinished phrases",
-    "input": {"events": [
-      {"tStartMs": 0, "dDurationMs": 1000, "segs": [{"utf8": "first phrase"}]},
-      {"tStartMs": 2500, "dDurationMs": 1000, "segs": [{"utf8": "second phrase"}]}
-    ]},
-    "expected": [[0, 1, "first phrase"], [2.5, 3.5, "second phrase"]]
+    "input": {
+      "events": [
+        {
+          "tStartMs": 0,
+          "dDurationMs": 1000,
+          "segs": [
+            {
+              "utf8": "first phrase"
+            }
+          ]
+        },
+        {
+          "tStartMs": 2500,
+          "dDurationMs": 1000,
+          "segs": [
+            {
+              "utf8": "second phrase"
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      [
+        0,
+        1,
+        "first phrase"
+      ],
+      [
+        2.5,
+        3.5,
+        "second phrase"
+      ]
+    ]
   },
   {
     "name": "screenshot sentence uses its balanced comma boundary with real segment anchors",
