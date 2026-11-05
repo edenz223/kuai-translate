@@ -173,20 +173,6 @@ test('the actual popup synchronizes saved settings before translating even while
   query.resolve();await setImmediate();assert.equal(content.runtime.status().translated,1);
 });
 
-test('the popup subtitle-list action sees the newly enabled state after delayed settings delivery',async t=>{
-  const query=deferred(),read=deferred(),stored=defaultSettings();stored.subtitlesEnabled=false;
-  const h=fixture(t,{stored,queryHook:()=>query.promise,url:'https://www.youtube.com/watch?v=abcdefghijk'});await h.controller.ready;t.after(()=>{query.resolve();read.resolve();});
-  const opened=[],content=await attachContent(t,h,{onOpenList:settings=>{opened.push(settings.subtitlesEnabled);return {opened:settings.subtitlesEnabled};}});
-  const popup=createDocument(new URL('../public/popup.html',import.meta.url)),previous=globalThis.chrome;
-  globalThis.chrome=h.chromeApi;t.after(()=>{globalThis.chrome=previous;});await startPopup(popup.document,h.chromeApi);
-  const getSettings=content.client.getSettings;content.client.getSettings=async()=>{await read.promise;return getSettings();};
-  popup.node('subtitles').checked=true;const saving=popup.node('subtitles').fire('change');await setImmediate();
-  const opening=popup.node('subtitle-list').fire('click');await setImmediate();
-  assert.equal(h.stored.subtitlesEnabled,true);assert.equal(content.settings.subtitlesEnabled,false);assert.deepEqual(opened,[]);
-  read.resolve();await setImmediate();assert.deepEqual(opened,[true]);await saving;await opening;
-  assert.deepEqual(opened,[true]);assert.equal(popup.node('status').classList.contains('error'),false);
-});
-
 test('the popup exposes a failed authoritative read and does not dispatch translation until retry succeeds',async t=>{
   const h=fixture(t,{queryHook:()=>{throw Error('No broadcast tabs');}});await h.controller.ready;
   const content=await attachContent(t,h);content.paragraph('Hello');

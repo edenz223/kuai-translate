@@ -102,6 +102,7 @@ test('YouTube watch title uses a stacked source and translation layout and resto
  const controller=createPageTranslator(h.dependencies);await controller.translatePage();
  assert.equal(heading.getAttribute('data-kuai-title-layout'),'stacked');
  const layout=h.doc.querySelector('[data-kuai-title-layout-style]');assert.ok(layout);assert.match(layout.textContent,/display:block!important/);assert.match(layout.textContent,/height:auto!important/);
+ assert.match(layout.textContent,/h1\[data-kuai-title-layout=stacked\]>\[data-kuai-page-translation\]>br\{display:none!important\}/,'block-level title translations must not add a leading blank line');
  assert.strictEqual(heading.firstChild,source);assert.equal(output(heading).textContent,'译：A long YouTube video title');assert.equal(heading.style.cssText,originalStyle);
  controller.refreshPresentation();assert.equal(h.doc.querySelectorAll('[data-kuai-title-layout-style]').length,1);
  controller.restore();assert.equal(heading.hasAttribute('data-kuai-title-layout'),false);assert.equal(h.doc.querySelector('[data-kuai-title-layout-style]'),null);assert.strictEqual(heading.firstChild,source);assert.equal(heading.style.cssText,originalStyle);

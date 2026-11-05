@@ -1,6 +1,6 @@
 {
   "name": "kuai-translate",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Independent, dependency-free browser translation extension with free services, custom APIs and YouTube subtitle study tools.",
   "type": "module",

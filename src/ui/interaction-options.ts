@@ -29,7 +29,7 @@ const groups: Record<string,InteractionGroup>={
   }},
   input:{property:'inputOptions',defaults:INPUT_OPTIONS_DEFAULTS,fields:{
     enabled:['checkbox'],providerId:['provider'],sourceLanguage:['select',sourceLanguages],targetLanguage:['select',targetLanguages],
-    shortcut:['shortcut','restoreShortcut','恢复最近一次替换'],restoreShortcut:['shortcut','shortcut','输入翻译 / 再次按下恢复'],
+    shortcut:['shortcut','restoreShortcut','已保存的还原快捷键'],
     icon:['select',[['none','不显示入口'],['dot','小圆点'],['icon','翻译图标']]],autoApply:['checkbox'],includeOriginal:['checkbox'],
     displayOrder:['select',[['original-translation','原文在前，译文在后'],['translation-original','译文在前，原文在后']]],disabledSites:['sites'],
   }},
@@ -169,7 +169,7 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
         field.addEventListener(type,()=>commit(group,key));
         if(type==='input')field.addEventListener('blur',()=>commit(group,key,{blur:true}));
       }
-      node('reset-'+group+'-options').addEventListener('click',()=>{
+      node('reset-'+group+'-options')?.addEventListener('click',()=>{
         resetDrafts(group);return save(settings=>{(settings as unknown as Record<string,unknown>)[property]=structuredClone(defaults);});
       });
     }

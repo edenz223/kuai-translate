@@ -69,10 +69,10 @@ test('popup freezes settings while it flushes an earlier save and dispatches the
   h.node('provider').value='google';const saving=h.node('provider').fire('change');await setImmediate();
   const task=h.node('translate-page').fire('click');await setImmediate();
   assert.equal(h.actions().length,0,'the action waits for the earlier settings write');
-  for(const id of ['provider','target','paragraph-enabled','subtitles'])assert.equal(h.node(id).disabled,true,id+' must not admit a later unsaved choice during this action');
+  for(const id of ['provider','target','paragraph-enabled'])assert.equal(h.node(id).disabled,true,id+' must not admit a later unsaved choice during this action');
   release();await saving;await task;
   assert.deepEqual(translatedWith,[['google','zh-Hans']]);
-  for(const id of ['provider','target','paragraph-enabled','subtitles'])assert.equal(h.node(id).disabled,false);
+  for(const id of ['provider','target','paragraph-enabled'])assert.equal(h.node(id).disabled,false);
 });
 
 test('unsupported browser pages explain why the main action is unavailable without sending content messages',async t=>{

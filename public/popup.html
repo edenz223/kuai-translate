@@ -1,12 +1,10 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kuai translate</title><link rel="stylesheet" href="ui.css"></head>
-<body class="popup"><header class="brand"><span class="brand-mark" aria-hidden="true">K</span><div><h1>Kuai translate</h1><p>简单、直接的翻译</p></div></header>
+<body class="popup"><header class="brand"><img class="brand-mark" src="icons/icon-128.png" width="44" height="44" alt="" aria-hidden="true"><div><h1>Kuai translate</h1><p>简单、直接的翻译</p></div></header>
 <main><section class="popup-section"><div class="popup-section-heading"><h2>网页翻译</h2><button id="page-settings" class="link-button" type="button">网页设置 →</button></div><label>翻译服务<select id="provider" aria-label="翻译服务"></select></label><label>目标语言<select id="target" aria-label="目标语言"></select></label>
 <div class="actions"><button id="translate-page" class="primary" type="button" aria-describedby="page-scope" disabled>翻译此网页</button></div>
 <p id="page-scope" class="muted" role="status">正在读取页面状态…</p>
-<label class="check"><input id="paragraph-enabled" type="checkbox" aria-describedby="paragraph-shortcut">启用段落快捷翻译</label><p id="paragraph-shortcut" class="muted">指向段落后，按一次 Shift 翻译，再按一次关闭译文。</p></section>
-<section class="popup-section"><div class="popup-section-heading"><h2>YouTube 字幕</h2><button id="subtitle-settings" class="link-button" type="button">字幕设置 →</button></div>
-<label class="check"><input id="subtitles" type="checkbox">开启 YouTube 字幕翻译</label><button id="subtitle-list" type="button" aria-describedby="subtitle-scope" disabled>展开侧边字幕列表</button><p id="subtitle-scope" class="muted">字幕列表仅在 YouTube 视频页面可用。</p></section>
+<label class="check"><input id="paragraph-enabled" type="checkbox" aria-describedby="paragraph-shortcut">启用悬浮翻译</label><p id="paragraph-shortcut" class="muted">指向段落后，按一次 Shift 翻译，再按一次关闭译文。</p></section>
 <p id="status" role="status" aria-live="polite" class="status">加载设置…</p>
 <nav class="popup-links"><button id="text-tool" class="link-button" type="button">文本 / 文件翻译</button><button id="options" class="link-button" type="button">设置与 API</button></nav></main>
 <script type="module" src="src/ui/popup.js"></script></body></html>

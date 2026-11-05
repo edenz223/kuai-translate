@@ -6,17 +6,20 @@ import {runtimeStructure} from '../scripts/runtime-structure.mjs';
 const baseline=JSON.parse(await fs.readFile(new URL('./fixtures/runtime.before-typescript.json',import.meta.url),'utf8'));
 const root=new URL('../',import.meta.url);
 
-test('migration preserves the complete manifest and every permission byte-for-byte',async()=>{
-  const before=await fs.readFile(new URL('./fixtures/manifest.before-typescript.json',import.meta.url));
-  assert.deepEqual(await fs.readFile(new URL('public/manifest.json',root)),before);
-  assert.deepEqual(await fs.readFile(new URL('dist/manifest.json',root)),before);
+test('migration preserves the complete manifest and every permission except the release version',async()=>{
+  const before=await fs.readFile(new URL('./fixtures/manifest.before-typescript.json',import.meta.url),'utf8');
+  const {version}=JSON.parse(await fs.readFile(new URL('package.json',root),'utf8'));
+  const expected=Buffer.from(before.replace(/("version": )"[^"]+"/,'$1'+JSON.stringify(version)));
+  assert.deepEqual(await fs.readFile(new URL('public/manifest.json',root)),expected);
+  assert.deepEqual(await fs.readFile(new URL('dist/manifest.json',root)),expected);
 });
 
 test('unchanged public assets preserve their migration baseline',async()=>{
   for(const [name,hash] of Object.entries(baseline.assets)) {
     const emitted=await fs.readFile(new URL('dist/'+name.slice('public/'.length),root));
-    if(name==='public/options.html'){
+    if(['public/options.html','public/popup.html'].includes(name)){
       // The subtitle font scaling control is covered by the presentation UI tests.
+      // Options and popup changes are covered by the interaction and popup UI tests.
       assert.deepEqual(emitted,await fs.readFile(new URL(name,root)));continue;
     }
     assert.equal(createHash('sha256').update(emitted).digest('hex'),hash,name);
@@ -32,7 +35,8 @@ test('unchanged runtimes preserve their original executable structure',async()=>
   // Bootstrap is now bundled; lifecycle behavior is covered by content-loader and browser smoke tests.
   // Semantic ASR cuts are covered by youtube-captions behavior tests.
   // Authored playback grouping is covered by captions and runtime overlay tests.
-  const evolved=new Set(['src/youtube/captions.js','src/youtube/asr-segmentation.js','public/content-loader.js','src/content/page-policy.js','src/content/page-content.js','src/background/controller.js','src/providers/index.js','src/ui/options.js','src/content/interactions.js','src/content/dom.js','src/content/page-translator.js','src/youtube/index.js','src/youtube/capture-main.js','src/youtube/sidebar.js','src/youtube/presentation.js','src/youtube/overlay.js','src/shared/presentation.js','src/shared/settings.js','src/shared/styles.js','src/ui/presentation.js']);
+  // Popup cleanup and input controls are covered by ui-popup and ui-interaction-options tests.
+  const evolved=new Set(['src/ui/popup.js','src/ui/interaction-options.js','src/youtube/captions.js','src/youtube/asr-segmentation.js','public/content-loader.js','src/content/page-policy.js','src/content/page-content.js','src/background/controller.js','src/providers/index.js','src/ui/options.js','src/content/interactions.js','src/content/dom.js','src/content/page-translator.js','src/youtube/index.js','src/youtube/capture-main.js','src/youtube/sidebar.js','src/youtube/presentation.js','src/youtube/overlay.js','src/shared/presentation.js','src/shared/settings.js','src/shared/styles.js','src/ui/presentation.js']);
   for(const [name,hash] of Object.entries(baseline.runtime)) {
     if(evolved.has(name))continue;
     const target=name==='public/content-loader.js'?'content-loader.js':name;

@@ -79,7 +79,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     // heading. Scope a normal block layout to translated video titles only.
     if(!titleLayoutStyle?.isConnected){
       titleLayoutStyle=document.createElement('style');titleLayoutStyle.setAttribute('data-kuai-owned','');titleLayoutStyle.setAttribute('data-kuai-title-layout-style','');
-      titleLayoutStyle.textContent='h1[data-kuai-title-layout=stacked]{display:block!important;height:auto!important;max-height:none!important;overflow:visible!important}h1[data-kuai-title-layout=stacked]>[data-kuai-page-translation]{display:block!important;width:100%!important;min-width:0!important;max-width:100%!important;box-sizing:border-box!important}';
+      titleLayoutStyle.textContent='h1[data-kuai-title-layout=stacked]{display:block!important;height:auto!important;max-height:none!important;overflow:visible!important}h1[data-kuai-title-layout=stacked]>[data-kuai-page-translation]{display:block!important;width:100%!important;min-width:0!important;max-width:100%!important;box-sizing:border-box!important}h1[data-kuai-title-layout=stacked]>[data-kuai-page-translation]>br{display:none!important}';
       document.documentElement.append(titleLayoutStyle);
     }
     element.setAttribute('data-kuai-title-layout','stacked');entry.titleLayout=true;

@@ -43,7 +43,7 @@ test('the actual settings controller saves every interaction option and reloads 
     ['selection','maxLength','12000','input'],['selection','showOriginal',false],['selection','autoSpeak',true],
     ['selection','disabledSites','private.example','input'],
     ['input','enabled',true],['input','providerId','yandex'],['input','sourceLanguage','ja'],['input','targetLanguage','en'],
-    ['input','shortcut','Alt+K','input'],['input','restoreShortcut','Ctrl+Shift+Y','input'],['input','icon','icon'],
+    ['input','shortcut','Alt+K','input'],['input','icon','icon'],
     ['input','autoApply',false],['input','includeOriginal',true],['input','displayOrder','translation-original'],
     ['input','disabledSites','billing.example','input'],
     ['hover','trigger','custom'],['hover','customKeys','control + k','input'],['hover','mode','area'],
@@ -54,7 +54,7 @@ test('the actual settings controller saves every interaction option and reloads 
   await h.edit('hover-enabled',true);await h.edit('selection-enabled',false);
   assert.deepEqual(h.stored.pageOptions,{autoTranslate:true,alwaysLanguages:['en','ja'],neverLanguages:['ko'],alwaysSites:['example.com','https://news.example/articles/**'],neverSites:['private.example'],translateFullPage:false,excludeSelectors:['.advert','[data-private]'],minTextLength:12,translateDynamic:true,contextMenuEnabled:false,shortcut:'Control+Shift+P',displayModeShortcut:'Alt+D'});
   assert.deepEqual(h.stored.selectionOptions,{providerId:'google',sourceLanguage:'en',targetLanguage:'ja',triggerMode:'dot',triggerAction:'hover',delay:600,maxLength:12000,showOriginal:false,autoSpeak:true,disabledSites:['private.example']});
-  assert.deepEqual(h.stored.inputOptions,{enabled:true,providerId:'yandex',sourceLanguage:'ja',targetLanguage:'en',shortcut:'Alt+K',restoreShortcut:'Control+Shift+Y',icon:'icon',autoApply:false,includeOriginal:true,displayOrder:'translation-original',disabledSites:['billing.example']});
+  assert.deepEqual(h.stored.inputOptions,{enabled:true,providerId:'yandex',sourceLanguage:'ja',targetLanguage:'en',shortcut:'Alt+K',restoreShortcut:'Control+Shift+Z',icon:'icon',autoApply:false,includeOriginal:true,displayOrder:'translation-original',disabledSites:['billing.example']});
   assert.deepEqual(h.stored.hoverOptions,{trigger:'custom',customKeys:['Control','K'],mode:'area',displayMode:'inline',delay:450,holdDelay:1000,showIndicator:false,borderColor:'#aabbcc',disabledSites:['chat.example']});
   assert.equal(h.stored.activeProviderId,'microsoft');assert.equal(h.stored.targetLanguage,'zh-Hans');
   assert.equal(h.stored.hoverEnabled,true);assert.equal(h.stored.selectionEnabled,false);
@@ -131,12 +131,14 @@ test('invalid or same-context conflicting shortcuts stay visible and never overw
   assert.equal(h.stored.pageOptions.displayModeShortcut,'');assert.match(h.node('page-option-displayModeShortcut-error').textContent,/冲突/);
   await h.edit('input-option-shortcut','Control+P','input');
   assert.equal(h.stored.inputOptions.shortcut,'Control+P','page and editable-input shortcuts have distinct contexts');
-  await h.edit('input-option-restoreShortcut','Ctrl+P','input');
+  assert.equal(h.node('input-option-restoreShortcut'),null);
+  await h.edit('input-option-shortcut','Control+Shift+Z','input');
   assert.equal(h.stored.inputOptions.restoreShortcut,'Control+Shift+Z');
-  assert.match(h.node('input-option-restoreShortcut-error').textContent,/冲突/);
+  assert.match(h.node('input-option-shortcut-error').textContent,/冲突/);
   await h.edit('page-option-displayModeShortcut','','input');await h.edit('page-option-shortcut','','input');
   assert.equal(h.stored.pageOptions.shortcut,'');assert.equal(shortcut.getAttribute('aria-invalid'),'false');
-  await h.edit('input-option-restoreShortcut','','input');assert.equal(h.stored.inputOptions.restoreShortcut,'');
+  await h.edit('input-option-shortcut','','input');assert.equal(h.stored.inputOptions.shortcut,'');
+  assert.equal(h.stored.inputOptions.restoreShortcut,'Control+Shift+Z','legacy restore preference remains compatible');
 });
 
 test('shortcut conflict hints follow changes to the paired action without silently saving an earlier draft',async t=>{
@@ -214,7 +216,7 @@ test('the actual interaction form keeps conflicting save drafts until explicit r
   await h.edit('input-option-icon','icon');assert.equal(h.stored.inputOptions.icon,'icon');
 });
 
-test('input form shows upgraded defaults and retains explicit follow-page choices until its own reset',async t=>{
+test('input form shows upgraded defaults and retains explicit follow-page choices after reload',async t=>{
   const h=options(t,settings=>{
     delete settings.inputDefaultsVersion;settings.targetLanguage='fr';
     settings.inputOptions.targetLanguage='follow_page';settings.inputOptions.icon='none';
@@ -225,9 +227,8 @@ test('input form shows upgraded defaults and retains explicit follow-page choice
   assert.equal(h.stored.inputDefaultsVersion,2);assert.equal(h.stored.inputOptions.targetLanguage,'follow_page');assert.equal(h.stored.inputOptions.icon,'none');
   await h.node('reload-settings').fire('click');
   assert.equal(h.node('input-option-targetLanguage').value,'follow_page');assert.equal(h.node('input-option-icon').value,'none');
-  await h.node('reset-input-options').fire('click');await setImmediate();
-  assert.equal(h.stored.inputOptions.targetLanguage,'en');assert.equal(h.stored.inputOptions.icon,'dot');
-  assert.equal(h.stored.targetLanguage,'fr','input reset must not change the webpage target');
+  assert.equal(h.node('reset-input-options'),null);
+  assert.equal(h.stored.targetLanguage,'fr','input edits must not change the webpage target');
 });
 
 test('multiline rules reject oversized or invalid drafts while accepting bounded one-entry-per-line lists',async t=>{
@@ -247,7 +248,7 @@ test('multiline rules reject oversized or invalid drafts while accepting bounded
   await h.edit('page-option-alwaysLanguages','en\nzh-Hans','input');assert.deepEqual(h.stored.pageOptions.alwaysLanguages,['en','zh-Hans']);
 });
 
-test('interaction group resets preserve all other groups, provider credentials and presentation preferences',async t=>{
+test('removed interaction resets stay absent while hover reset preserves other settings',async t=>{
   const h=options(t,settings=>{
     settings.providers.push({id:'private-api',type:'openai',name:'My API',enabled:true,baseUrl:'https://api.example/v1',apiKey:'local-secret',model:'my-model',region:'',temperature:null});
     settings.activeProviderId='private-api';settings.pageStyle.preset='marker';settings.subtitleStyle.targetFontSize=35;settings.pageDisplayMode='translation_only';
@@ -255,15 +256,10 @@ test('interaction group resets preserve all other groups, provider credentials a
   await h.edit('page-option-minTextLength','27','input');await h.edit('selection-option-providerId','google');await h.edit('input-option-autoApply',false);await h.edit('hover-option-delay','650','input');
   await h.edit('selection-enabled',false);await h.edit('hover-enabled',true);
   const before=structuredClone(h.stored);
-  assert.ok(h.node('reset-selection-options'),'the selection group must offer its own reset');
-  await h.node('reset-selection-options').fire('click');await setImmediate();
-  assert.equal(h.stored.selectionOptions.providerId,'follow_page');assert.equal(h.stored.selectionOptions.triggerMode,'auto');
-  assert.equal(h.stored.selectionEnabled,false,'resetting detailed options preserves the separate enabled switch');
-  for(const key of ['pageOptions','inputOptions','hoverOptions','providers','pageStyle','subtitleStyle','pageDisplayMode'])assert.deepEqual(h.stored[key],before[key],key+' must survive selection reset');
-  await h.node('reset-page-options').fire('click');await setImmediate();assert.equal(h.stored.pageOptions.minTextLength,1);assert.equal(h.stored.activeProviderId,'private-api');
-  await h.node('reset-input-options').fire('click');await setImmediate();assert.equal(h.stored.inputOptions.autoApply,true);
+  for(const group of ['page','selection','input'])assert.equal(h.node('reset-'+group+'-options'),null);
   await h.node('reset-hover-options').fire('click');await setImmediate();assert.equal(h.stored.hoverOptions.delay,300);assert.equal(h.stored.hoverEnabled,true);
   assert.equal(h.stored.hoverOptions.displayMode,'inline');
+  for(const key of ['pageOptions','selectionOptions','inputOptions','selectionEnabled','activeProviderId','providers','pageStyle','subtitleStyle','pageDisplayMode'])assert.deepEqual(h.stored[key],before[key],key+' must survive hover reset');
   const reopened=h.reopen();await reopened.start();assert.equal(reopened.node('hover-option-trigger').value,'shift');
   assert.equal(h.stored.providers.find(item=>item.id==='private-api').apiKey,'local-secret');
   assert.equal(h.stored.pageStyle.preset,'marker');assert.equal(h.stored.subtitleStyle.targetFontSize,35);assert.equal(h.stored.pageDisplayMode,'translation_only');

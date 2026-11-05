@@ -44,11 +44,10 @@
       <div><label for="page-option-displayModeShortcut">切换双语 / 仅译文</label><input id="page-option-displayModeShortcut" type="text" maxlength="120" placeholder="例如 Alt+D；留空关闭" autocomplete="off" spellcheck="false" aria-describedby="page-shortcut-help page-option-displayModeShortcut-error"><p id="page-option-displayModeShortcut-error" class="field-error" role="alert" hidden></p></div>
     </div>
     <p id="page-shortcut-help" class="muted">在网页的非输入区域生效。填写一个或多个修饰键 + 一个 A–Z 字母，例如 Control+Shift+K；留空关闭。Control 可写 Ctrl，Meta 可写 Cmd；浏览器或系统已占用的组合可能无法使用。显示模式快捷键在尚无译文时会开始翻译。</p>
-    <div class="actions"><button id="reset-page-options" type="button">恢复网页交互默认值</button><span class="muted">保留网页服务、语言、显示模式与样式。</span></div>
   </div>
   <div id="hover" class="interaction-subsection paragraph-settings" aria-labelledby="hover-heading">
-  <div class="section-heading"><h3 id="hover-heading">段落快捷翻译</h3><p id="hover-service-summary" class="muted">鼠标指向段落，按一次快捷键翻译，再按一次关闭。服务、显示方式、样式与整页翻译共用。</p></div>
-  <label class="check"><input id="hover-enabled" type="checkbox">启用段落快捷翻译</label>
+  <div class="section-heading"><h3 id="hover-heading">悬浮翻译</h3><p id="hover-service-summary" class="muted">鼠标指向段落，按一次快捷键翻译，再按一次关闭。服务、显示方式、样式与整页翻译共用。</p></div>
+  <label class="check"><input id="hover-enabled" type="checkbox">启用悬浮翻译</label>
   <div id="hover-options-panel" hidden>
     <div class="form-grid">
       <label>触发方式<select id="hover-option-trigger"></select></label>
@@ -60,7 +59,7 @@
     <p id="hover-trigger-help" class="muted">鼠标指向文字，按一次所选按键翻译，再按一次关闭；无需一直按住。整页翻译会复用这里的译文，恢复原文会一起清除。</p>
     <p id="hover-left-hold-help" class="muted" hidden>左键需先达到按住时长，再等待悬停延迟；拖动选择文字时不会触发。</p>
     <div class="form-grid"><label class="check"><input id="hover-option-showIndicator" type="checkbox">显示当前翻译范围提示框</label><label id="hover-border-color-field">提示框颜色<input id="hover-option-borderColor" type="color" value="#cfcfcf"></label></div>
-    <details class="advanced-style"><summary>网站例外</summary><div><label for="hover-option-disabledSites">只禁用段落快捷翻译的网站（每行一个，最多 100 项）</label><textarea id="hover-option-disabledSites" class="rule-list" rows="3" maxlength="200100" placeholder="chat.example" spellcheck="false" aria-describedby="hover-sites-help hover-option-disabledSites-error"></textarea><p id="hover-sites-help" class="muted">在网页禁用规则之外叠加生效。支持域名、HTTP/HTTPS 地址和路径通配符 * / **，每行最多 2000 字符。</p><p id="hover-option-disabledSites-error" class="field-error" role="alert" hidden></p></div></details>
+    <details class="advanced-style"><summary>网站例外</summary><div><label for="hover-option-disabledSites">只禁用悬浮翻译的网站（每行一个，最多 100 项）</label><textarea id="hover-option-disabledSites" class="rule-list" rows="3" maxlength="200100" placeholder="chat.example" spellcheck="false" aria-describedby="hover-sites-help hover-option-disabledSites-error"></textarea><p id="hover-sites-help" class="muted">在网页禁用规则之外叠加生效。支持域名、HTTP/HTTPS 地址和路径通配符 * / **，每行最多 2000 字符。</p><p id="hover-option-disabledSites-error" class="field-error" role="alert" hidden></p></div></details>
   </div>
   <div class="actions"><button id="reset-hover-options" type="button">恢复段落快捷键默认值</button><span class="muted">保留启用状态、网页服务和样式。</span></div>
 </div>
@@ -102,7 +101,6 @@
     <p id="selection-speech-help" class="muted">自动朗读仅用于单个原文单词，并使用浏览器可用的本机语音；没有合适语音时跳过。</p>
     <div><label for="selection-option-disabledSites">禁用划词翻译的网站（每行一个，最多 100 项）</label><textarea id="selection-option-disabledSites" class="rule-list" rows="3" maxlength="200100" placeholder="private.example" spellcheck="false" aria-describedby="selection-sites-help selection-option-disabledSites-error"></textarea><p id="selection-sites-help" class="muted">支持域名、HTTP/HTTPS 地址和路径通配符 * / **，每行最多 2000 字符。</p><p id="selection-option-disabledSites-error" class="field-error" role="alert" hidden></p></div>
   </div>
-  <div class="actions"><button id="reset-selection-options" type="button">恢复划词交互默认值</button><span class="muted">保留划词启用状态及其他分区设置。</span></div>
 </section>
 <section id="input" class="card settings-section" aria-labelledby="input-heading">
   <div class="section-heading"><h2 id="input-heading">输入翻译</h2><p class="muted">在可编辑区域使用快捷键、入口或右键菜单翻译。密码和明确标记的验证码、支付卡字段不会处理。</p></div>
@@ -114,15 +112,13 @@
       <label>原文语言<select id="input-option-sourceLanguage"></select></label>
       <label>输出语言（默认英文）<select id="input-option-targetLanguage"></select></label>
       <div><label for="input-option-shortcut">输入翻译 / 再次按下恢复</label><input id="input-option-shortcut" type="text" maxlength="120" placeholder="Alt+X；留空关闭" autocomplete="off" spellcheck="false" aria-describedby="input-shortcut-help input-option-shortcut-error"><p id="input-option-shortcut-error" class="field-error" role="alert" hidden></p></div>
-      <div><label for="input-option-restoreShortcut">恢复最近一次替换</label><input id="input-option-restoreShortcut" type="text" maxlength="120" placeholder="Control+Shift+Z；留空关闭" autocomplete="off" spellcheck="false" aria-describedby="input-shortcut-help input-option-restoreShortcut-error"><p id="input-option-restoreShortcut-error" class="field-error" role="alert" hidden></p></div>
     </div>
-    <p id="input-shortcut-help" class="muted">仅在符合条件的输入区域中生效。填写修饰键 + A–Z 字母，留空关闭；两项须使用不同组合。译文未再被编辑时，再按翻译快捷键也可恢复最近一次替换。</p>
+    <p id="input-shortcut-help" class="muted">仅在符合条件的输入区域中生效。填写修饰键 + A–Z 字母，留空关闭。译文未再被编辑时，再按翻译快捷键可恢复原文。</p>
     <div class="checks"><label class="check"><input id="input-option-autoApply" type="checkbox" aria-describedby="input-apply-help">翻译完成后自动写回输入区域</label><label class="check"><input id="input-option-includeOriginal" type="checkbox">写回时同时保留原文</label></div>
     <p id="input-apply-help" class="muted">默认直接写回，不弹出结果卡；输入区内的小圆点默认不修改内容；先点击圆点展开翻译图标，再点击图标翻译成目标语言。完成后图标显示绿色勾，再点图标还原，不显示文字反馈弹窗。关闭自动写回后可先预览，再选择“应用”。输入内容、焦点或可编辑状态变化时停止写回，无法安全写入的译文仍可复制。</p>
     <label id="input-display-order-field" hidden>原文与译文的写回顺序<select id="input-option-displayOrder"></select></label>
     <div class="interaction-subsection"><label for="input-option-disabledSites">禁用输入翻译的网站（每行一个，最多 100 项）</label><textarea id="input-option-disabledSites" class="rule-list" rows="3" maxlength="200100" placeholder="billing.example" spellcheck="false" aria-describedby="input-sites-help input-option-disabledSites-error"></textarea><p id="input-sites-help" class="muted">支持域名、HTTP/HTTPS 地址和路径通配符 * / **，每行最多 2000 字符。</p><p id="input-option-disabledSites-error" class="field-error" role="alert" hidden></p></div>
   </div>
-  <div class="actions"><button id="reset-input-options" type="button">恢复输入交互默认值</button><span class="muted">恢复本区的启用状态、服务、语言与交互选项；保留其他分区。</span></div>
 </section>
 
 <section id="subtitles" class="card settings-section" aria-labelledby="subtitles-heading">
