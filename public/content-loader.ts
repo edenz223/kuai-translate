@@ -1,6 +1,6 @@
 type BootstrapRuntime = {stop?:()=>void};
 declare var __kuaiContentLoading: Promise<BootstrapRuntime|void>|undefined;
-/* Classic MV3 content entry; the readable implementation uses native modules. */
+/* Classic MV3 entry; the build bundles all modules for direct isolated-world injection. */
 (function () {
   if (globalThis.__kuaiContentLoading) return;
   const delays=[250,1000,3000];
@@ -18,7 +18,7 @@ declare var __kuaiContentLoading: Promise<BootstrapRuntime|void>|undefined;
     for(let attempt=0;;attempt++){
       try{
         if(disposed)throw stoppedError();
-        module ||= await import(chrome.runtime.getURL('src/content/index.js'));
+        module ||= await import('../src/content/index.js');
         if(disposed)throw stoppedError();
         const runtime=await module!.start();
         if(disposed){runtime?.stop?.();throw stoppedError();}

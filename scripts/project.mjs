@@ -3,13 +3,14 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import ts from 'typescript';
+import {build as bundle} from 'esbuild';
 
 export const projectRoot = fileURLToPath(new URL('../',import.meta.url));
 const runtimeExtensions = new Set(['.js','.mjs','.json','.html','.css','.svg','.png','.ico','.txt']);
 const buildExtensions = new Set([...runtimeExtensions,'.ts']);
 const sourceExtensions = new Set([...buildExtensions,'.cjs','.md','.yml','.yaml']);
 const sourceDirectories = ['src','public','scripts','tests','docs','.github'];
-const sourceRootFiles = ['package.json','pnpm-lock.yaml','tsconfig.json','tsconfig.types.json','README.md','README.zh-CN.md','LICENSE','PRIVACY.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md','ARCHITECTURE.md','.gitignore'];
+const sourceRootFiles = ['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','tsconfig.json','tsconfig.types.json','README.md','README.zh-CN.md','LICENSE','PRIVACY.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md','ARCHITECTURE.md','.gitignore'];
 const sort = values => values.sort((a,b)=>a < b ? -1 : a > b ? 1 : 0);
 
 async function exists(file) { try {await fs.access(file);return true;}catch{return false;} }
@@ -81,6 +82,14 @@ export async function buildProject(root = projectRoot) {
     }
     await Promise.all(writes);
   }
+  // Content scripts are classic scripts. Inline even lazy YouTube imports so
+  // page navigation/origin checks cannot block an extension module fetch.
+  const contentEntry=path.join(root,'public/content-loader.ts');
+  if(await exists(contentEntry))await bundle({
+    entryPoints:[contentEntry],outfile:path.join(output,'content-loader.js'),
+    bundle:true,format:'iife',platform:'browser',target:'chrome120',
+    charset:'utf8',legalComments:'inline',
+  });
   return output;
 }
 
