@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kuai translate · 设置</title><link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png"><link rel="stylesheet" href="ui.css"></head>
 <body class="settings-page"><div class="page"><header class="page-header"><div class="brand"><img class="brand-mark" src="icons/icon-128.png" width="44" height="44" alt="" aria-hidden="true"><div><h1>Kuai translate</h1><p>你的语言，你的翻译服务</p></div></div><a href="text.html">文本 / 文件翻译 →</a></header>
-<nav class="settings-nav" aria-label="设置分区"><a href="#webpage">网页翻译</a><a href="#selection">划词翻译</a><a href="#input">输入翻译</a><a href="#subtitles">YouTube 字幕</a><a href="#providers">翻译服务 / API</a><a href="#backup">备份与导入</a></nav>
+<nav class="settings-nav" aria-label="设置分区"><a href="#webpage">网页翻译</a><a href="#selection">划词翻译</a><a href="#input">输入翻译</a><a href="#subtitles">YouTube 字幕</a><a href="#providers">翻译服务</a><a href="#backup">备份与导入</a></nav>
 <main>
 <section id="webpage" class="card settings-section" aria-labelledby="webpage-heading">
   <div class="section-heading"><h2 id="webpage-heading">网页翻译</h2><p class="muted">选择网页服务、翻译范围与触发方式。网页按滚动位置翻译当前可见内容；划词和输入可使用独立的服务与语言。</p></div>
@@ -163,14 +163,36 @@
   <div class="subtitle-preview-stage"><div id="subtitle-preview-box" class="subtitle-preview-box"><div id="subtitle-preview-source-line" class="subtitle-preview-line"><span id="subtitle-preview-source" lang="en">Take a moment to read the words.</span></div><div id="subtitle-preview-target-line" class="subtitle-preview-line"><span id="subtitle-preview-target" lang="zh-CN" tabindex="0">停留片刻，读懂这些文字。</span></div></div></div>
   <div class="actions"><button id="reset-subtitle-style" type="button">恢复字幕样式默认值</button><span class="muted">保留字幕服务和目标语言选择。</span></div>
 </section>
-<section id="providers" class="card settings-section"><div class="section-heading"><div><h2>翻译服务</h2><p class="muted">免费服务可直接使用。自配 API 可以添加多个独立实例。</p></div></div>
-<div class="provider-layout"><aside><div id="provider-list" class="provider-list" aria-label="翻译服务列表"></div><label>添加自配服务<select id="provider-type"><option value="openai">OpenAI 兼容 API</option><option value="gemini">Google Gemini</option><option value="anthropic">Anthropic Claude</option><option value="azure">Azure Translator</option><option value="deepl">DeepL API</option><option value="deeplx">DeepLX / 自建接口</option><option value="ollama">Ollama</option></select></label><button id="add-provider" type="button">＋ 添加实例</button></aside>
-<div id="provider-form"><p id="provider-kind" class="eyebrow"></p><label>显示名称<input id="provider-name" type="text" maxlength="100" autocomplete="off"></label><label class="check"><input id="provider-enabled" type="checkbox">在服务选择器中启用</label>
-<p id="free-notice" class="notice">无需账号或 API Key。免费网页接口的可用性和限流由服务方决定。</p>
-<div id="custom-fields"><label>API 地址<input id="provider-baseUrl" type="url" spellcheck="false" autocomplete="off"></label><p class="muted">留空使用该类型默认地址；DeepLX 需填写自己的接口地址。</p>
-<label>API Key<div class="input-action"><input id="provider-apiKey" type="password" autocomplete="off" spellcheck="false"><button id="show-key" type="button">显示</button></div></label><p id="key-help" class="muted"></p>
-<div class="form-grid"><div id="model-field"><label for="provider-model-list">可用模型</label><select id="provider-model-list" hidden aria-describedby="model-status"></select><button id="fetch-models" type="button">获取模型</button><label for="provider-model">模型名</label><input id="provider-model" type="text" placeholder="获取模型后选择，也可手动填写" autocomplete="off" spellcheck="false"><p id="model-status" class="status" role="status" aria-live="polite"></p></div><label id="temperature-field">温度<input id="provider-temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用服务默认"></label><label id="region-field">Azure 区域<input id="provider-region" type="text" placeholder="例如 eastasia" autocomplete="off" spellcheck="false"></label></div></div>
-<div class="actions"><button id="test-provider" type="button">测试连接</button><button id="delete-provider" class="danger" type="button">删除此实例</button></div><p id="test-status" class="status" role="status" aria-live="polite"></p></div></div></section>
+<section id="providers" class="card settings-section" aria-labelledby="providers-heading"><div class="section-heading"><h2 id="providers-heading">翻译服务</h2><p class="muted">免费服务无需配置即可使用。自配 API 可添加多个独立实例，用于 AI 翻译或使用自己的额度。</p></div>
+<div class="provider-layout"><aside class="provider-sidebar" aria-label="翻译服务列表">
+  <h3 class="provider-group-title">免费服务</h3><div id="free-provider-list" class="provider-list"></div>
+  <div class="provider-group-title"><h3>自配 API</h3><button id="add-provider" class="link-button" type="button" aria-expanded="false" aria-controls="provider-picker">＋ 添加</button></div>
+  <div id="custom-provider-list" class="provider-list"></div>
+  <p id="custom-empty" class="provider-empty">还没有自配 API。添加后可使用 AI 模型翻译，或使用 DeepL、Azure 等自己的账号额度。</p>
+</aside>
+<div class="provider-detail">
+<div id="provider-picker" class="provider-picker" hidden><h3>选择要添加的服务类型</h3><div id="provider-types" class="provider-types"></div><div class="actions"><button id="cancel-add" type="button">取消</button></div></div>
+<div id="provider-form">
+  <div class="provider-header"><div class="provider-heading"><h3 id="provider-title"></h3><p id="provider-kind" class="provider-kind"></p></div><div class="provider-header-actions"><button id="make-default" type="button">设为网页默认</button><button id="test-provider" class="primary" type="button">测试连接</button></div></div>
+  <p id="provider-usage" class="provider-usage"></p>
+  <div id="test-result" class="test-result"><p id="test-status" class="status" role="status" aria-live="polite"></p><p id="test-detail" class="test-detail" hidden></p></div>
+  <label class="check"><input id="provider-enabled" type="checkbox">在服务选择器中启用</label>
+  <p id="free-notice" class="notice">无需账号或 API Key。免费网页接口的可用性和限流由服务方决定；不稳定时可换用其他免费服务或自配 API。</p>
+  <div id="custom-fields">
+    <label id="name-field">显示名称<input id="provider-name" type="text" maxlength="100" autocomplete="off"></label>
+    <fieldset class="provider-group"><legend>连接</legend>
+      <label for="provider-baseUrl">API 地址 <span id="baseUrl-required" class="required-mark">必填</span></label><input id="provider-baseUrl" type="url" spellcheck="false" autocomplete="off" aria-describedby="baseUrl-error baseUrl-help"><p id="baseUrl-error" class="field-error" hidden></p><p id="baseUrl-help" class="muted"></p>
+      <label for="provider-apiKey">API Key <span id="apiKey-required" class="required-mark">必填</span></label><div class="input-action"><input id="provider-apiKey" type="password" autocomplete="off" spellcheck="false" aria-describedby="apiKey-error key-help"><button id="show-key" type="button" aria-pressed="false" aria-controls="provider-apiKey">显示</button></div><p id="apiKey-error" class="field-error" hidden></p><p class="muted"><span id="key-help"></span> <a id="key-link" target="_blank" rel="noopener noreferrer" hidden>获取 API Key ↗</a></p>
+      <label id="region-field">Azure 区域<input id="provider-region" type="text" placeholder="例如 eastasia" autocomplete="off" spellcheck="false"></label>
+    </fieldset>
+    <fieldset id="model-field" class="provider-group"><legend>模型</legend>
+      <label for="provider-model">模型名 <span class="required-mark">必填</span></label><div class="input-action"><input id="provider-model" type="text" placeholder="获取模型后选择，也可手动填写" autocomplete="off" spellcheck="false" aria-describedby="model-error model-status"><button id="fetch-models" type="button">获取模型</button></div><p id="model-error" class="field-error" hidden></p>
+      <select id="provider-model-list" hidden aria-label="可用模型" aria-describedby="model-status"></select><p id="model-status" class="status" role="status" aria-live="polite"></p>
+    </fieldset>
+    <details id="advanced-field" class="advanced-style provider-advanced"><summary>高级</summary><label id="temperature-field">温度<input id="provider-temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用服务默认"></label><p class="muted">0–2，数值越低译文越稳定。留空使用服务默认值。</p></details>
+  </div>
+  <div class="actions"><button id="delete-provider" class="danger" type="button">删除此实例</button></div>
+</div></div></div></section>
 <section id="backup" class="card settings-section"><h2>本地备份与导入</h2><p class="muted">导出本机设置以备份或迁移。默认不包含 API Key；可导入 Kuai translate 或可识别的旧版翻译服务、快捷键和样式配置。</p><label class="check"><input id="include-secrets" type="checkbox">导出时包含 API Key（备份文件将明文保存密钥）</label><div class="actions"><button id="export-settings" type="button">导出设置</button><label class="file-button">导入设置<input id="import-settings" type="file" accept=".json,application/json"></label></div></section>
 <footer class="save-bar"><p id="status" class="status" role="status" aria-live="polite">加载设置…</p><button id="retry-save" type="button" hidden>重试保存</button><button id="reload-settings" type="button" hidden>重新读取（放弃未保存修改）</button></footer></main></div>
 <script type="module" src="src/ui/options.js"></script></body></html>
