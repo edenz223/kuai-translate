@@ -19,7 +19,7 @@ test('existing settings receive compatible interaction defaults without sharing 
   });
   assert.deepEqual(settings.inputOptions,{
     enabled:true,providerId:'follow_page',sourceLanguage:'follow_page',targetLanguage:'en',shortcut:'Alt+X',
-    restoreShortcut:'Control+Shift+Z',icon:'dot',autoApply:true,includeOriginal:false,displayOrder:'original-translation',disabledSites:[],
+    restoreShortcut:'',icon:'dot',autoApply:true,includeOriginal:false,displayOrder:'original-translation',disabledSites:[],
   });
   assert.deepEqual(settings.hoverOptions,{
     trigger:'shift',customKeys:[],mode:'paragraph',displayMode:'inline',delay:300,holdDelay:800,showIndicator:true,borderColor:'#cfcfcf',disabledSites:[],

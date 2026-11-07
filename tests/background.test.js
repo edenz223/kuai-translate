@@ -8,8 +8,8 @@ const extensionId='kuai-extension';
 const page={id:extensionId,url:'https://example.com/article',tab:{id:4},frameId:0,documentId:'document-a'};
 const options={id:extensionId,url:'chrome-extension://'+extensionId+'/options.html',documentId:'options-a'};
 function event(){const callbacks=new Set();return {addListener:fn=>callbacks.add(fn),removeListener:fn=>callbacks.delete(fn),emit:(...args)=>{for(const fn of callbacks)fn(...args);},get size(){return callbacks.size;}};}
-function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenuHook,createMenuHook}={}){
-  let data=structuredClone(stored);const access=[],writes=[],broadcasts=[],menus=[],menuCalls=[],requests=[],badges=[];
+function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenuHook,createMenuHook,tabs={}}={}){
+  let data=structuredClone(stored);const access=[],writes=[],broadcasts=[],menus=[],menuCalls=[],menuUpdates=[],created=[],requests=[],badges=[];
   const changed=event();
   const chromeApi={
     runtime:{id:extensionId,getURL:path=>'chrome-extension://'+extensionId+'/'+path,onMessage:event(),onInstalled:event(),sendMessage:async message=>{broadcasts.push(message);}},
@@ -18,15 +18,17 @@ function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenu
       get:async()=>{await getHook?.();return data===undefined?{}:{[SETTINGS_KEY]:structuredClone(data)};},
       set:async values=>{const next=values[SETTINGS_KEY];writes.push(structuredClone(next));await setHook?.(next);data=structuredClone(next);changed.emit({[SETTINGS_KEY]:{newValue:data}},'local');},
     }},
-    tabs:{query:async()=>[{id:4},{id:5}],sendMessage:async(tabId,message,target)=>{broadcasts.push({tabId,message,target});},onRemoved:event()},
+    tabs:{query:async()=>[{id:4},{id:5}],sendMessage:async(tabId,message,target)=>{broadcasts.push({tabId,message,target});},onRemoved:event(),
+      onActivated:event(),get:async tabId=>tabs[tabId]??{id:tabId},create:async value=>{created.push(value);}},
     webNavigation:{onCommitted:event()},commands:{onCommand:event()},
     action:{setBadgeText:async value=>{badges.push(['text',value]);},setBadgeBackgroundColor:async value=>{badges.push(['color',value]);}},
     contextMenus:{onClicked:event(),removeAll:async callback=>{menuCalls.push('remove');await removeMenuHook?.();menus.length=0;callback?.();},
+      update:(id,value,callback)=>{menuUpdates.push([id,value]);callback?.();},
       create:(menu,callback)=>{menuCalls.push(menu.id);if(createMenuHook)Promise.resolve(createMenuHook(menu)).then(()=>{menus.push(menu);callback?.();});else{menus.push(menu);callback?.();}return menu.id;}},
   };
   const fetchImpl=async(url,init)=>{requests.push({url,init});const texts=JSON.parse(init.body);return Response.json(texts.map(text=>({translations:[{text:'译文:'+text}]})));};
   const controller=createBackground({chromeApi,fetchImpl}).start();
-  return {controller,chromeApi,access,writes,broadcasts,menus,menuCalls,requests,badges,get data(){return data;}};
+  return {controller,chromeApi,access,writes,broadcasts,menus,menuCalls,menuUpdates,created,requests,badges,get data(){return data;}};
 }
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 async function flush(){for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));}
@@ -126,7 +128,7 @@ test('provider testing is available to extension pages and errors remain redacte
 });
 test('context menu listeners survive startup and forward explicit selection to its frame',async()=>{
   const stored=defaultSettings();stored.selectionEnabled=true;const h=fixture({stored});await h.controller.ready;await flush();
-  assert.equal(h.menus.length,7);
+  assert.equal(h.menus.length,8);
   h.chromeApi.contextMenus.onClicked.emit({menuItemId:'kuai.selection',selectionText:'Selected text',frameId:3},{id:4});await flush();
   const call=h.broadcasts.find(item=>item.message?.type==='KUAI_SELECTION_TRANSLATE');
   assert.deepEqual(call,{tabId:4,message:{type:'KUAI_SELECTION_TRANSLATE',text:'Selected text'},target:{frameId:3}});
@@ -463,7 +465,7 @@ test('menus rebuild only for relevant preference changes and preserve independen
   current.pageStyle.fontSize=120;current.targetLanguage='ja';await saveSnapshot(h,current);await flush();
   h.chromeApi.runtime.onInstalled.emit();await flush();assert.equal(h.menuCalls.length,firstCount);
   current=await privateSettings(h);current.selectionEnabled=false;await saveSnapshot(h,current);await flush();
-  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore','kuai.input','kuai.site.always','kuai.site.never','kuai.site.default']);
+  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore','kuai.input','kuai.site.always','kuai.site.never','kuai.site.default','kuai.site.input']);
   current=await privateSettings(h);current.inputOptions.enabled=false;await saveSnapshot(h,current);await flush();
   assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore','kuai.site.always','kuai.site.never','kuai.site.default']);
   current=await privateSettings(h);current.pageOptions.contextMenuEnabled=false;await saveSnapshot(h,current);await flush();assert.deepEqual(h.menus,[]);
@@ -563,6 +565,38 @@ test('site menu items edit only the clicked host and are limited to web pages',a
   h.chromeApi.contextMenus.onClicked.emit({menuItemId:'kuai.site.default',pageUrl:'https://news.example.com/b'},{id:4});await flush();
   assert.deepEqual(h.data.pageOptions.neverSites,[]);
   assert.equal(h.broadcasts.some(item=>item.tabId!==undefined&&String(item.message?.type).startsWith('KUAI_PAGE')),false,'site rules never message the page');
+  h.controller.stop();
+});
+
+test('input site checkbox follows the active tab and edits only the clicked host',async()=>{
+  const tabs={7:{id:7,active:true,url:'https://mail.example.com/inbox'},8:{id:8,active:false,url:'https://other.example/'}};
+  const h=fixture({tabs});await h.controller.ready;await flush();
+  const item=h.menus.find(menu=>menu.id==='kuai.site.input');
+  assert.deepEqual({type:item.type,checked:item.checked,contexts:item.contexts,patterns:item.documentUrlPatterns},
+    {type:'checkbox',checked:false,contexts:['page','editable'],patterns:['http://*/*','https://*/*']});
+  h.chromeApi.contextMenus.onClicked.emit({menuItemId:'kuai.site.input',checked:true,pageUrl:'https://mail.example.com/inbox',frameId:2},{id:7});await flush();
+  assert.deepEqual(h.data.inputOptions.disabledSites,['mail.example.com']);assert.deepEqual(h.data.pageOptions.neverSites,[]);
+  assert.deepEqual(h.menuUpdates.at(-1),['kuai.site.input',{checked:true}]);
+  assert.equal(h.broadcasts.some(item=>item.tabId!==undefined&&String(item.message?.type).startsWith('KUAI_PAGE')),false,'the page is never messaged');
+  h.menuUpdates.length=0;
+  h.chromeApi.tabs.onActivated.emit({tabId:8,windowId:1});await flush();
+  assert.deepEqual(h.menuUpdates,[],'an inactive tab cannot change the checkbox');
+  tabs[8].active=true;h.chromeApi.tabs.onActivated.emit({tabId:8,windowId:1});await flush();
+  assert.deepEqual(h.menuUpdates.at(-1),['kuai.site.input',{checked:false}]);
+  tabs[7].url='https://stale.example/';h.chromeApi.webNavigation.onCommitted.emit({tabId:7,frameId:0,documentId:'d',url:'https://mail.example.com/next'});await flush();
+  assert.deepEqual(h.menuUpdates.at(-1),['kuai.site.input',{checked:true}],'the committed URL wins over a stale tab URL');
+  h.chromeApi.contextMenus.onClicked.emit({menuItemId:'kuai.site.input',checked:false,pageUrl:'https://mail.example.com/compose'},{id:7});await flush();
+  assert.deepEqual(h.data.inputOptions.disabledSites,[]);assert.deepEqual(h.created,[]);
+  h.controller.stop();assert.equal(h.chromeApi.tabs.onActivated.size,0);
+});
+
+test('a broader input pattern cannot be unchecked from the menu, so it opens the input settings',async()=>{
+  const stored=defaultSettings();stored.inputOptions.disabledSites=['*.example.com','mail.example.com'];
+  const h=fixture({stored});await h.controller.ready;await flush();
+  h.chromeApi.contextMenus.onClicked.emit({menuItemId:'kuai.site.input',checked:false,pageUrl:'https://mail.example.com/'},{id:7});await flush();
+  assert.deepEqual(h.data.inputOptions.disabledSites,['*.example.com']);
+  assert.deepEqual(h.created,[{url:'chrome-extension://kuai-extension/options.html#input'}]);
+  assert.deepEqual(h.menuUpdates.at(-1),['kuai.site.input',{checked:true}]);
   h.controller.stop();
 });
 

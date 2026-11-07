@@ -143,7 +143,7 @@ selectionOptions: {
 },
 inputOptions: {
   enabled: true, providerId: 'follow_page', sourceLanguage: 'follow_page', targetLanguage: 'en',
-  shortcut: 'Alt+X', restoreShortcut: 'Control+Shift+Z', icon: 'dot', autoApply: true,
+  shortcut: 'Alt+X', restoreShortcut: '', icon: 'dot', autoApply: true,
   includeOriginal: false, displayOrder: 'original-translation', disabledSites: []
 },
 hoverOptions: {
@@ -155,9 +155,9 @@ hoverOptions: {
 
 `normalizeInteractionOptions(input, providers)` 返回四个完整组；`resolveFeatureSettings(settings, feature)` 解析划词/输入的独立服务与语言，悬停沿用网页。服务只能引用启用的已保存实例或 `follow_page`；源语言可为 `auto`、`follow_page` 或语言代码，目标不能为 `auto`。`interactionConfigurationKey()` 用于通知路由，实际消费者仍按受影响的功能取消任务。
 
-完整配置包含公开的三个迁移标记：`inputDefaultsVersion: 2`、`paragraphDefaultsVersion: 1`、`subtitleStyleDefaultsVersion: 1`。仅对 `schemaVersion: 1` 完整旧配置识别旧默认值，局部未标记的显式值不被当成旧备份；已有效的未来版本标记也保留。
+完整配置包含公开的三个迁移标记：`inputDefaultsVersion: 3`、`paragraphDefaultsVersion: 1`、`subtitleStyleDefaultsVersion: 1`。仅对 `schemaVersion: 1` 完整旧配置识别旧默认值，局部未标记的显式值不被当成旧备份；已有效的未来版本标记也保留。
 
-- 输入：无标记的旧 `follow_page / none` 对改为 `en / dot`；标记 1 且目标为 `zh-Hans` 时改为 `en`，入口及其他选项保留。其他目标保留。
+- 输入：无标记的旧 `follow_page / none` 对改为 `en / dot`；标记 1 且目标为 `zh-Hans` 时改为 `en`，入口及其他选项保留。其他目标保留。标记低于 3 且 `restoreShortcut` 为旧默认 `Control+Shift+Z` 时清空（再次按 `shortcut` 即恢复），自定义值保留；字段仍保留以兼容旧备份。
 - 段落：缺少标记且旧触发方式为 `alt` 时一次性改为 `shift`，不改变启用状态或自定义组合。旧产品导入使用当前默认对象作基底，因此其明确支持的旧按键保持为显式值。
 - 字幕：缺少标记且没有明确 `backgroundMode` 时，只有旧字号/颜色/字重/描边/字体/背景这一整组视觉值全部匹配旧默认才改为新默认；布局、模式、顺序和遮罩不参加比较且保留。已自定义视觉值保留 `panel` 背景。
 
@@ -246,7 +246,7 @@ Popup 使用 `chrome.tabs.sendMessage` 向 **`frameId: 0`** 发送 `KUAI_PAGE_TR
 
 输入的快捷键、聚焦圆点和右键命令共用 `input-editor.js` 快照。默认圆点位于输入框内侧，首选距右边约 24 px、距下边约 8 px，随输入框及窗口位置变化调整；小输入框缩小入口。聚焦不发请求；圆点首次点击仅展开翻译图标，再点击图标才触发，快捷键仍可直接触发。默认翻译完成直接安全写回，不打开结果卡片；默认圆点模式仅用图标反馈：展开后翻译成功显示绿色勾，再点同一图标还原；加载时可点图标取消，错误时可点图标重试，不显示文字反馈弹窗。只有显式保存 `autoApply: false` 才打开单独的输入预览，不占用固定的划词卡片。
 
-文本、焦点归属、selection、类型、可编辑性与 DOM 身份都需匹配，`beforeinput` 可以取消写入。只支持普通文本控件及能保留现有节点的简单富文本写回；复杂富文本选区保留安全复制/显式预览。只记录最近一次成功替换，Ctrl+Shift+Z、输入反馈的恢复按钮或再次按主快捷键在记录有效时恢复；用户输入、组合输入、无关焦点或编辑器变化使旧操作失效，不接管原编辑器的多步 undo。
+文本、焦点归属、selection、类型、可编辑性与 DOM 身份都需匹配，`beforeinput` 可以取消写入。只支持普通文本控件及能保留现有节点的简单富文本写回；复杂富文本选区保留安全复制/显式预览。只记录最近一次成功替换，再次按主快捷键或输入反馈的恢复按钮在记录有效时恢复（默认关闭的 `restoreShortcut` 若有自定义值也可恢复）；用户输入、组合输入、无关焦点或编辑器变化使旧操作失效，不接管原编辑器的多步 undo。
 
 段落键盘快捷键在按下时记录指向的原段落和源文本，在释放时切换。轻量的捕获阶段只识别会冲突的完整组合；原有输入/划词处理仍在冒泡阶段，尊重编辑器的 `preventDefault`。Alt+Z / Alt+X 不会顺带触发 Alt 段落翻译。组合输入、选区、输入框、失焦、路由变化或整页恢复会取消尚未提交的手势；已经提交的请求不因松键或移开鼠标而取消。
 

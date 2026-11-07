@@ -50,7 +50,7 @@ test('choosing prior defaults after upgrade remains intentional through merge an
   const saved=mergeSettings(base,draft,current);
   for(const value of [normalizeSettings(saved),publicSettings(saved),importSettings(exportSettings(saved),saved)]){
     assert.equal(value.inputOptions.targetLanguage,'zh-Hans');assert.equal(value.hoverOptions.trigger,'alt');assert.equal(value.subtitleStyle.targetWeight,600);assert.equal(value.subtitleStyle.backgroundMode,'panel');
-    assert.equal(value.selectionOptions.delay,600);assert.equal(value.inputDefaultsVersion,2);assert.equal(value.paragraphDefaultsVersion,1);assert.equal(value.subtitleStyleDefaultsVersion,2);
+    assert.equal(value.selectionOptions.delay,600);assert.equal(value.inputDefaultsVersion,3);assert.equal(value.paragraphDefaultsVersion,1);assert.equal(value.subtitleStyleDefaultsVersion,2);
   }
   assert.equal(JSON.stringify(publicSettings(saved)).includes('fixture-only-secret'),false);assert.equal(importSettings(exportSettings(saved),saved).providers.at(-1).apiKey,'fixture-only-secret');
 });

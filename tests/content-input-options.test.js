@@ -20,7 +20,8 @@ test('repeated main shortcut restores the last unchanged successful input edit',
 
 test('dedicated restore button and shortcut restore without making a translation request',async()=>{
  const h=fixture(),input=field(h),ui=createInteractions(h.dependencies).start();await ui.translateInput();const restore=popupAction(h,'data-restore');assert.ok(restore);assert.equal(restore.hidden,false);h.emit(restore,'pointerdown');h.emit(restore,'click');assert.equal(input.value,'Keep hello tail');
- await ui.translateInput();assert.equal(key(h,input,'z',{ctrlKey:true,shiftKey:true}).defaultPrevented,true);assert.equal(input.value,'Keep hello tail');assert.equal(h.requests.length,2);ui.stop();
+ await ui.translateInput();assert.equal(key(h,input,'z',{ctrlKey:true,shiftKey:true}).defaultPrevented,false,'redo stays with the editor by default');assert.equal(input.value,'Keep 你好 tail');
+ h.settings.inputOptions={restoreShortcut:'Control+Shift+Z'};assert.equal(key(h,input,'z',{ctrlKey:true,shiftKey:true}).defaultPrevented,true);assert.equal(input.value,'Keep hello tail');assert.equal(h.requests.length,2);ui.stop();
 });
 
 for(const [order,want]of [['original-translation','Keep hello\n你好 tail'],['translation-original','Keep 你好\nhello tail']])test(`input can include the original in ${order} order`,async()=>{

@@ -111,13 +111,13 @@
       <label>聚焦输入区域时显示<select id="input-option-icon"></select></label>
       <label>原文语言<select id="input-option-sourceLanguage"></select></label>
       <label>输出语言（默认英文）<select id="input-option-targetLanguage"></select></label>
-      <div><label for="input-option-shortcut">输入翻译 / 再次按下恢复</label><input id="input-option-shortcut" type="text" maxlength="120" placeholder="Alt+X；留空关闭" autocomplete="off" spellcheck="false" aria-describedby="input-shortcut-help input-option-shortcut-error"><p id="input-option-shortcut-error" class="field-error" role="alert" hidden></p></div>
+      <div><label for="input-option-shortcut">输入翻译 / 再次按下恢复原文</label><input id="input-option-shortcut" type="text" maxlength="120" placeholder="Alt+X；留空关闭" autocomplete="off" spellcheck="false" aria-describedby="input-shortcut-help input-option-shortcut-error"><p id="input-option-shortcut-error" class="field-error" role="alert" hidden></p></div>
     </div>
     <p id="input-shortcut-help" class="muted">仅在符合条件的输入区域中生效。填写修饰键 + A–Z 字母，留空关闭。译文未再被编辑时，再按翻译快捷键可恢复原文。</p>
     <div class="checks"><label class="check"><input id="input-option-autoApply" type="checkbox" aria-describedby="input-apply-help">翻译完成后自动写回输入区域</label><label class="check"><input id="input-option-includeOriginal" type="checkbox">写回时同时保留原文</label></div>
     <p id="input-apply-help" class="muted">默认直接写回，不弹出结果卡；输入区内的小圆点默认不修改内容；先点击圆点展开翻译图标，再点击图标翻译成目标语言。完成后图标显示绿色勾，再点图标还原，不显示文字反馈弹窗。关闭自动写回后可先预览，再选择“应用”。输入内容、焦点或可编辑状态变化时停止写回，无法安全写入的译文仍可复制。</p>
     <label id="input-display-order-field" hidden>原文与译文的写回顺序<select id="input-option-displayOrder"></select></label>
-    <div class="interaction-subsection"><label for="input-option-disabledSites">禁用输入翻译的网站（每行一个，最多 100 项）</label><textarea id="input-option-disabledSites" class="rule-list" rows="3" maxlength="200100" placeholder="billing.example" spellcheck="false" aria-describedby="input-sites-help input-option-disabledSites-error"></textarea><p id="input-sites-help" class="muted">支持域名、HTTP/HTTPS 地址和路径通配符 * / **，每行最多 2000 字符。</p><p id="input-option-disabledSites-error" class="field-error" role="alert" hidden></p></div>
+    <div class="interaction-subsection"><label for="input-option-disabledSites">禁用输入翻译的网站（每行一个，最多 100 项）</label><textarea id="input-option-disabledSites" class="rule-list" rows="3" maxlength="200100" placeholder="billing.example" spellcheck="false" aria-describedby="input-sites-help input-option-disabledSites-error"></textarea><p id="input-sites-help" class="muted">支持域名、HTTP/HTTPS 地址和路径通配符 * / **，每行最多 2000 字符。也可在网页上右键选择“本站禁用输入翻译”。</p><p id="input-option-disabledSites-error" class="field-error" role="alert" hidden></p></div>
   </div>
 </section>
 

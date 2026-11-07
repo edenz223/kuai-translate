@@ -1,6 +1,6 @@
 /** Public configuration schema. Provider secrets are exposed only to extension pages. */
 import { normalizePageStyle, normalizeSubtitleStyle, SUBTITLE_STYLE_DEFAULTS } from './presentation.js';
-import { normalizeInteractionOptions } from './interactions.js';
+import { normalizeInteractionOptions, normalizeShortcut } from './interactions.js';
 export interface Provider {
   id: string; type: string; name: string; enabled: boolean;
   baseUrl?: string; apiKey?: string; model: string; region?: string; temperature: number | null;
@@ -36,7 +36,7 @@ export function normalizeSubtitleTrackPreference(input?:unknown):SubtitleTrackPr
 
 export function defaultSettings() {
   return {
-    schemaVersion:1, inputDefaultsVersion:2, paragraphDefaultsVersion:1, subtitleStyleDefaultsVersion:2, providerRevision:0, providers:structuredClone(FREE_PROVIDERS) as Provider[],
+    schemaVersion:1, inputDefaultsVersion:3, paragraphDefaultsVersion:1, subtitleStyleDefaultsVersion:2, providerRevision:0, providers:structuredClone(FREE_PROVIDERS) as Provider[],
     activeProviderId:'microsoft', subtitleProviderId:'follow_page',
     sourceLanguage:'auto', targetLanguage:'zh-Hans', interfaceLanguage:'auto',
     subtitlesEnabled:true, selectionEnabled:false, hoverEnabled:true, showOriginal:true,
@@ -111,10 +111,13 @@ export function normalizeSettings(input:unknown):Settings {
   const chineseInputDefault=input.schemaVersion===1&&input.inputDefaultsVersion===1&&input.inputOptions?.targetLanguage==='zh-Hans';
   let interactionInput=legacyInputDefaults?{...input,inputOptions:{...input.inputOptions,targetLanguage:'en',icon:'dot'}}:
     chineseInputDefault?{...input,inputOptions:{...input.inputOptions,targetLanguage:'en'}}:input;
+  // Alt+X already restores its own unedited translation; the old second key only shadowed redo.
+  if(input.schemaVersion===1&&version(input.inputDefaultsVersion,0)<3&&normalizeShortcut(input.inputOptions?.restoreShortcut)==='Control+Shift+Z')
+    interactionInput={...interactionInput,inputOptions:{...interactionInput.inputOptions,restoreShortcut:''}};
   if(input.schemaVersion===1&&version(input.paragraphDefaultsVersion,0)<1&&input.hoverOptions?.trigger==='alt')
     interactionInput={...interactionInput,hoverOptions:{...input.hoverOptions,trigger:'shift'}};
   return {
-    schemaVersion:1,inputDefaultsVersion:version(input.inputDefaultsVersion,2),paragraphDefaultsVersion:version(input.paragraphDefaultsVersion,1),subtitleStyleDefaultsVersion:version(input.subtitleStyleDefaultsVersion,2),providerRevision:Number.isSafeInteger(input.providerRevision)&&input.providerRevision>=0?input.providerRevision:0,providers,activeProviderId:active,
+    schemaVersion:1,inputDefaultsVersion:version(input.inputDefaultsVersion,3),paragraphDefaultsVersion:version(input.paragraphDefaultsVersion,1),subtitleStyleDefaultsVersion:version(input.subtitleStyleDefaultsVersion,2),providerRevision:Number.isSafeInteger(input.providerRevision)&&input.providerRevision>=0?input.providerRevision:0,providers,activeProviderId:active,
     subtitleProviderId:input.subtitleProviderId==='follow_page' || !enabled(input.subtitleProviderId) ? 'follow_page' : input.subtitleProviderId,
     sourceLanguage:language(input.sourceLanguage,'auto',true),targetLanguage:language(input.targetLanguage,'zh-Hans'),
     interfaceLanguage:['auto','en','zh-CN'].includes(input.interfaceLanguage) ? input.interfaceLanguage : 'auto',
