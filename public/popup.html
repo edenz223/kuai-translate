@@ -1,10 +1,44 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kuai translate</title><link rel="stylesheet" href="ui.css"></head>
-<body class="popup"><header class="brand"><img class="brand-mark" src="icons/icon-128.png" width="44" height="44" alt="" aria-hidden="true"><div><h1>Kuai translate</h1><p>简单、直接的翻译</p></div></header>
-<main><section class="popup-section"><div class="popup-section-heading"><h2>网页翻译</h2><button id="page-settings" class="link-button" type="button">网页设置 →</button></div><label>翻译服务<select id="provider" aria-label="翻译服务"></select></label><label>目标语言<select id="target" aria-label="目标语言"></select></label>
-<div class="actions"><button id="translate-page" class="primary" type="button" aria-describedby="page-scope" disabled>翻译此网页</button></div>
-<p id="page-scope" class="muted" role="status">正在读取页面状态…</p>
-<label class="check"><input id="paragraph-enabled" type="checkbox" aria-describedby="paragraph-shortcut">启用悬浮翻译</label><p id="paragraph-shortcut" class="muted">指向段落后，按一次 Shift 翻译，再按一次关闭译文。</p></section>
+<body class="popup">
+<header class="popup-header"><img class="brand-mark" src="icons/icon-128.png" width="32" height="32" alt="" aria-hidden="true"><div class="popup-title"><h1>Kuai translate</h1><p id="site-host" class="muted">当前网页</p></div><span id="page-badge" class="page-badge" data-state="idle">未翻译</span></header>
+<main>
+<section class="popup-card" aria-labelledby="page-heading"><h2 id="page-heading" class="visually-hidden">网页翻译</h2>
+  <div class="language-pair">
+    <label><span>原文</span><select id="source" aria-label="原文语言"></select></label>
+    <button id="swap-languages" class="icon-button" type="button" aria-label="互换原文与目标语言" title="互换语言"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg></button>
+    <label><span>目标</span><select id="target" aria-label="目标语言"></select></label>
+  </div>
+  <button id="translate-page" class="primary popup-main" type="button" aria-describedby="page-scope" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h9M8.5 3v2M11 5c-1 4-3.5 7-6.5 8.5M6.5 8.5c1.2 2 3 3.6 5 4.5M13 21l4-9 4 9M14.5 18h5"/></svg><span id="translate-page-label">翻译此网页</span></button>
+  <div id="page-progress" class="progress" hidden><div id="page-progress-bar" class="progress-bar"></div></div>
+  <p id="page-scope" class="muted" role="status">正在读取页面状态…</p>
+  <div class="provider-row">
+    <label><span>翻译服务</span><select id="provider" aria-label="翻译服务"></select></label>
+    <p id="provider-warning" class="provider-warning" hidden>此服务尚未填写 API Key。<button id="provider-settings" class="link-button" type="button">去配置</button></p>
+  </div>
+</section>
+<section class="popup-card" aria-labelledby="quick-heading"><h2 id="quick-heading">快捷开关</h2>
+  <div class="quick-grid">
+    <label class="quick-toggle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 10h10M4 15h16M4 19h10"/></svg><span>双语对照</span><input id="display-bilingual" type="checkbox" role="switch"></label>
+    <label class="quick-toggle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4l5 15 2.2-6.3L19 10.5z"/></svg><span>悬浮翻译</span><input id="paragraph-enabled" type="checkbox" role="switch" aria-describedby="paragraph-shortcut"></label>
+    <label class="quick-toggle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h3M5 19h3M6.5 5v14M11 9h8M11 13h8M11 17h5"/></svg><span>划词翻译</span><input id="selection-enabled" type="checkbox" role="switch"></label>
+    <label class="quick-toggle"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h1M11 10h1M15 10h2M7 14h10"/></svg><span>输入翻译</span><input id="input-enabled" type="checkbox" role="switch"></label>
+  </div>
+  <p id="paragraph-shortcut" class="muted">指向段落后，按一次 Shift 翻译，再按一次关闭译文。</p>
+  <fieldset class="site-rule"><legend>本站</legend>
+    <div class="segmented">
+      <label><input id="site-default" type="radio" name="site-rule" value="default"><span>默认</span></label>
+      <label><input id="site-always" type="radio" name="site-rule" value="always"><span>自动翻译</span></label>
+      <label><input id="site-never" type="radio" name="site-rule" value="never"><span>从不翻译</span></label>
+    </div>
+  </fieldset>
+  <p id="site-rule-note" class="muted" hidden></p>
+</section>
 <p id="status" role="status" aria-live="polite" class="status">加载设置…</p>
-<nav class="popup-links"><button id="text-tool" class="link-button" type="button">文本 / 文件翻译</button><button id="options" class="link-button" type="button">设置与 API</button></nav></main>
+<nav class="popup-links" aria-label="更多">
+  <button id="text-tool" class="nav-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6"/></svg>文本 / 文件</button>
+  <button id="page-settings" class="nav-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>网页设置</button>
+  <button id="options" class="nav-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>设置与 API</button>
+</nav>
+</main>
 <script type="module" src="src/ui/popup.js"></script></body></html>

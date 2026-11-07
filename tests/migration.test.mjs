@@ -17,9 +17,10 @@ test('migration preserves the complete manifest and every permission except the 
 test('unchanged public assets preserve their migration baseline',async()=>{
   for(const [name,hash] of Object.entries(baseline.assets)) {
     const emitted=await fs.readFile(new URL('dist/'+name.slice('public/'.length),root));
-    if(['public/options.html','public/popup.html'].includes(name)){
+    if(['public/options.html','public/popup.html','public/ui.css'].includes(name)){
       // The subtitle font scaling control is covered by the presentation UI tests.
       // Options and popup changes are covered by the interaction and popup UI tests.
+      // The redesigned popup styles are checked by the browser smoke screenshot.
       assert.deepEqual(emitted,await fs.readFile(new URL(name,root)));continue;
     }
     assert.equal(createHash('sha256').update(emitted).digest('hex'),hash,name);

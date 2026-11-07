@@ -169,7 +169,7 @@ test('the actual popup synchronizes saved settings before translating even while
   read.resolve();await setImmediate();assert.equal(content.requests.length,1);await saving;await translating;
   assert.equal(content.requests.length,1);assert.equal(content.requests[0].options.targetLanguage,'ja');
   assert.equal(content.runtime.status().translated,1);assert.ok(paragraph.querySelector('[data-kuai-page-translation]'));
-  assert.match(popup.node('translate-page').textContent,/恢复原文/);
+  assert.match(popup.node('translate-page-label').textContent,/恢复原文/);
   query.resolve();await setImmediate();assert.equal(content.runtime.status().translated,1);
 });
 

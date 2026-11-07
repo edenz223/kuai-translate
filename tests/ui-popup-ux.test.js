@@ -26,13 +26,13 @@ function setup(t,{url='https://example.com/article',state={active:false,total:0,
 
 test('one popup page button restores existing paragraph translations and starts again on the next click',async t=>{
   const h=setup(t,{state:{active:false,total:3,translated:3}});await h.start();
-  assert.match(h.node('translate-page').textContent,/恢复原文/);
+  assert.match(h.node('translate-page-label').textContent,/恢复原文/);
   await h.node('translate-page').fire('click');
   assert.deepEqual(h.actions().map(item=>item.type),['KUAI_PAGE_RESTORE']);
-  assert.match(h.node('translate-page').textContent,/翻译此网页/);
+  assert.match(h.node('translate-page-label').textContent,/翻译此网页/);
   await h.node('translate-page').fire('click');
   assert.deepEqual(h.actions().map(item=>item.type),['KUAI_PAGE_RESTORE','KUAI_PAGE_TRANSLATE']);
-  assert.match(h.node('translate-page').textContent,/恢复原文/);
+  assert.match(h.node('translate-page-label').textContent,/恢复原文/);
   assert.ok(h.sent.every(item=>item.id===12&&item.options.frameId===0));
 });
 
@@ -109,4 +109,52 @@ test('a successful retrying settings edit removes the earlier save error and unl
   assert.equal(h.settings.targetLanguage,'en');assert.equal(h.settings.activeProviderId,'google');
   assert.equal(h.node('status').classList.contains('error'),false);assert.doesNotMatch(h.node('status').textContent,/未保存|failure/);
   assert.equal(h.node('translate-page').disabled,false);
+});
+
+test('quick switches save display mode, selection and input without starting a translation',async t=>{
+  const h=setup(t);await h.start();
+  assert.equal(h.node('display-bilingual').checked,true);
+  h.node('display-bilingual').checked=false;await h.node('display-bilingual').fire('change');
+  h.node('selection-enabled').checked=true;await h.node('selection-enabled').fire('change');
+  h.node('input-enabled').checked=false;await h.node('input-enabled').fire('change');
+  assert.equal(h.settings.pageDisplayMode,'translation_only');
+  assert.equal(h.settings.selectionEnabled,true);
+  assert.equal(h.settings.inputOptions.enabled,false);
+  assert.equal(h.actions().length,0);
+});
+
+test('language pair swaps only after an explicit source language is chosen',async t=>{
+  const h=setup(t);await h.start();
+  assert.equal(h.node('swap-languages').disabled,true,'auto-detect cannot become a target');
+  h.node('source').value='en';await h.node('source').fire('change');
+  assert.equal(h.node('swap-languages').disabled,false);
+  await h.node('swap-languages').fire('click');
+  assert.equal(h.settings.sourceLanguage,'zh-Hans');assert.equal(h.settings.targetLanguage,'en');
+});
+
+test('site rule writes only this host and keeps auto-translate scoped to it',async t=>{
+  const h=setup(t,{url:'https://news.example.com/a'});await h.start();
+  assert.equal(h.node('site-host').textContent,'news.example.com');
+  assert.equal(h.node('site-default').checked,true);
+  h.node('site-always').checked=true;await h.node('site-always').fire('change');
+  assert.deepEqual(h.settings.pageOptions.alwaysSites,['news.example.com']);
+  assert.equal(h.settings.pageOptions.autoTranslate,true);
+  h.node('site-never').checked=true;await h.node('site-never').fire('change');
+  assert.deepEqual(h.settings.pageOptions.alwaysSites,[]);assert.deepEqual(h.settings.pageOptions.neverSites,['news.example.com']);
+  assert.equal(h.node('page-badge').dataset.state,'blocked');
+  h.node('site-default').checked=true;await h.node('site-default').fire('change');
+  assert.deepEqual(h.settings.pageOptions.neverSites,[]);
+  assert.equal(h.node('site-default').checked,true);
+});
+
+test('page badge and progress follow the page translation state',async t=>{
+  const h=setup(t,{state:{active:true,total:4,translated:1}});await h.start();
+  assert.equal(h.node('page-badge').dataset.state,'working');
+  assert.equal(h.node('page-progress').hidden,false);
+  assert.equal(h.node('page-progress-bar').style.width,'25%');
+});
+
+test('a keyed service without an API key links to its configuration',async t=>{
+  const h=setup(t);await h.start();
+  assert.equal(h.node('provider-warning').hidden,true);
 });
