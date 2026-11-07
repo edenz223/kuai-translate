@@ -199,3 +199,13 @@ test('rich text structural mutations still invalidate restoration even if markup
  for(const observer of observers)if(observer.active)observer.records.push({type:'childList',target:editor});
  assert.equal(ui.restoreInput(),false);assert.equal(editor.textContent,'译：hello');ui.stop();
 });
+
+test('the collapsed dot carries the request state so progress is visible without expanding',async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={icon:'dot'};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));
+ const ui=createInteractions(h.dependencies).start();h.emit(input,'focusin');
+ const dot=()=>h.doc.getElementById('kuai-input-trigger').shadowRoot.querySelector('[data-trigger]');
+ assert.equal(dot().getAttribute('data-state'),'idle');
+ const task=ui.translateInput();await settle();assert.equal(dot().getAttribute('data-state'),'loading');
+ finish({translations:['你好']});await task;await settle();assert.equal(dot().getAttribute('data-state'),'translated');
+ ui.stop();
+});
