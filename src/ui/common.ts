@@ -73,6 +73,7 @@ export function describeProviderError(error: unknown): {title:string;hint:string
   return match ? {title:match[1],hint:match[2],detail} : {title:'测试失败',hint:detail,detail:''};
 }
 export const LANGUAGES: SelectEntry[] = [['auto','自动检测'],['zh-Hans','简体中文'],['zh-Hant','繁體中文'],['en','English'],['ja','日本語'],['ko','한국어'],['fr','Français'],['de','Deutsch'],['es','Español'],['pt','Português'],['ru','Русский'],['ar','العربية'],['hi','हिन्दी'],['it','Italiano'],['vi','Tiếng Việt'],['th','ไทย'],['id','Bahasa Indonesia']];
+export const languageName = (id: string): string => LANGUAGES.find(([value])=>value===id)?.[1] || id;
 export const byId = <T extends HTMLElement = HTMLElement>(document: Document,id: string): T => document.getElementById(id) as T;
 export function setStatus(node: HTMLElement, message: string, error = false): void { node.textContent = message; node.classList.toggle('error',error); }
 export function fillSelect(document: Document, select: SelectControl, entries: SelectEntry[], selected: string): void {
@@ -86,7 +87,8 @@ export function fillSelect(document: Document, select: SelectControl, entries: S
 }
 export function fillProviders(document: Document, select: SelectControl, settings: Settings, selected: string, follow = false): void {
   const entries = settings.providers.filter(provider=>provider.enabled).map((provider): SelectEntry=>[provider.id,provider.name || TYPE_NAMES[provider.type] || provider.type]);
-  fillSelect(document,select,follow ? [['follow_page','跟随网页翻译'],...entries] : entries,selected);
+  const current = entries.find(([id])=>id===settings.activeProviderId)?.[1];
+  fillSelect(document,select,follow ? [['follow_page',current ? `跟随网页翻译（当前：${current}）` : '跟随网页翻译'],...entries] : entries,selected);
 }
 export function downloadText(document: Document, fileName: string, text: string, type = 'text/plain;charset=utf-8') {
   const url = URL.createObjectURL(new Blob([text],{type})), anchor = document.createElement('a');

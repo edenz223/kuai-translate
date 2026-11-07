@@ -44,7 +44,7 @@ test('the actual settings controller saves every interaction option and reloads 
     ['selection','disabledSites','private.example','input'],
     ['input','enabled',true],['input','providerId','yandex'],['input','sourceLanguage','ja'],['input','targetLanguage','en'],
     ['input','shortcut','Alt+K','input'],['input','icon','icon'],
-    ['input','autoApply',false],['input','includeOriginal',true],['input','displayOrder','translation-original'],
+    ['input','autoApply',false],['input','writeBack','translation-original'],
     ['input','disabledSites','billing.example','input'],
     ['hover','trigger','custom'],['hover','customKeys','control + k','input'],['hover','mode','area'],
     ['hover','delay','450','input'],['hover','holdDelay','1000','input'],['hover','showIndicator',false],
@@ -91,8 +91,6 @@ test('the settings page shows only the controls that apply to each selected trig
   assert.equal(h.node('selection-delay-field').hidden,true,'click activation has no artificial delay');
   await h.edit('selection-option-triggerAction','hover');assert.equal(h.node('selection-delay-field').hidden,false);
   await h.edit('selection-option-triggerMode','meta');assert.equal(h.node('selection-trigger-action-field').hidden,true);
-  assert.equal(h.node('input-display-order-field').hidden,true);
-  await h.edit('input-option-includeOriginal',true);assert.equal(h.node('input-display-order-field').hidden,false);
   assert.equal(h.node('hover-options-panel').hidden,false);
   await h.edit('hover-enabled',false);assert.equal(h.node('hover-options-panel').hidden,true);
   await h.edit('hover-enabled',true);assert.equal(h.node('hover-options-panel').hidden,false);
@@ -276,4 +274,32 @@ test('enabled provider choices stay current and invalid drafts can be explicitly
   await h.edit('page-option-shortcut','Ctrl+','input');
   await h.node('reload-settings').fire('click');await setImmediate();
   assert.equal(h.node('page-option-shortcut').value,'Alt+Z');assert.equal(h.node('page-option-shortcut-error').hidden,true);
+});
+
+test('input write-back is one choice stored as includeOriginal and displayOrder',async t=>{
+  const h=options(t);await h.start();
+  const field=h.node('input-option-writeBack');
+  assert.deepEqual(field.children.map(option=>option.value),['translation','original-translation','translation-original']);
+  assert.equal(field.value,'translation');assert.equal(h.node('input-write-back-help').hidden,true);
+  await h.edit('input-option-writeBack','translation-original');assert.equal(h.node('input-write-back-help').hidden,false);
+  assert.equal(h.stored.inputOptions.includeOriginal,true);assert.equal(h.stored.inputOptions.displayOrder,'translation-original');
+  await h.edit('input-option-writeBack','translation');
+  assert.equal(h.stored.inputOptions.includeOriginal,false);assert.equal(h.stored.inputOptions.displayOrder,'translation-original','the order is kept for next time');
+  const reopened=h.reopen();await reopened.start();assert.equal(reopened.node('input-option-writeBack').value,'translation');
+  await h.edit('input-option-autoApply',false);assert.match(h.node('input-apply-help').textContent,/预览/);
+  await h.edit('input-option-icon','none');assert.match(h.node('input-icon-help').textContent,/快捷键/);
+});
+
+test('input language pair shows follow-page values and swaps the effective languages',async t=>{
+  const h=options(t);await h.start();
+  const source=h.node('input-option-sourceLanguage');
+  assert.equal(source.children[0].textContent,'跟随网页原文语言（当前：自动检测）');
+  assert.match(h.node('input-option-providerId').children[0].textContent,/^跟随网页翻译（当前：.+）$/);
+  assert.equal(h.node('input-swap-languages').disabled,true,'auto-detect cannot become a target');
+  assert.equal(h.node('input-swap-help').hidden,false);
+  await h.edit('input-option-sourceLanguage','follow_page');await h.edit('input-option-targetLanguage','follow_page');
+  await h.edit('source-language','ja');
+  assert.equal(h.node('input-swap-languages').disabled,false);
+  await h.node('input-swap-languages').fire('click');await setImmediate();
+  assert.equal(h.stored.inputOptions.sourceLanguage,'zh-Hans');assert.equal(h.stored.inputOptions.targetLanguage,'ja');
 });
