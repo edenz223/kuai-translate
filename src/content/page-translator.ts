@@ -4,7 +4,7 @@ import type {BrowserEnvironment,CodedError,PageBlock} from './dom.js';
 import type {PageContent,PageLinkBinding} from './page-content.js';
 
 export interface PageStatus {active:boolean;translated:number;errors:number;total:number;cancelled:boolean;isTranslated:boolean;error?:string}
-export interface PageTranslatorOptions {document:Document;env?:BrowserEnvironment;translate:Translate;cancel?:(id:string)=>unknown;getSettings:()=>Settings;makeRequestId?:()=>string;onBeforeTranslate?:()=>void;onRestore?:()=>void}
+export interface PageTranslatorOptions {document:Document;env?:BrowserEnvironment;translate:Translate;cancel?:(id:string)=>unknown;getSettings:()=>Settings;makeRequestId?:()=>string;onBeforeTranslate?:()=>void;onRestore?:()=>void;onChange?:(status:PageStatus)=>void}
 export interface TranslateBlocksOptions {validate?:()=>boolean;retryErrors?:boolean;viewportOnly?:boolean}
 type PageEntryStatus = 'pending'|'success'|'error'|'cancelled';
 interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>boolean;viewportOnly:boolean;url:string;status:PageEntryStatus;output:HTMLElement|null;inner?:HTMLElement;sheet?:HTMLStyleElement;sourceLayout?:string|null;parts:(string|undefined)[];originals:HTMLElement[];content:PageContent;links:PageLinkBinding[];resolve:(()=>void)|null;done?:Promise<void>;titleLayout?:boolean;loadingHost?:HTMLElement|null;loadingNode?:Text|null;expected?:number}
@@ -24,7 +24,7 @@ const alwaysAllowed=()=>true;
 let nextOutputId=0;
 
 /** Append translations to existing blocks. Original nodes and listeners never move. */
-export function createPageTranslator({ document, env = globalThis, translate, cancel = () => {}, getSettings, makeRequestId = makeId,onBeforeTranslate=()=>{},onRestore=()=>{} }: PageTranslatorOptions) {
+export function createPageTranslator({ document, env = globalThis, translate, cancel = () => {}, getSettings, makeRequestId = makeId,onBeforeTranslate=()=>{},onRestore=()=>{},onChange }: PageTranslatorOptions) {
   const entries = new Map<HTMLElement,PageEntry>(), requests = new Map<string,PageRequest>(),loadingEntries=new Set<PageEntry>(),loadingDisposers: (()=>void)[]=[];
   const requestCancelled=Symbol('cancelled request');
   let cancelled = false,observer: MutationObserver|null=null,repairQueued=false,titleLayoutStyle: HTMLStyleElement|null=null,lastError='';
@@ -34,6 +34,12 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     const all = [...entries.values()], translated = all.filter(entry => entry.status === 'success').length;
     return { active:all.some(entry=>entry.status==='pending'), translated, errors:all.filter(entry => entry.status === 'error').length, total:all.length, cancelled, isTranslated:translated > 0,...(lastError?{error:lastError}:{}) };
   };
+  // Entry changes arrive in bursts; observers receive one summary per microtask.
+  let changeQueued=false;
+  function changed(): void{
+    if(!onChange||changeQueued)return;
+    changeQueued=true;queueMicrotask(()=>{changeQueued=false;onChange(status());});
+  }
   function abortRequest(id: string): void {
     const request=requests.get(id);if(!request)return;
     requests.delete(id);request.release!();
@@ -52,6 +58,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     }
     if(entry.titleLayout&&entry.element.getAttribute('data-kuai-title-layout')==='stacked')entry.element.removeAttribute('data-kuai-title-layout');
     if(entries.get(entry.element)===entry)entries.delete(entry.element);
+    changed();
     if(!entries.size){observer?.disconnect();observer=null;titleLayoutStyle?.remove();titleLayoutStyle=null;}
   }
   function observe() {
@@ -68,7 +75,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
   }
   function makeEntry(element: HTMLElement, source: string, key: string, validate: ()=>boolean, viewportOnly: boolean): PageEntry {
     const entry: PageEntry={element,source,key,validate,viewportOnly,url:route(),status:'pending',output:null,parts:[],originals:[],content:capturePageContent(element,env),links:[],resolve:null};
-    entry.done=new Promise<void>(resolve=>{entry.resolve=resolve;});entries.set(element,entry);observe();return entry;
+    entry.done=new Promise<void>(resolve=>{entry.resolve=resolve;});entries.set(element,entry);observe();changed();return entry;
   }
   function stackYouTubeTitle(entry: PageEntry): void{
     let host;try{host=new URL(route()).hostname;}catch{return;}
@@ -213,6 +220,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
       });entry.inner!.append(retry);
     }
     present(entry);if(state!=='pending')finish(entry);
+    changed();
   }
   function cancelCurrent() {
     cancelled = true;
@@ -314,6 +322,6 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     if(isPageSiteBlocked(getSettings(),route())){const error=new Error('当前网址已设为不翻译，可在网页翻译设置中修改。') as CodedError;error.code='SITE_DISABLED';throw error;}
     onBeforeTranslate();lastError='';return translateBlocks(collectBlocks(document,env,{visibleOnly:true}),{retryErrors,viewportOnly:true});
   }
-  function reportError(error: unknown): void{lastError=String((error as {message?:unknown} | null)?.message||labels().failed);}
+  function reportError(error: unknown): void{lastError=String((error as {message?:unknown} | null)?.message||labels().failed);changed();}
   return { translatePage,translateBlocks,toggleBlocks,restore,cancelCurrent,status,refreshPresentation,hasTranslation,reportError,stop:restore };
 }

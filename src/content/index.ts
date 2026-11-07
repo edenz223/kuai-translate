@@ -1,11 +1,11 @@
 import type {Settings} from '../shared/settings.js';
-import type {MessageResponse,PageRequest,PageStatus,PreferencePatch,PublicFailure} from '../shared/messages.js';
+import type {MessageResponse,PageBadgeState,PageRequest,PageStatus,PreferencePatch,PublicFailure} from '../shared/messages.js';
 import type {YouTubeControllerOptions} from '../youtube/index.js';
 import type {BrowserEnvironment,CodedError} from './dom.js';
 
 type SaveMethod = 'updatePreferences'|'updatePagePreferences';
 type SavePatch<M extends SaveMethod> = Parameters<typeof defaultClient[M]>[0];
-type ContentClient = Pick<typeof defaultClient,'getSettings'|'translate'|'cancel'|'onSettingsChanged'> & Partial<Pick<typeof defaultClient,'makeRequestId'|'openOptions'|SaveMethod>>;
+type ContentClient = Pick<typeof defaultClient,'getSettings'|'translate'|'cancel'|'onSettingsChanged'> & Partial<Pick<typeof defaultClient,'makeRequestId'|'openOptions'|'reportPageState'|SaveMethod>>;
 interface YouTubeInstance {stop?:()=>void;openSidebar?:()=>unknown}
 type YouTubeStartOptions = YouTubeControllerOptions & {cancel:typeof defaultClient.cancel};
 export interface ContentRuntimeOptions {env?:BrowserEnvironment;client?:ContentClient;startYouTube?:(options:YouTubeStartOptions)=>YouTubeInstance|Promise<YouTubeInstance>}
@@ -20,7 +20,7 @@ import {pageTranslationKey,isPageSiteBlocked} from './page-policy.js';
 import {createPageTriggers} from './page-triggers.js';
 import {interactionConfigurationKey} from '../shared/interactions.js';
 
-const PAGE_MESSAGES = new Set(['KUAI_PAGE_TRANSLATE','KUAI_PAGE_RESTORE','KUAI_SELECTION_TRANSLATE','KUAI_INPUT_TRANSLATE','KUAI_PAGE_STATUS','KUAI_YOUTUBE_OPEN_LIST']);
+const PAGE_MESSAGES = new Set(['KUAI_PAGE_TRANSLATE','KUAI_PAGE_RESTORE','KUAI_SELECTION_TRANSLATE','KUAI_INPUT_TRANSLATE','KUAI_PAGE_STATUS','KUAI_YOUTUBE_OPEN_LIST','KUAI_PAGE_TOGGLE','KUAI_PAGE_DISPLAY_MODE']);
 const emptyStatus = () => ({active:false,translated:0,errors:0,total:0,cancelled:false,isTranslated:false});
 
 /** Wire native controllers to document-scoped extension messages. */
@@ -29,6 +29,9 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
   let settings: Settings, page: ReturnType<typeof createPageTranslator>|undefined, pageTriggers: ReturnType<typeof createPageTriggers>|undefined, interactions: ReturnType<typeof createInteractions>|undefined, youtube: YouTubeInstance|undefined, youtubeStarting: Promise<YouTubeInstance|undefined>|null|undefined, startPromise: Promise<ContentRuntime>|null|undefined, stopped=false, observer: MutationObserver|undefined, unsubscribeSettings: (()=>void)|undefined, readyResolver: (()=>void)|null|undefined;
   let phase='idle',subtitleError: PublicFailure|null=null,settingsRead: SettingsRead|undefined,settingsError='',actionEpoch=0;
   let lastUrl=env.location?.href||'', lastError='';
+  // The background clears the badge on each committed navigation, so a fresh document starts idle.
+  let reportedBadge: PageBadgeState='idle';
+  const topFrame=(()=>{try{return !env.top||env.top===(env as unknown);}catch{return false;}})();
   const launchYouTube=startYouTube || (async (options: YouTubeStartOptions) => (await import('../youtube/index.js')).startYouTube(options));
   const subscribeSettings=(callback: (settings:Settings)=>void): (()=>void)=>{subscribers.add(callback);return()=>subscribers.delete(callback);};
   const actionError=()=>Object.assign(new Error(stopped?'页面翻译已停止，请刷新页面。':'页面操作已取消，请重试。'),{code:stopped?'CONTENT_STOPPED':'CANCELLED'});
@@ -80,6 +83,14 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
     pageTriggers?.updateSettings();
     lastError='';
     for(const callback of [...subscribers]){try{callback(next);}catch{subtitleError={code:'YOUTUBE_UPDATE_FAILED',message:'字幕界面更新失败，请重新打开字幕列表或刷新页面。'};}}
+    reportBadge();
+  }
+  function reportBadge(): void{
+    if(stopped||!topFrame||!client.reportPageState||!settings)return;
+    const value=status();
+    const state: PageBadgeState=value.active?'working':value.errors||value.error?'error':value.translated?'done':isPageSiteBlocked(settings,env.location?.href||'')?'blocked':'idle';
+    if(state===reportedBadge)return;
+    reportedBadge=state;client.reportPageState(state).catch(()=>{if(reportedBadge===state)reportedBadge='idle';});
   }
   function status(): PageStatus{return {...(page?.status()||emptyStatus()),phase,...(settingsError||lastError?{error:settingsError||lastError}:{}),...(subtitleError?{subtitleError}:{})};}
   function ensureYouTube(): Promise<YouTubeInstance|undefined>{
@@ -112,6 +123,8 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
       case 'KUAI_PAGE_TRANSLATE':
         if(isPageSiteBlocked(settings,env.location?.href||'')){const error=new Error('当前网址已设为不翻译，可在网页翻译设置中修改。') as CodedError;error.code='SITE_DISABLED';throw error;}
         lastError='';void pageTriggers!.translate().catch(error=>{lastError=String(error?.message||'Page translation failed');page!.cancelCurrent();});return status();
+      case 'KUAI_PAGE_TOGGLE':lastError='';void pageTriggers!.toggle().catch(error=>{lastError=String(error?.message||'Page translation failed');reportBadge();});return status();
+      case 'KUAI_PAGE_DISPLAY_MODE':void pageTriggers!.mode().catch(error=>{lastError=String(error?.message||'Display mode change failed');reportBadge();});return status();
       case 'KUAI_SELECTION_TRANSLATE':return interactions!.translateSelection({text:message.text});
       case 'KUAI_INPUT_TRANSLATE':return interactions!.translateInput();
       case 'KUAI_YOUTUBE_OPEN_LIST': {
@@ -145,7 +158,7 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
       await ready();if(stopped)return api;
       settings=await client.getSettings(false);if(stopped)return api;
       const dependencies={document,env,getSettings:()=>settings,translate:client.translate,cancel:client.cancel,makeRequestId:client.makeRequestId,openOptions:client.openOptions,onUserAction:(action:string)=>pageTriggers?.handleUserAction(action)};
-      page=createPageTranslator({...dependencies,onRestore:()=>interactions?.clearParagraphGesture?.()});
+      page=createPageTranslator({...dependencies,onRestore:()=>interactions?.clearParagraphGesture?.(),onChange:reportBadge});
       interactions=createInteractions({...dependencies,page}).start();
       pageTriggers=createPageTriggers({document,env,getSettings:()=>settings,page,onManualStop:cancelSettingsRead,changeDisplayMode:async value=>{
         if(!client.updatePagePreferences)throw Error('请重新加载扩展并刷新网页，再使用显示模式快捷键。');
@@ -159,7 +172,9 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
       if(env.MutationObserver){observer=new env.MutationObserver(routeChanged);observer.observe(document.documentElement,{childList:true,subtree:true});}
       // Caption UI is optional: its failure must not disable webpage translation.
       try{await ensureYouTube();}catch{}
-      if(!stopped)phase='ready';
+      // A back/forward cache restore commits a navigation, which clears the badge; report the kept state again.
+      listen(env,'pageshow',event=>{if(event.persisted){reportedBadge='idle';reportBadge();}});
+      if(!stopped)phase='ready';reportBadge();
       return api;
     })().catch(()=>{
       cleanup();startPromise=null;

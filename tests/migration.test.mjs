@@ -10,16 +10,24 @@ test('migration preserves the complete manifest and every permission except the 
   const before=await fs.readFile(new URL('./fixtures/manifest.before-typescript.json',import.meta.url),'utf8');
   const {version}=JSON.parse(await fs.readFile(new URL('package.json',root),'utf8'));
   const expected=Buffer.from(before.replace(/("version": )"[^"]+"/,'$1'+JSON.stringify(version)));
-  assert.deepEqual(await fs.readFile(new URL('public/manifest.json',root)),expected);
-  assert.deepEqual(await fs.readFile(new URL('dist/manifest.json',root)),expected);
+  // Keyboard commands need no permission; every other manifest byte stays as migrated.
+  const withoutCommands=async name=>{
+    const text=await fs.readFile(new URL(name,root),'utf8');
+    assert.deepEqual(Object.keys(JSON.parse(text).commands),['toggle-page','toggle-display-mode']);
+    return Buffer.from(text.replace(/  "commands": \{[\s\S]*?\n  \},\n/,''));
+  };
+  assert.deepEqual(await withoutCommands('public/manifest.json'),expected);
+  assert.deepEqual(await withoutCommands('dist/manifest.json'),expected);
 });
 
 test('unchanged public assets preserve their migration baseline',async()=>{
   for(const [name,hash] of Object.entries(baseline.assets)) {
     const emitted=await fs.readFile(new URL('dist/'+name.slice('public/'.length),root));
-    if(['public/options.html','public/popup.html'].includes(name)){
+    if(['public/options.html','public/popup.html','public/ui.css','public/_locales/en/messages.json','public/_locales/zh_CN/messages.json'].includes(name)){
       // The subtitle font scaling control is covered by the presentation UI tests.
       // Options and popup changes are covered by the interaction and popup UI tests.
+      // The redesigned popup styles are checked by the browser smoke screenshot.
+      // Locale additions name the keyboard commands registered in the manifest.
       assert.deepEqual(emitted,await fs.readFile(new URL(name,root)));continue;
     }
     assert.equal(createHash('sha256').update(emitted).digest('hex'),hash,name);
@@ -36,7 +44,8 @@ test('unchanged runtimes preserve their original executable structure',async()=>
   // Semantic ASR cuts are covered by youtube-captions behavior tests.
   // Authored playback grouping is covered by captions and runtime overlay tests.
   // Popup cleanup and input controls are covered by ui-popup and ui-interaction-options tests.
-  const evolved=new Set(['src/ui/popup.js','src/ui/interaction-options.js','src/youtube/captions.js','src/youtube/asr-segmentation.js','public/content-loader.js','src/content/page-policy.js','src/content/page-content.js','src/background/controller.js','src/providers/index.js','src/ui/options.js','src/content/interactions.js','src/content/dom.js','src/content/page-translator.js','src/youtube/index.js','src/youtube/capture-main.js','src/youtube/sidebar.js','src/youtube/presentation.js','src/youtube/overlay.js','src/shared/presentation.js','src/shared/settings.js','src/shared/styles.js','src/ui/presentation.js']);
+  // Toolbar badge reporting and page commands are covered by content-badge and background tests.
+  const evolved=new Set(['src/ui/popup.js','src/content/index.js','src/content/page-translator.js','src/content/page-triggers.js','src/shared/client.js','src/ui/interaction-options.js','src/youtube/captions.js','src/youtube/asr-segmentation.js','public/content-loader.js','src/content/page-policy.js','src/content/page-content.js','src/background/controller.js','src/providers/index.js','src/ui/options.js','src/content/interactions.js','src/content/dom.js','src/content/page-translator.js','src/youtube/index.js','src/youtube/capture-main.js','src/youtube/sidebar.js','src/youtube/presentation.js','src/youtube/overlay.js','src/shared/presentation.js','src/shared/settings.js','src/shared/styles.js','src/ui/presentation.js']);
   for(const [name,hash] of Object.entries(baseline.runtime)) {
     if(evolved.has(name))continue;
     const target=name==='public/content-loader.js'?'content-loader.js':name;

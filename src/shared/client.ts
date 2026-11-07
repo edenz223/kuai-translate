@@ -1,6 +1,6 @@
 import type {Settings} from './settings.js';
 import type {RequestType, RequestPayload, RequestResultMap, MessageResponse, TranslationOptions,
-  TranslationResult, PreferencePatch, OptionsSection, SettingsChanged} from './messages.js';
+  TranslationResult, PreferencePatch, OptionsSection, SettingsChanged, PageBadgeState} from './messages.js';
 export type {TranslationOptions, TranslationResult, Translate} from './messages.js';
 type ClientChrome = Pick<typeof chrome, 'runtime'>;
 /** The only content-to-background transport. No provider credential is sent by content. */
@@ -24,6 +24,7 @@ export const cancel = (requestId:string) => request('KUAI_CANCEL',{requestId});
 export const updatePreferences = (patch:PreferencePatch) => request('KUAI_UPDATE_PREFERENCES',{patch});
 export const updatePagePreferences = (patch:{pageDisplayMode:'bilingual'|'translation_only'}) => request('KUAI_UPDATE_PAGE_PREFERENCES',{patch});
 export const openOptions = (section:OptionsSection) => request('KUAI_OPEN_OPTIONS',{section});
+export const reportPageState = (state:PageBadgeState) => request('KUAI_PAGE_STATE',{state});
 
 export async function translate(texts:string[], options:TranslationOptions={}):Promise<TranslationResult> {
   const {signal,requestId=makeRequestId(),providerId,sourceLanguage,targetLanguage}=options;

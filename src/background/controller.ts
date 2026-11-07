@@ -1,5 +1,6 @@
 import type {Settings,Provider} from '../shared/settings.js';
-import type {BackgroundRequest, BackgroundResponse, PageActionType, PageRequest, SettingsChanged} from '../shared/messages.js';
+import type {BackgroundRequest, BackgroundResponse, PageActionType, PageBadgeState, PageRequest, SettingsChanged} from '../shared/messages.js';
+import type {SiteRule} from '../shared/site-rules.js';
 interface Owner {trusted:boolean;scope:string;tabId?:number;frameId?:number;documentId:string}
 interface TranslationJob {owner:Owner;controller:AbortController;savedProviderId:string;providerIdentity:string;
   followProvider:boolean;followSource:boolean;followTarget:boolean;sourceLanguage:string;targetLanguage:string}
@@ -11,8 +12,9 @@ import { translateWithProvider, listProviderModels } from '../providers/index.js
 import { failure, publicError } from '../providers/errors.js';
 import { mergeSettings } from './settings-merge.js';
 import { applyPreferencePatch } from './preferences.js';
+import { applySiteRule } from '../shared/site-rules.js';
 
-const messageTypes = new Set(['KUAI_GET_SETTINGS', 'KUAI_SAVE_SETTINGS', 'KUAI_UPDATE_PREFERENCES', 'KUAI_UPDATE_PAGE_PREFERENCES', 'KUAI_OPEN_OPTIONS', 'KUAI_TRANSLATE', 'KUAI_CANCEL', 'KUAI_TEST_PROVIDER', 'KUAI_LIST_MODELS']);
+const messageTypes = new Set(['KUAI_GET_SETTINGS', 'KUAI_SAVE_SETTINGS', 'KUAI_UPDATE_PREFERENCES', 'KUAI_UPDATE_PAGE_PREFERENCES', 'KUAI_OPEN_OPTIONS', 'KUAI_TRANSLATE', 'KUAI_CANCEL', 'KUAI_TEST_PROVIDER', 'KUAI_LIST_MODELS', 'KUAI_PAGE_STATE']);
 const providerIdentity=(provider?:Provider)=>provider ? JSON.stringify(['id','type','enabled','baseUrl','apiKey','model','region','temperature'].map(key=>provider[key as keyof Provider])) : '';
 const menuItems: {id:string;title:string;contexts:NonNullable<chrome.contextMenus.CreateProperties['contexts']>;message:PageActionType}[] = [
   { id: 'kuai.page', title: 'Kuai translate · 翻译网页', contexts: ['page'], message: 'KUAI_PAGE_TRANSLATE' },
@@ -20,6 +22,17 @@ const menuItems: {id:string;title:string;contexts:NonNullable<chrome.contextMenu
   { id: 'kuai.selection', title: 'Kuai translate · 翻译选中文字', contexts: ['selection'], message: 'KUAI_SELECTION_TRANSLATE' },
   { id: 'kuai.input', title: 'Kuai translate · 翻译输入内容', contexts: ['editable'], message: 'KUAI_INPUT_TRANSLATE' },
 ];
+// Site rules change settings in the background; they never message the page.
+const siteMenuItems: {id:string;title:string;rule:SiteRule}[] = [
+  { id: 'kuai.site.always', title: 'Kuai translate · 本站自动翻译', rule: 'always' },
+  { id: 'kuai.site.never', title: 'Kuai translate · 本站从不翻译', rule: 'never' },
+  { id: 'kuai.site.default', title: 'Kuai translate · 本站恢复默认', rule: 'default' },
+];
+const WEB_PAGES = ['http://*/*', 'https://*/*'];
+const BADGES: Record<PageBadgeState,[text:string,color:string]> = {
+  idle:['',''], working:['…','#087e8b'], done:['✓','#087e8b'], error:['!','#b32332'], blocked:['–','#7b8d99'],
+};
+const COMMANDS: Record<string,PageActionType> = {'toggle-page':'KUAI_PAGE_TOGGLE','toggle-display-mode':'KUAI_PAGE_DISPLAY_MODE'};
 
 /** Owns privileged API credentials. Content scripts can supply only saved provider IDs. */
 export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = globalThis.fetch, timeoutMs = 30000 }: {chromeApi?:typeof chrome;fetchImpl?:typeof fetch;timeoutMs?:number} = {}):BackgroundController {
@@ -156,6 +169,18 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     const pageDisplayMode=patch.pageDisplayMode;
     return writeSettings(current=>normalizeSettings({...current,pageDisplayMode})).then(publicSettings);
   }
+  async function setPageBadge(owner:Owner, message:MessageOf<'KUAI_PAGE_STATE'>) {
+    const state=message.state;
+    if (Object.keys(message).some(key=>!['type','state'].includes(key)) || !Object.hasOwn(BADGES,state)) throw failure('INVALID_INPUT','页面状态无效。');
+    // Only the top document of a web tab speaks for the toolbar button.
+    if (owner.trusted || owner.frameId!==0 || !Number.isSafeInteger(owner.tabId) || !chromeApi.action) return {shown:false};
+    const [text,color]=BADGES[state], tabId=owner.tabId!;
+    try {
+      if (color) await chromeApi.action.setBadgeBackgroundColor({tabId,color});
+      await chromeApi.action.setBadgeText({tabId,text});
+    } catch { return {shown:false}; }
+    return {shown:true};
+  }
   async function openOptions(message:MessageOf<'KUAI_OPEN_OPTIONS'>) {
     const section=message.section;
     if (!['webpage','selection','input','hover','subtitles'].includes(section) || Object.keys(message).some(key=>!['type','section'].includes(key)))
@@ -212,6 +237,9 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
         case 'KUAI_UPDATE_PAGE_PREFERENCES':
           value = await updatePagePreferences(message);
           break;
+        case 'KUAI_PAGE_STATE':
+          value = await setPageBadge(owner, message);
+          break;
         case 'KUAI_CANCEL': {
           const job = jobs.get(requestKey(owner, message.requestId));
           job?.controller.abort(); value = { cancelled: !!job }; break;
@@ -244,8 +272,13 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
       (item.id!=='kuai.selection' || settings.selectionEnabled) &&
       (item.id!=='kuai.input' || settings.inputOptions.enabled);
   }
+  function visibleMenus():chrome.contextMenus.CreateProperties[] {
+    if (!settings.pageOptions.contextMenuEnabled) return [];
+    return [...menuItems.filter(menuEnabled).map(({message,...item})=>item),
+      ...siteMenuItems.map(({rule,...item}):chrome.contextMenus.CreateProperties=>({...item,contexts:['page'],documentUrlPatterns:WEB_PAGES}))];
+  }
   function menuSignature() {
-    return menuItems.filter(menuEnabled).map(item=>item.id).join('|');
+    return visibleMenus().map(item=>item.id).join('|');
   }
   function menuOperation(method:'create'|'removeAll',...args:[]|[chrome.contextMenus.CreateProperties]) {
     // create returns an ID, not a Promise; callbacks also support the extension's Chrome 120 minimum.
@@ -268,8 +301,8 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
         if(menuSignature()===appliedMenuSignature) continue;
         await menuOperation('removeAll');
         if(stopped) return;
-        const signature=menuSignature(),visible=menuItems.filter(menuEnabled);
-        for(const {message,...item} of visible) {
+        const signature=menuSignature(),visible=visibleMenus();
+        for(const item of visible) {
           if(stopped || signature!==menuSignature()) break;
           await menuOperation('create',item);
         }
@@ -283,7 +316,16 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     });
     return menuTask;
   }
+  function onSiteMenu(rule:SiteRule, url:string) {
+    if (stopped || !/^https?:/.test(url)) return;
+    initialize().then(()=>{
+      if (stopped || !settings.pageOptions.contextMenuEnabled) return;
+      return writeSettings(current=>{const next=structuredClone(current);applySiteRule(next,url,rule);return normalizeSettings(next);});
+    }).catch(()=>{});
+  }
   function onMenu(info:chrome.contextMenus.OnClickData, tab?:chrome.tabs.Tab) {
+    const site = siteMenuItems.find(menu => menu.id === info.menuItemId);
+    if (site) return onSiteMenu(site.rule, info.pageUrl || tab?.url || '');
     const item = menuItems.find(menu => menu.id === info.menuItemId);
     if (stopped || !item || !Number.isInteger(tab?.id) || tab!.id!<0) return;
     const message:PageRequest = { type: item.message };
@@ -292,6 +334,15 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     initialize().then(()=>writeQueue.catch(()=>{})).then(()=>{
       if(!stopped && menuEnabled(item)) return chromeApi.tabs.sendMessage(tabId,message,{frameId});
     }).catch(()=>{});
+  }
+  async function onCommand(command:string, tab?:chrome.tabs.Tab) {
+    const type=COMMANDS[command];
+    if (stopped || !type) return;
+    try {
+      const target=tab?.id!==undefined ? tab : (await chromeApi.tabs.query({active:true,currentWindow:true}))[0];
+      if (!Number.isInteger(target?.id) || target!.id!<0 || !/^https?:/.test(target!.url || '')) return;
+      await chromeApi.tabs.sendMessage(target!.id!,{type},{frameId:0});
+    } catch {}
   }
   function onStorage(changes:Record<string,chrome.storage.StorageChange>, area:string) {
     if (area !== 'local' || !changes[SETTINGS_KEY] || stopped) return;
@@ -312,6 +363,10 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     listen(chromeApi.runtime.onMessage, onMessage);
     listen(chromeApi.runtime.onInstalled, setupMenus);
     listen(chromeApi.contextMenus?.onClicked, onMenu);
+    listen(chromeApi.commands?.onCommand, onCommand);
+    listen(chromeApi.webNavigation?.onCommitted, (details:chrome.webNavigation.WebNavigationTransitionCallbackDetails) => {
+      if (details.frameId === 0 && chromeApi.action) Promise.resolve().then(()=>chromeApi.action.setBadgeText({tabId:details.tabId,text:''})).catch(()=>{});
+    });
     listen(chromeApi.storage.onChanged, onStorage);
     listen(chromeApi.tabs?.onRemoved, (tabId:number) => cancelJobs(job => job.owner.tabId === tabId));
     listen(chromeApi.webNavigation?.onCommitted, (details:chrome.webNavigation.WebNavigationTransitionCallbackDetails) => cancelJobs(job => !job.owner.trusted && job.owner.tabId === details.tabId &&

@@ -105,5 +105,5 @@ export function createPageTriggers({document,env=globalThis,getSettings,page,cha
     scheduleAuto();return api;
   }
   function stop(){if(stopped)return;stopped=true;epoch++;clearTimers();observer?.disconnect();disposers.splice(0).forEach(dispose=>dispose());}
-  const api={start,stop,routeChanged,updateSettings,translate,restore,cancel,toggle,handleUserAction};return api;
+  const api={start,stop,routeChanged,updateSettings,translate,restore,cancel,toggle,mode,handleUserAction};return api;
 }
