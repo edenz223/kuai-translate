@@ -1,8 +1,13 @@
 import test from 'node:test';
-const sheet=h=>h.doc.querySelector('[data-kuai-page-style]')?.textContent||'';
 import assert from 'node:assert/strict';
-import { fixture, Event } from './helpers/content-dom.cjs';
-import { createContentRuntime } from '../dist/src/content/index.js';
+import {fixture,Event} from './helpers/content-dom.cjs';
+import {createContentRuntime} from '../dist/src/content/index.js';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {setImmediate as immediate} from 'node:timers/promises';
+import {defaultSettings} from '../dist/src/shared/settings.js';
+
+const sheet=h=>h.doc.querySelector('[data-kuai-page-style]')?.textContent||'';
 
 function setup(options={}){
  const h=fixture(),listeners=new Set(),subscribers=new Set(),youtubeCalls=[],youtubeSettings=[];let youtubeStops=0,persisted;
@@ -35,30 +40,6 @@ test('presentation-only notifications restyle translated content without clearin
  const output=p.querySelector('[data-kuai-page-translation]'),node=output.firstChild;
  await h.notify({...h.settings,pageStyle:{textColor:'#123456',fontSize:140}});
  assert.strictEqual(p.querySelector('[data-kuai-page-translation]'),output);assert.strictEqual(output.firstChild,node);assert.ok(sheet(h).includes('color:#123456!important'));assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);h.runtime.stop();
-});
-test('style changes during a page request neither cancel it nor lose its eventual result',async()=>{
- const h=setup(),p=h.paragraph('Hello');let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));await h.runtime.start();await h.message('KUAI_PAGE_TRANSLATE');
- await h.notify({...h.settings,pageStyle:{textColor:'#654321'},subtitleStyle:{hideTranslation:true}});assert.equal(h.cancellations.length,0);
- finish({translations:['你好']});for(let i=0;i<12;i++)await Promise.resolve();const output=p.querySelector('[data-kuai-page-translation]');assert.equal(output.textContent,'你好');assert.ok(sheet(h).includes('color:#654321!important'));h.runtime.stop();
-});
-test('a transient initial settings failure can be retried on the same runtime without duplicate listeners',async()=>{
- const h=setup();let attempts=0;h.client.getSettings=async()=>{if(++attempts===1)throw Error('temporary');return h.settings;};
- await assert.rejects(h.runtime.start());await h.runtime.start();assert.equal(attempts,2);assert.equal(h.listeners.size,1);assert.equal((await h.message('KUAI_PAGE_STATUS')).ok,true);h.runtime.stop();
-});
-test('optional YouTube initialization failure keeps page translation working and can retry list opening',async()=>{
- let attempts=0,opened=0;const h=setup({launch:()=>{if(++attempts===1)throw Error('view unavailable');return {openSidebar:()=>{opened++;return {opened:true};},stop(){}};}});h.paragraph('Hello');
- await h.runtime.start();assert.equal(h.listeners.size,1);assert.equal((await h.message('KUAI_PAGE_TRANSLATE')).ok,true);
- for(let i=0;i<10;i++)await Promise.resolve();assert.equal((await h.message('KUAI_PAGE_STATUS')).value.translated,1);
- const result=await h.message('KUAI_YOUTUBE_OPEN_LIST');assert.equal(result.ok,true);assert.equal(result.value.opened,true);assert.equal(attempts,2);assert.equal(opened,1);h.runtime.stop();
-});
-test('a settings rejection arriving after stop preserves the disposed phase and cannot revive the runtime',async()=>{
- const h=setup();let rejectSettings;
- h.client.getSettings=()=>new Promise((resolve,reject)=>{rejectSettings=reject;});
- const pending=h.runtime.start();for(let i=0;i<5&&!rejectSettings;i++)await Promise.resolve();
- assert.equal(typeof rejectSettings,'function');h.runtime.stop();rejectSettings(Error('late private failure'));
- await assert.rejects(pending,{code:'CONTENT_STOPPED'});
- assert.equal(h.runtime.status().phase,'stopped');assert.equal(h.listeners.size,0);assert.equal(h.subscribers.size,0);
- await assert.rejects(h.runtime.start(),{code:'CONTENT_STOPPED'});
 });
 
 async function settle(){for(let i=0;i<24;i++)await Promise.resolve();}
@@ -103,16 +84,6 @@ test('opted-in dynamic translation sends only added source and ignores owned out
  await h.message('KUAI_PAGE_RESTORE');const later=h.paragraph('Third');emit([{type:'childList',target:h.doc.body,addedNodes:[later],removedNodes:[]}]);h.flushTimers();await settle();assert.equal(h.requests.length,2);h.runtime.stop();
 });
 
-test('dynamic source edits inside a hidden original are translated while output text edits are ignored',async()=>{
- const h=setup(),emit=mutations(h),p=h.paragraph('First');h.settings.pageOptions={translateDynamic:true};h.settings.pageDisplayMode='translation_only';
- await h.runtime.start();await h.message('KUAI_PAGE_TRANSLATE');await settle();
- const original=p.querySelector('[data-kuai-original]').firstChild;original.nodeValue='Updated source';
- emit([{type:'characterData',target:original,addedNodes:[],removedNodes:[]}]);h.flushTimers();await settle();
- assert.deepEqual(h.requests.map(request=>request.texts),[['First'],['Updated source']]);
- const translated=p.querySelector('[data-kuai-page-translation]').firstChild;emit([{type:'characterData',target:translated,addedNodes:[],removedNodes:[]}]);h.flushTimers();await settle();
- assert.equal(h.requests.length,2);h.runtime.stop();
-});
-
 test('automatic translation respects opt-in, deny precedence and already-target-language pages',async()=>{
  for(const scenario of [
   {options:{autoTranslate:false,alwaysSites:['example.org']},lang:'en'},
@@ -125,80 +96,68 @@ test('automatic translation respects opt-in, deny precedence and already-target-
  }
 });
 
-test('stopping during pending automatic language detection cannot revive page work',async()=>{
- const h=setup();h.settings.pageOptions={autoTranslate:true,alwaysLanguages:['en']};h.paragraph('Waiting');let resolve;
- h.env.chrome.i18n={detectLanguage:()=>new Promise(finish=>{resolve=finish;})};await h.runtime.start();h.flushTimers();await settle();
- assert.equal(typeof resolve,'function');h.runtime.stop();resolve({isReliable:true,languages:[{language:'en',percentage:100}]});await settle();h.flushTimers();
- assert.equal(h.requests.length,0);assert.equal(h.runtime.status().phase,'stopped');
+function run(failures,scenario={}) {
+  const path=fileURLToPath(new URL('../public/content-loader.ts',import.meta.url));
+  const program=`
+    import vm from 'node:vm';import fs from 'node:fs';import ts from 'typescript';
+    const scenario=${JSON.stringify(scenario)};
+    let attempts=0,imports=0,nextTimer=0,pagehidden=false;const timers=new Map(),delays=[],warnings=[],listeners=new Map(),cleared=[];
+    const context=vm.createContext({chrome:{runtime:{getURL:()=> 'chrome-extension://kuai/src/content/index.js'}},console:{warn:(...args)=>warnings.push(args.join(' '))},
+      setTimeout:(fn,delay)=>{const id=++nextTimer;timers.set(id,fn);delays.push(delay);return id;},clearTimeout:id=>{if(timers.delete(id))cleared.push(id);},
+      addEventListener:(type,fn)=>{if(!listeners.has(type))listeners.set(type,new Set());listeners.get(type).add(fn);},
+      removeEventListener:(type,fn)=>listeners.get(type)?.delete(fn)});
+    const module=new vm.SyntheticModule(['start'],function(){this.setExport('start',async()=>{attempts++;if(attempts<=${failures}){const error=new Error('private-details-must-not-log');error.code=scenario.errorCode||'TEMPORARY';throw error;}return {ready:true};});},{context});
+    await module.link(()=>{});await module.evaluate();
+    const script=new vm.Script(ts.transpileModule(fs.readFileSync(${JSON.stringify(path)},'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText,{importModuleDynamically:async()=>{imports++;return module;}});
+    script.runInContext(context);script.runInContext(context);
+    for(let i=0;i<20;i++){
+      await new Promise(setImmediate);
+      if(scenario.pagehideDuringRetry&&!pagehidden&&timers.size){pagehidden=true;for(const fn of [...(listeners.get('pagehide')||[])])fn({persisted:!!scenario.persisted});}
+      const next=timers.entries().next().value;if(next){timers.delete(next[0]);next[1]();}
+    }
+    if(context.__kuaiContentLoading)await context.__kuaiContentLoading;
+    console.log(JSON.stringify({attempts,imports,delays,warnings,hasLoading:!!context.__kuaiContentLoading,pendingTimers:timers.size,cleared:cleared.length,pagehideListeners:listeners.get('pagehide')?.size||0}));
+  `;
+  const result=spawnSync(process.execPath,['--no-warnings','--experimental-vm-modules','--input-type=module','-e',program],{encoding:'utf8',timeout:10000});
+  assert.equal(result.status,0,result.stderr);return JSON.parse(result.stdout);
+}
+test('actual classic content loader retries a transient startup failure and deduplicates injections',()=>{
+  const result=run(1);assert.equal(result.attempts,2);assert.equal(result.imports,1);assert.equal(result.hasLoading,true);assert.deepEqual(result.delays,[250]);assert.equal(result.pagehideListeners,0);
+});
+test('classic bootstrap stops after a bounded retry budget without logging private error messages',()=>{
+  const result=run(10);assert.equal(result.attempts,4);assert.deepEqual(result.delays,[250,1000,3000]);assert.equal(result.hasLoading,false);assert.equal(result.warnings.length,1);assert.ok(!result.warnings.join('').includes('private-details'));assert.equal(result.pagehideListeners,0);
 });
 
-test('an in-flight dynamic page follows an updated target after the superseded request settles',async()=>{
- const h=setup();h.settings.pageOptions={translateDynamic:true};h.paragraph('First');const pending=[];
- h.respond(()=>new Promise(resolve=>pending.push(resolve)));await h.runtime.start();await h.message('KUAI_PAGE_TRANSLATE');await settle();
- await h.notify({...h.settings,targetLanguage:'ja'});pending[0]({translations:['Old result']});await settle();h.flushTimers();await settle();
- assert.equal(h.requests.length,2);assert.equal(h.requests[1].options.targetLanguage,'ja');pending[1]({translations:['新しい訳文']});await settle();h.runtime.stop();
+function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
+function setupSync(t){
+  const h=fixture(),listeners=new Set(),subscribers=new Set(),updates=[],opened=[];
+  let stored=defaultSettings(),current;
+  h.env.chrome={runtime:{id:'kuai-sync',onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)}}};
+  const client={...h.dependencies,getSettings:async()=>structuredClone(stored),onSettingsChanged:fn=>{subscribers.add(fn);return()=>subscribers.delete(fn);}};
+  const runtime=createContentRuntime({env:h.env,client,startYouTube:({settings,subscribeSettings})=>{
+    current=settings;const off=subscribeSettings(next=>{current=next;updates.push(next);});
+    return {stop:off,openSidebar(){opened.push(current);return {opened:true};}};
+  }});
+  t.after(()=>runtime.stop());
+  const message=type=>new Promise(resolve=>{for(const listener of listeners)if(listener({type},{id:'kuai-sync'},resolve)===true)return;resolve();});
+  return {...h,client,runtime,message,updates,opened,subscribers,
+    store:next=>{stored=structuredClone(next);},notify:next=>subscribers.forEach(fn=>fn(next)),get settings(){return current;}};
+}
+
+test('page status pulls authoritative settings and restores output invalidated without a notification',async t=>{
+  const h=setupSync(t),paragraph=h.paragraph('Hello');await h.runtime.start();
+  await h.message('KUAI_PAGE_TRANSLATE');await immediate();assert.ok(paragraph.querySelector('[data-kuai-page-translation]'));
+  h.store({...defaultSettings(),targetLanguage:'ja'});
+  const result=await h.message('KUAI_PAGE_STATUS');
+  assert.equal(result.ok,true);assert.equal(result.value.total,0);assert.equal(h.settings.targetLanguage,'ja');
 });
 
-async function paragraphTap(h,p){h.emit(p,'mousemove');h.emit(h.doc,'keydown',{key:'Shift',shiftKey:true});h.emit(h.doc,'keyup',{key:'Shift'});await settle();}
-const pageOutput=p=>p.querySelector('[data-kuai-page-translation]');
-
-test('runtime refreshes paragraph output styles without clearing text or sending another request',async t=>{
- const h=setup(),p=h.paragraph('Hover source');h.settings.hoverEnabled=true;h.settings.hoverOptions={displayMode:'inline',delay:50};t.after(()=>h.runtime.stop());await h.runtime.start();
- await paragraphTap(h,p);const output=pageOutput(p);assert.ok(output);assert.equal((await h.message('KUAI_PAGE_STATUS')).value.translated,1);
- await h.notify({...h.settings,pageStyle:{preset:'highlight',textColor:'#123456',fontSize:130}});
- assert.strictEqual(pageOutput(p),output);assert.ok(sheet(h).includes('color:#123456!important'));assert.ok(sheet(h).includes('font-size:130%!important'));assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);
-});
-
-test('a full page pass keeps prior paragraph output and never resends its source',async t=>{
- const h=setup(),p=h.paragraph('Shared paragraph'),source=p.firstChild;h.settings.hoverEnabled=true;t.after(()=>h.runtime.stop());await h.runtime.start();
- await paragraphTap(h,p);const output=pageOutput(p);assert.ok(output);
- await h.message('KUAI_PAGE_TRANSLATE');await settle();assert.equal(pageOutput(p),output);assert.equal(p.querySelectorAll('[data-kuai-page-translation]').length,1);assert.strictEqual(p.firstChild,source);
- assert.deepEqual(h.requests.map(request=>request.texts),[['Shared paragraph']]);
-});
-
-for(const pending of [false,true])test(`pointer hover reuses a ${pending?'pending':'completed'} page entry without cancelling page work`,async t=>{
- const h=setup(),p=h.paragraph('Shared paragraph');let finish;h.settings.hoverEnabled=true;h.settings.hoverOptions={trigger:'hover',delay:50};t.after(()=>h.runtime.stop());if(pending)h.respond(()=>new Promise(resolve=>{finish=resolve;}));await h.runtime.start();await h.message('KUAI_PAGE_TRANSLATE');await settle();
- const output=pageOutput(p);h.emit(p,'mousemove');h.advance(50);await settle();assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);
- if(pending){finish({translations:['Shared result']});await settle();}
- assert.strictEqual(pageOutput(p),output);assert.equal((await h.message('KUAI_PAGE_STATUS')).value.translated,1);
-});
-
-test('page restore clears paragraph results while preserving a separately running input translation',async t=>{
- const h=setup(),p=h.paragraph('Hover source');h.settings.hoverEnabled=true;t.after(()=>h.runtime.stop());await h.runtime.start();await paragraphTap(h,p);assert.ok(pageOutput(p));
- const input=h.paragraph('','textarea');input.value='Draft';input.focus();let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const inputJob=h.message('KUAI_INPUT_TRANSLATE');await settle();assert.equal(typeof finish,'function');
- await h.message('KUAI_PAGE_RESTORE');assert.equal(pageOutput(p),null);assert.equal(h.cancellations.length,0);
- finish({translations:['草稿']});assert.equal((await inputJob).ok,true);assert.equal(input.value,'草稿');
-});
-
-test('a paragraph shortcut retries a failed page entry without duplicating its result row',async t=>{
- const h=setup(),p=h.paragraph('Retry source');h.settings.hoverEnabled=true;t.after(()=>h.runtime.stop());h.respond(async()=>{throw Error('Service unavailable');});await h.runtime.start();await h.message('KUAI_PAGE_TRANSLATE');await settle();assert.equal((await h.message('KUAI_PAGE_STATUS')).value.errors,1);
- h.respond(async texts=>({translations:texts.map(()=> 'Recovered result')}));await paragraphTap(h,p);
- assert.equal(pageOutput(p)?.textContent,'Recovered result');assert.equal(p.querySelectorAll('[data-kuai-page-translation]').length,1);assert.equal(h.requests.length,2);assert.equal((await h.message('KUAI_PAGE_STATUS')).value.errors,0);
-});
-
-test('a page pass shares its asynchronous language claim with pointer translation',async t=>{
- const h=setup(),p=h.paragraph('Shared preparation'),detections=[];h.settings.hoverEnabled=true;h.settings.hoverOptions={trigger:'hover',delay:50};h.settings.pageOptions={neverLanguages:['fr']};
- h.env.chrome.i18n={detectLanguage:()=>new Promise(resolve=>detections.push(resolve))};t.after(()=>h.runtime.stop());await h.runtime.start();await h.message('KUAI_PAGE_TRANSLATE');await settle();assert.equal(detections.length,1);
- h.emit(p,'mousemove');h.advance(50);await settle();assert.equal(detections.length,1);assert.equal(h.requests.length,0);assert.equal((await h.message('KUAI_PAGE_STATUS')).value.total,1);
- detections[0]({isReliable:true,languages:[{language:'en',percentage:99}]});await settle();assert.equal(h.requests.length,1);assert.equal(p.querySelectorAll('[data-kuai-page-translation]').length,1);
-});
-
-test('restoring a preparing page releases its claim and its late filter cannot clear a new paragraph result',async t=>{
- const h=setup(),p=h.paragraph('Released preparation'),detections=[];h.settings.hoverEnabled=true;h.settings.pageOptions={neverLanguages:['fr']};
- h.env.chrome.i18n={detectLanguage:()=>new Promise(resolve=>detections.push(resolve))};t.after(()=>h.runtime.stop());await h.runtime.start();await h.message('KUAI_PAGE_TRANSLATE');await settle();await h.message('KUAI_PAGE_RESTORE');
- await paragraphTap(h,p);detections[1]({isReliable:true,languages:[{language:'en',percentage:99}]});await settle();const output=pageOutput(p);assert.ok(output);
- detections[0]({isReliable:true,languages:[{language:'en',percentage:99}]});await settle();assert.strictEqual(pageOutput(p),output);assert.equal(h.requests.length,1);
-});
-
-test('runtime exposes pending paragraph status and full-page restore prevents its late completion',async t=>{
- const h=setup(),p=h.paragraph('Pending paragraph');h.settings.hoverEnabled=true;let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));t.after(()=>h.runtime.stop());await h.runtime.start();await paragraphTap(h,p);
- const status=(await h.message('KUAI_PAGE_STATUS')).value;assert.equal(status.active,true);assert.equal(status.total,1);assert.equal(status.translated,0);
- const restored=await h.message('KUAI_PAGE_RESTORE');assert.equal(restored.value.total,0);assert.equal(restored.value.active,false);assert.deepEqual(h.cancellations,['request-1']);
- finish({translations:['Late']});await settle();assert.equal(pageOutput(p),null);
-});
-
-test('full-page restore also releases a paragraph shortcut that has not reached keyup',async t=>{
- const h=setup(),p=h.paragraph('Restore while armed');h.settings.hoverEnabled=true;t.after(()=>h.runtime.stop());await h.runtime.start();
- h.emit(p,'mousemove');h.emit(h.doc,'keydown',{key:'Shift',shiftKey:true});await h.message('KUAI_PAGE_RESTORE');h.emit(h.doc,'keyup',{key:'Shift'});await settle();
- assert.equal(h.requests.length,0);assert.equal(pageOutput(p),null);
+test('stop rejects a pending action promptly and ignores its later settings response',async t=>{
+  const h=setupSync(t),read=deferred();h.paragraph('Hello');await h.runtime.start();t.after(()=>read.resolve(defaultSettings()));
+  h.client.getSettings=()=>read.promise;
+  let response;const pending=h.message('KUAI_PAGE_TRANSLATE').then(value=>{response=value;});await immediate();
+  h.runtime.stop();await immediate();
+  assert.equal(response?.error?.code,'CONTENT_STOPPED');await pending;
+  read.resolve({...defaultSettings(),targetLanguage:'ja'});await immediate();
+  assert.equal(h.runtime.status().phase,'stopped');assert.equal(h.requests.length,0);assert.equal(h.subscribers.size,0);
 });

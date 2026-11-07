@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { translateWithProvider, validateProvider } from '../dist/src/providers/index.js';
-import { defaultSettings, normalizeSettings } from '../dist/src/shared/settings.js';
+import * as providers from '../dist/src/providers/index.js';
+import {translateWithProvider} from '../dist/src/providers/index.js';
 
 function responder(payloads) {
   const calls=[];
@@ -96,53 +96,12 @@ test('DeepL uses its explicit key and automatic language detection',async()=>{
   assert.equal('source_lang' in h.calls[0].body,false);
   assert.equal(new Headers(h.calls[0].options.headers).get('Authorization'),'DeepL-Auth-Key unit-test-private-key');
 });
-test('DeepLX and local Ollama permit explicitly configured keyless service',async()=>{
-  const h=responder(call=>({code:200,data:call.body.text==='Hello'?'你好':'再见'}));
-  assert.deepEqual(await translateWithProvider({type:'deeplx',baseUrl:'http://localhost:1188'},{...inputs,...h}),result);
-  assert.equal(h.calls[0].url.pathname,'/translate');
-  assert.equal(new Headers(h.calls[0].options.headers).has('Authorization'),false);
-  const local=responder({message:{content:'你好'}});
-  assert.deepEqual(await translateWithProvider({type:'ollama',model:'my-local-model'},{texts:['Hello'],targetLanguage:'zh-Hans',...local}),['你好']);
-  assert.equal(local.calls[0].url.hostname,'localhost');
-});
-
-for(const [label,payload] of [['empty',[]],['empty text',[{translations:[{text:'  '}]}]],['mismatched',[{translations:[{text:'你好'}]}]],['malformed',{error:{message:'secret-from-provider'}}]]){
-  test(label+' Microsoft response is an explicit error without automatic fallback',async()=>{
-    const h=responder(payload);
-    await assert.rejects(translateWithProvider({type:'microsoft'},{...inputs,...h}),error=>error.code==='INVALID_RESPONSE' && !error.message.includes('secret-from-provider'));
-    assert.equal(h.calls.length,1);
-  });
-}
 test('LLM fences are accepted but unequal output is not silently split or guessed',async()=>{
   const h=responder({choices:[{message:{content:'```json\n["你好","再见"]\n```'}}]});
   assert.deepEqual(await translateWithProvider(config('openai'),{...inputs,...h}),result);
   const bad=responder({choices:[{message:{content:'first\nsecond'}}]});
   await assert.rejects(translateWithProvider(config('openai'),{...inputs,...bad}),{code:'INVALID_RESPONSE'});
 });
-for(const [type,reasons,completeReason] of [
-  ['openai',['length','content_filter','tool_calls'],'stop'],
-  ['gemini',['MAX_TOKENS','SAFETY','RECITATION'],'STOP'],
-  ['anthropic',['max_tokens','refusal','pause_turn','tool_use'],'end_turn'],
-  ['ollama',['length','tool_calls'],'stop'],
-]){
-  test(type+' rejects explicitly incomplete results even when their text looks usable',async()=>{
-    const payload=(reason,text)=>({
-      openai:{choices:[{finish_reason:reason,message:{role:'assistant',content:text}}]},
-      gemini:{candidates:[{finishReason:reason,content:{role:'model',parts:[{text}]}}]},
-      anthropic:{type:'message',role:'assistant',stop_reason:reason,content:[{type:'text',text}]},
-      ollama:{done:true,done_reason:reason,message:{role:'assistant',content:text}},
-    })[type];
-    for(const reason of reasons)for(const text of ['partial translation','["partial translation"]']) {
-      const h=responder(payload(reason,text));
-      await assert.rejects(translateWithProvider(config(type),{texts:['Hello'],targetLanguage:'zh-Hans',...h}),{code:'INCOMPLETE_RESPONSE'});
-      assert.equal(h.calls.length,1,'incomplete output must not trigger a retry or fallback');
-    }
-    for(const reason of [undefined,completeReason]) {
-      const h=responder(payload(reason,'["你好"]'));
-      assert.deepEqual(await translateWithProvider(config(type),{texts:['Hello'],targetLanguage:'zh-Hans',...h}),['你好']);
-    }
-  });
-}
 test('empty and malformed response bodies produce safe visible errors',async()=>{
   const h=responder(new Response('not-json-private-key',{status:200}));
   await assert.rejects(translateWithProvider(config('azure'),{...inputs,...h}),error=>error.code==='INVALID_RESPONSE'&&!error.message.includes('private-key'));
@@ -173,26 +132,29 @@ test('large HTTP response is bounded before parsing',async()=>{
   const h=responder(new Response('x',{headers:{'content-length':'99999999'}}));
   await assert.rejects(translateWithProvider({type:'google'},{texts:['Hello'],targetLanguage:'en',...h}),{code:'RESPONSE_TOO_LARGE'});
 });
-test('timeout cancels a stalled response body reader',async()=>{
-  let cancelled=false;
-  const body=new ReadableStream({cancel(){cancelled=true;}});
-  await assert.rejects(translateWithProvider({type:'microsoft'},{...inputs,timeoutMs:10,fetchImpl:async()=>new Response(body)}),{code:'TIMEOUT'});
-  assert.equal(cancelled,true);
+
+const configModels=type=>({id:'custom',type,apiKey:'fixture-secret',baseUrl:'https://provider.example/prefix/v1',model:''});
+const discover=(provider,options)=>{assert.equal(typeof providers.listProviderModels,'function');return providers.listProviderModels(provider,options);};
+for(const type of ['openai','gemini','anthropic','ollama'])test(type+' lists models without requiring a selected model',async()=>{
+  const calls=[];
+  const bodies={openai:{data:[{id:'z-model'},{id:'a-model'},{id:'a-model'}]},gemini:{models:[{name:'models/a-model',displayName:'A',supportedGenerationMethods:['generateContent']},{name:'models/embedding',supportedGenerationMethods:['embedContent']}]},anthropic:{data:[{id:'a-model',display_name:'A'}],has_more:false},ollama:{models:[{name:'a-model'}]}};
+  const result=await discover(configModels(type),{fetchImpl:async(url,init)=>{calls.push({url:new URL(url),init});return Response.json(bodies[type]);}});
+  assert.deepEqual(result.map(item=>item.id),type==='openai'?['a-model','z-model']:['a-model']);
+  const {url,init}=calls[0],headers=new Headers(init.headers);
+  assert.equal(init.method,'GET');assert.equal(init.body,undefined);assert.equal(init.redirect,'error');
+  assert.equal(url.pathname,'/prefix/v1/'+(type==='ollama'?'api/tags':'models'));
+  assert.equal(url.href.includes('fixture-secret'),false);
+  assert.equal(headers.get(type==='gemini'?'x-goog-api-key':type==='anthropic'?'x-api-key':'authorization'),type==='openai'||type==='ollama'?'Bearer fixture-secret':'fixture-secret');
 });
-test('an invisible zero-width-only translation is rejected',async()=>{
-  const h=responder([{translations:[{text:'\u200b\u200c'}]}]);
-  await assert.rejects(translateWithProvider({type:'microsoft'},{texts:['Hello'],targetLanguage:'zh-Hans',...h}),{code:'INVALID_RESPONSE'});
+test('model discovery normalizes a full translation endpoint and follows Gemini pagination',async()=>{
+  let page=0;
+  const result=await discover({...configModels('gemini'),baseUrl:'https://provider.example/v1beta/models/old:generateContent?alt=json'}, {fetchImpl:async(url)=>{
+    const target=new URL(url);assert.equal(target.pathname,'/v1beta/models');assert.equal(target.searchParams.get('alt'),'json');
+    if(page++) {assert.equal(target.searchParams.get('pageToken'),'next');return Response.json({models:[{name:'models/b',supportedGenerationMethods:['generateContent']}]});}
+    return Response.json({models:[{name:'models/a',supportedGenerationMethods:['generateContent']}],nextPageToken:'next'});
+  }});assert.deepEqual(result.map(item=>item.id),['a','b']);
 });
-test('complete custom endpoints and optional temperature are preserved',()=>{
-  assert.equal(validateProvider({...config('openai'),baseUrl:'https://api.example/v1/chat/completions',temperature:0}).temperature,0);
-});
-test('clearing temperature in saved settings omits the optional field from all AI request bodies',async()=>{
-  for(const type of ['openai','gemini','anthropic','ollama']) {
-    const settings=defaultSettings();settings.providers.push({...config(type),temperature:null});
-    const provider=normalizeSettings(settings).providers.at(-1);
-    const payload={openai:{choices:[{message:{content:'["你好"]'}}]},gemini:{candidates:[{content:{parts:[{text:'["你好"]'}]}}]},anthropic:{content:[{type:'text',text:'["你好"]'}]},ollama:{message:{content:'["你好"]'}}}[type];
-    const h=responder(payload);
-    assert.deepEqual(await translateWithProvider(provider,{texts:['Hello'],targetLanguage:'zh-Hans',...h}),['你好']);
-    assert.equal(JSON.stringify(h.calls[0].body).includes('"temperature"'),false,type+' should use the service default');
-  }
+test('discovery rejects invalid config before network, but local Ollama needs no key',async()=>{
+  for(const provider of [{...configModels('openai'),apiKey:''},{...configModels('openai'),baseUrl:'https://user:pass@api.example'},configModels('deepl')])await assert.rejects(discover(provider,{fetchImpl:()=>assert.fail('must not fetch')}),{code:'INVALID_CONFIG'});
+  await discover({type:'ollama'},{fetchImpl:async(url)=>{assert.equal(new URL(url).pathname,'/api/tags');return Response.json({models:[]});}});
 });

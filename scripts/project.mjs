@@ -8,9 +8,9 @@ import {build as bundle} from 'esbuild';
 export const projectRoot = fileURLToPath(new URL('../',import.meta.url));
 const runtimeExtensions = new Set(['.js','.mjs','.json','.html','.css','.svg','.png','.ico','.txt']);
 const buildExtensions = new Set([...runtimeExtensions,'.ts']);
-const sourceExtensions = new Set([...buildExtensions,'.cjs','.md','.yml','.yaml']);
-const sourceDirectories = ['src','public','scripts','tests','docs','.github'];
-const sourceRootFiles = ['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','tsconfig.json','tsconfig.types.json','README.md','README.zh-CN.md','LICENSE','PRIVACY.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','THIRD_PARTY_NOTICES.md','ARCHITECTURE.md','.gitignore'];
+const sourceExtensions = new Set([...buildExtensions,'.cjs','.yml','.yaml']);
+const sourceDirectories = ['src','public','scripts','tests','.github'];
+const sourceRootFiles = ['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','tsconfig.json','README.md','LICENSE','PRIVACY.md','CHANGELOG.md','.gitignore'];
 const sort = values => values.sort((a,b)=>a < b ? -1 : a > b ? 1 : 0);
 
 async function exists(file) { try {await fs.access(file);return true;}catch{return false;} }

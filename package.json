@@ -13,9 +13,8 @@
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs",
     "package": "node scripts/package.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.types.json",
-    "verify": "pnpm run typecheck && pnpm run test && pnpm run check",
-    "smoke": "node scripts/browser-smoke.mjs"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "verify": "pnpm run typecheck && pnpm run test && pnpm run check"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.7",

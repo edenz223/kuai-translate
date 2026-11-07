@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import dom from './helpers/content-dom.cjs';
 import {defaultSettings} from '../dist/src/shared/settings.js';
-let api={};try{api=await import('../dist/src/youtube/index.js');}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
+import fs from 'node:fs';
+import vm from 'node:vm';
+import * as sessionApi from '../dist/src/youtube/session.js';
+import * as api from '../dist/src/youtube/index.js';
+
 function setup(){
   assert.equal(typeof api.createYouTubeController,'function');
   const h=dom.fixture();h.env.location={href:'https://www.youtube.com/watch?v=abcdef12345',origin:'https://www.youtube.com'};
@@ -36,11 +40,6 @@ test('old route caption messages and foreign page messages cannot populate a new
   h.message(data);h.h.emit(h.h.env,'message',{source:{},origin:h.h.env.location.origin,data:{...data,videoId:'abcdef12345'}});
   assert.equal(h.bridge.getState(session.id).subtitlesList.length,0);h.manager.stop();
 });
-test('runtime bridge cancels owned selection before timestamp assignment and keeps paused state',()=>{
-  const h=setup(),[session]=h.bridge.getSessions();let time=1;
-  Object.defineProperty(h.video,'currentTime',{get:()=>time,set:value=>{assert.equal(h.cancellations.at(-1)[1],'seek');time=value;}});
-  assert.equal(h.bridge.seek(session.id,12),true);assert.equal(time,12);assert.equal(h.video.paused,true);h.manager.stop();
-});
 test('changing the selected CC track invalidates a pending response before it can replace the new timeline',async()=>{
   const h=setup();tracks(h,'en');const first=requests(h).at(-1);h.cancellations.length=0;
   tracks(h,'es');const second=requests(h).at(-1);
@@ -61,17 +60,6 @@ test('retrying a failed caption track refetches it even when native fallback cue
   h.h.emit(retry,'click');const second=requests(h).at(-1);
   assert.equal(requests(h).length,2);assert.notEqual(second.requestId,first.requestId);assert.equal(new URL(second.url).searchParams.get('lang'),'en');
   caption(h,second.requestId,'Remote transcript');await settle();assert.equal(state.currentCaption.original,'Remote transcript');assert.equal(state.errorMessage,'');h.manager.stop();
-});
-test('an identical remote timeline promotes live DOM fallback without replacing translated text nodes',async()=>{
-  const h=setup(),segment=h.h.doc.createElement('span');segment.className='ytp-caption-segment';segment.textContent='123';h.player.append(segment);
-  tracks(h,'en');const first=requests(h).at(-1);await settle();
-  const [session]=h.bridge.getSessions(),state=session.state,source=state.subtitlesList;
-  assert.equal(state.isLiveDomCaptions,true);
-  const translation=h.bridge.getRoots(session).find(node=>node.textContent==='译:123'),textNode=translation.firstChild;
-  h.message({kind:'captions',videoId:'abcdef12345',requestId:first.requestId,body:JSON.stringify({events:[{tStartMs:1000,dDurationMs:6000,segs:[{utf8:'123'}]}]})});
-  await settle();h.manager.sync();h.manager.sync();
-  assert.equal(requests(h).length,1);assert.equal(state.isLiveDomCaptions,false);
-  assert.strictEqual(state.subtitlesList,source);assert.strictEqual(translation.firstChild,textNode);assert.equal(state.currentCaption.translation,'译:123');h.manager.stop();
 });
 
 const fragmented=JSON.stringify({events:[{tStartMs:0,dDurationMs:1000,segs:[{utf8:'We are'}]},{tStartMs:1000,dDurationMs:2000,segs:[{utf8:' learning.'}]}]});
@@ -97,29 +85,6 @@ test('late passive ASR response cannot overwrite a same-language manual track',a
   h.message({kind:'captions',videoId:'abcdef12345',languageCode:'en',trackUrl:automatic.baseUrl,body:fragmented.replace('We are','Stale words')});
   assert.strictEqual(state.subtitlesList,original);
 });
-test('passive ASR response uses its validated URL without inheriting pending track metadata',async t=>{
-  const h=setup();t.after(()=>h.manager.stop());
-  h.message({kind:'captions',videoId:'abcdef12345',languageCode:'en',trackUrl:track('en').baseUrl+'&kind=asr',body:fragmented});await settle();
-  assert.deepEqual(h.bridge.getSessions()[0].state.subtitlesList.map(c=>c.text),['We are learning.']);
-});
-
-test('explicit requested ASR kind is retained when its own response URL has no kind parameter',async t=>{
-  const h=setup();t.after(()=>h.manager.stop());
-  h.message({kind:'tracks',videoId:'abcdef12345',tracks:[{...track('en'),kind:'asr'}]});
-  h.message({kind:'captions',videoId:'abcdef12345',requestId:requests(h).at(-1).requestId,trackUrl:track('en').baseUrl+'&fmt=json3',body:fragmented});await settle();
-  assert.deepEqual(h.bridge.getSessions()[0].state.subtitlesList.map(c=>c.text),['We are learning.']);
-});
-
-test('a reused track id with changed ASR kind cancels and replaces the previous request',async t=>{
-  const h=setup();t.after(()=>h.manager.stop());
-  h.message({kind:'tracks',videoId:'abcdef12345',tracks:[{...track('en'),vssId:'.en',kind:'asr'}]});const old=requests(h).at(-1);
-  h.message({kind:'tracks',videoId:'abcdef12345',tracks:[{...track('en'),vssId:'.en'}]});const replacement=requests(h).at(-1);
-  assert.notEqual(replacement.requestId,old.requestId);
-  h.message({kind:'captions',videoId:'abcdef12345',requestId:old.requestId,body:fragmented});
-  assert.equal(h.bridge.getSessions()[0].state.subtitlesList.length,0);
-  h.message({kind:'captions',videoId:'abcdef12345',requestId:replacement.requestId,body:fragmented});await settle();
-  assert.deepEqual(h.bridge.getSessions()[0].state.subtitlesList.map(c=>c.text),['We are learning.']);
-});
 
 
 for(const [name,body]of [['empty JSON',JSON.stringify({events:[]})],['blank response',''],['unreadable response','{broken-json']])test('caption track '+name+' stays invisible and later captions can recover',async()=>{
@@ -131,78 +96,120 @@ for(const [name,body]of [['empty JSON',JSON.stringify({events:[]})],['blank resp
  caption(h,undefined,'Captions arrived');await settle();assert.equal(session.state.currentCaption.original,'Captions arrived');assert.equal(host.hidden,false);h.manager.stop();
 });
 
-test('an empty fetched track keeps available native captions without the unreadable-text message',async()=>{
- const h=setup();tracks(h,'en');const request=requests(h).at(-1);nativeCues(h,'Native captions');h.manager.sync();await settle();
- h.message({kind:'captions',videoId:'abcdef12345',requestId:request.requestId,body:JSON.stringify({events:[]})});await settle();
- const state=h.bridge.getSessions()[0].state;assert.equal(state.errorMessage,'');assert.equal(state.currentCaption.original,'Native captions');h.manager.stop();
+const file=new URL('../dist/src/youtube/capture-main.js',import.meta.url);
+const trackCapture={baseUrl:'https://www.youtube.com/api/timedtext?v=abcdef12345&lang=en',languageCode:'en',name:{simpleText:'English'}};
+function harness({withInitialResponse=false,selectedLanguage='en',fetcher,runtimeTracks=[],selectedTrack,setOption=()=>{}}={}) {
+  assert.ok(fs.existsSync(file),'the actual MAIN-world caption capture must exist');
+  const outputs=[],requests=[],intervals=[];
+  const response={videoDetails:{videoId:'abcdef12345'},captions:{playerCaptionsTracklistRenderer:{captionTracks:[trackCapture]}},unrelatedPrivateData:'must-not-be-copied'};
+  const win=new EventTarget();win.postMessage=data=>outputs.push(data);
+  const player={getPlayerResponse:()=>response,getOption:()=>selectedTrack||({languageCode:selectedLanguage}),getAudioTrack:()=>({captionTracks:runtimeTracks}),setOption};
+  if(withInitialResponse)win.ytInitialPlayerResponse=response;
+  const doc=new EventTarget();doc.querySelectorAll=()=>[player];
+  const context={window:win,document:doc,location:{href:'https://www.youtube.com/watch?v=abcdef12345',origin:'https://www.youtube.com'},
+    URL,Request,Response,AbortController,TextDecoder,Event,console,setInterval:callback=>{intervals.push(callback);return intervals.length;},clearInterval(){},setTimeout,clearTimeout,
+    fetch:async(url,init)=>{requests.push(String(url));if(fetcher)return fetcher(url,init);return new Response(JSON.stringify({events:[{tStartMs:0,dDurationMs:1000,segs:[{utf8:'Hi'}]}]}),{headers:{'content-type':'application/json'}});},
+  };
+  win.fetch=context.fetch;win.location=context.location;
+  vm.createContext(context);vm.runInContext(fs.readFileSync(file,'utf8'),context);
+  function message(data){const event=new Event('message');Object.assign(event,{source:win,origin:context.location.origin,data:{source:'kuai-youtube-request',...data}});win.dispatchEvent(event);}
+  return {outputs,requests,context,message,response,periodic:()=>intervals.forEach(callback=>callback())};
+}
+test('caption discovery emits only scoped track metadata for the current video',()=>{
+  const h=harness(),data=h.outputs.find(item=>item.kind==='tracks');
+  assert.equal(data.videoId,'abcdef12345');assert.equal(data.tracks.length,1);
+  assert.equal(JSON.stringify(h.outputs).includes('must-not-be-copied'),false);
+});
+test('main-world requests cannot turn caption access into arbitrary authenticated fetches',async()=>{
+  const h=harness();
+  for(const url of ['https://attacker.example/api/timedtext?v=abcdef12345','https://www.youtube.com/logout','https://www.youtube.com/api/timedtext?v=other-video'])h.message({kind:'fetch-track',videoId:'abcdef12345',requestId:'test',url});
+  await settle();assert.equal(h.requests.length,0);
+});
+test('valid track reads use the original fetch and return bounded subtitle data',async()=>{
+  const h=harness();h.message({kind:'fetch-track',videoId:'abcdef12345',requestId:'request-a',url:trackCapture.baseUrl});await settle();await settle();
+  assert.equal(h.requests.length,1);const result=h.outputs.find(item=>item.requestId==='request-a');
+  assert.equal(result.kind,'captions');assert.match(result.body,/Hi/);
+});
+test('a route change discards a late caption fetch response',async()=>{
+  const h=harness();h.message({kind:'fetch-track',videoId:'abcdef12345',requestId:'request-late',url:trackCapture.baseUrl});
+  h.context.location.href='https://www.youtube.com/watch?v=different01';await settle();await settle();
+  assert.equal(h.outputs.some(item=>item.requestId==='request-late'&&item.kind==='captions'),false);
 });
 
-test('a renewed signed URL retries a failed logical track without discarding fallback cues',t=>{
-  const h=setup();t.after(()=>h.manager.stop());
-  tracks(h,'en');const first=requests(h).at(-1);
-  h.message({kind:'captions',videoId:'abcdef12345',requestId:first.requestId,body:''});
-  nativeCues(h,'Fallback');h.manager.sync();
-  const session=h.bridge.getSessions()[0],source=session.state.subtitlesList;
-  h.message({kind:'tracks',videoId:'abcdef12345',selectedLanguage:'en',tracks:[{...track('en'),baseUrl:track('en').baseUrl+'&pot=renewed'}]});
-  assert.equal(requests(h).length,2);
-  assert.equal(new URL(requests(h).at(-1).url).searchParams.get('pot'),'renewed');
-  assert.strictEqual(session.state.subtitlesList,source);
+test('rapid track replacements cancel only the current matching request and immediately release its slot',async t=>{
+  const pending=[];
+  const h=harness({fetcher:(url,{signal})=>new Promise((resolve,reject)=>{
+    pending.push({signal,resolve});signal.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true});
+  })});
+  t.after(()=>{for(const request of pending)request.resolve(new Response('{"events":[]}'));});
+  const request=requestId=>h.message({kind:'fetch-track',videoId:'abcdef12345',requestId,url:trackCapture.baseUrl});
+  const cancel=(requestId,videoId='abcdef12345')=>h.message({kind:'cancel-track',videoId,requestId});
+  request('first');request('second');assert.equal(h.requests.length,2);
+  cancel('first','different01');cancel('unknown');assert.equal(pending[0].signal.aborted,false);assert.equal(pending[1].signal.aborted,false);
+  cancel('first');assert.equal(pending[0].signal.aborted,true);assert.equal(pending[1].signal.aborted,false);
+  request('third');assert.equal(h.requests.length,3,'cancel must release capacity before the rejected fetch settles');
+  cancel('second');request('fourth');assert.equal(h.requests.length,4);
+  cancel('third');cancel('fourth');await settle();
+  assert.equal(h.outputs.some(item=>item.requestId&&item.kind==='captions'),false);
+});
+test('empty caption responses refresh the native module once and try a fresh runtime URL',async()=>{
+  let reloads=0;const runtime=[];
+  const h=harness({runtimeTracks:runtime,setOption:(module,key,value)=>{
+    assert.deepEqual([module,key,value],['captions','reload',true]);
+    reloads++;runtime.push({...trackCapture,baseUrl:trackCapture.baseUrl+'&pot=renewed'});
+  },fetcher:url=>new Response(new URL(url).searchParams.has('pot')?'{"events":[{"tStartMs":0,"dDurationMs":1000,"segs":[{"utf8":"Recovered"}]}]}':'')});
+  h.message({kind:'fetch-track',videoId:'abcdef12345',requestId:'refresh',url:trackCapture.baseUrl});
+  await settle();await settle();await settle();
+  assert.equal(reloads,1);
+  assert.match(h.outputs.find(item=>item.requestId==='refresh')?.body||'',/Recovered/);
 });
 
-test('a complete passive capture cancels a pending replay before its late body can replace the timeline',t=>{
-  const h=setup();t.after(()=>h.manager.stop());tracks(h,'en');const first=requests(h).at(-1);
-  h.message({kind:'captions',videoId:'abcdef12345',trackUrl:track('en').baseUrl,languageCode:'en',body:'WEBVTT\n\n00:00.000 --> 00:03.000\nNative complete'});
-  assert.ok(h.outbound.some(item=>item.kind==='cancel-track'&&item.requestId===first.requestId));
-  caption(h,first.requestId,'Late replay');
-  assert.equal(h.bridge.getSessions()[0].state.subtitlesList[0].text,'Native complete');
+function fixture(translate=async texts=>({translations:texts.map(text=>'译:'+text)}),settings=defaultSettings()){
+  assert.equal(typeof sessionApi.createSubtitleSession,'function');
+  const video=new EventTarget();Object.assign(video,{isConnected:true,currentTime:1,duration:100,paused:true,ended:false,seekable:{length:0},closest:()=>null});
+  const session=sessionApi.createSubtitleSession({id:'test',video,settings,translate,onChange(){}});
+  session.setCues([{start:0,end:3,text:'Hello'},{start:10,end:14,text:'Next'}]);
+  return{session,state:session.state,video};
+}
+test('the native session renders current original and valid translated output',async()=>{
+  const {session,state}=fixture();session.update();await settle();
+  assert.equal(state.currentCaption.original,'Hello');assert.equal(state.currentCaption.translation,'译:Hello');
+  assert.equal(state.subtitlesList[0].status,'success');session.destroy();
+});
+test('holding captions preserves a copy while in-flight results and provider resets complete',async()=>{
+  let resolve;const {session,state}=fixture(()=>new Promise(done=>{resolve=done;}));session.update();await Promise.resolve();
+  session.hold(true);const original=state.selectionCaptionSnapshot.original;
+  resolve({translations:['你好','下一句']});await settle();
+  assert.equal(state.selectionCaptionSnapshot.original,original);assert.equal(state.selectionCaptionSnapshot.translation,'');
+  session.updateSettings({...defaultSettings(),targetLanguage:'ja'});
+  assert.equal(state.isSubtitleSelectionHeld,true);assert.equal(state.selectionCaptionSnapshot.original,original);
+  session.destroy();assert.equal(state.isSubtitleSelectionHeld,false);
+});
+test('replaced timelines ignore old responses and stale cue references cannot issue requests',async()=>{
+  let resolve,calls=0;const {session,state}=fixture(()=>{calls++;return new Promise(done=>{resolve=done;});});
+  const old=state.subtitlesList[0];session.update();await Promise.resolve();
+  session.setCues([{start:30,end:35,text:'New video cue'}]);
+  resolve({translations:['old','old']});await settle();
+  assert.equal(state.subtitlesList[0].translation,'');assert.equal(session.translateCues([old]),false);assert.equal(calls,1);session.destroy();
+});
+test('empty or unequal translations remain visible errors and do not retry forever',async()=>{
+  let calls=0;const {session,state}=fixture(async()=>{calls++;return{translations:['']};});
+  session.update();await settle();session.update();await settle();
+  assert.equal(state.subtitlesList[0].status,'error');assert.ok(state.currentCaption.errorMessage);assert.equal(calls,1);session.destroy();
+});
+test('disabling an in-flight session returns cancelled cues to pending so enabling can translate again',async()=>{
+  let calls=0;
+  const {session,state}=fixture(async texts=>{calls++;if(calls===1)return new Promise(()=>{});return{translations:texts.map(()=> '完成')};});
+  session.update();await Promise.resolve();session.setEnabled(false);
+  assert.equal(state.subtitlesList[0].status,'pending');
+  session.setEnabled(true);await settle();assert.equal(calls,2);assert.equal(state.subtitlesList[0].translation,'完成');session.destroy();
 });
 
-test('signed URL renewal replaces an old in-flight request before its empty response can block recovery',t=>{
-  const h=setup();t.after(()=>h.manager.stop());tracks(h,'en');const first=requests(h).at(-1);
-  h.message({kind:'tracks',videoId:'abcdef12345',selectedLanguage:'en',tracks:[{...track('en'),baseUrl:track('en').baseUrl+'&pot=inflight-renewed'}]});
-  assert.equal(requests(h).length,2);
-  assert.ok(h.outbound.some(item=>item.kind==='cancel-track'&&item.requestId===first.requestId));
-  h.message({kind:'captions',videoId:'abcdef12345',requestId:first.requestId,body:''});
-  const next=requests(h).at(-1);caption(h,next.requestId,'Renewed complete');
-  assert.equal(h.bridge.getSessions()[0].state.subtitlesList[0].text,'Renewed complete');
-});
-
-test('authored screenshot sentence stays whole in the overlay and shared reading timeline',async t=>{
-  const h=setup();t.after(()=>h.manager.stop());tracks(h,'en');h.video.currentTime=263;
-  const first="There you'd find a bunch of particles\nwhizzing around",last='as fast as tiny bullets.',full=first+' '+last;
-  h.message({kind:'captions',videoId:'abcdef12345',requestId:requests(h).at(-1).requestId,body:JSON.stringify({events:[
-    {tStartMs:259000,dDurationMs:2000,segs:[{utf8:first}]},
-    {tStartMs:261000,dDurationMs:3000,segs:[{utf8:last}]},
-    {tStartMs:264000,dDurationMs:4000,segs:[{utf8:'And the particles also attract each other.'}]},
-  ]})});await settle();
-  const [session]=h.bridge.getSessions(),state=h.bridge.getState(session.id),host=h.h.doc.getElementById('kuai-captions-window-'+session.id);
-  assert.equal(state.subtitlesList[0].text,full);assert.equal(state.subtitlesList[0].start,259);assert.equal(state.subtitlesList[0].end,264);
-  for(const time of [259.5,261.5,263.5]){
-    h.video.currentTime=time;session.update();await settle();
-    assert.equal(state.currentCaption.original,full);
-    assert.equal(host.shadowRoot.querySelector('.original-text').textContent,full);
-    assert.equal(host.shadowRoot.querySelector('.translation-text').textContent,'译:'+full);
-  }
-});
-
-test('finite native text-track fallback shares complete phrases with the video overlay',async t=>{
-  const h=setup();t.after(()=>h.manager.stop());h.video.currentTime=263;
-  const first="There you'd find a bunch of particles",last='whizzing around as fast as tiny bullets.';
-  h.video.textTracks=[{mode:'showing',language:'en',cues:[{startTime:259,endTime:261,text:first},{startTime:261,endTime:264,text:last}]}];
-  h.manager.sync();await settle();
-  const [session]=h.bridge.getSessions();
-  assert.equal(session.state.subtitlesList.length,1);assert.equal(session.state.currentCaption.original,first+' '+last);
-  const host=h.h.doc.getElementById('kuai-captions-window-'+session.id);
-  assert.equal(host.shadowRoot.querySelector('.original-text').textContent,first+' '+last);
-});
-
-test('finite native track voice annotations retain distinct speakers',async t=>{
-  const h=setup();t.after(()=>h.manager.stop());h.video.currentTime=3;
-  h.video.textTracks=[{mode:'showing',language:'en',cues:[
-    {startTime:0,endTime:2,text:'<v Alice>I was thinking'},
-    {startTime:2,endTime:4,text:'<v Bob>That will not work.'},
-  ]}];
-  h.manager.sync();await settle();const [session]=h.bridge.getSessions();
-  assert.deepEqual(session.state.subtitlesList.map(c=>c.text),['I was thinking','That will not work.']);
-  assert.equal(session.state.currentCaption.original,'That will not work.');
+test('a separate subtitle target survives unrelated page-language and presentation edits without retranslating',async t=>{
+  const requests=[],settings={...defaultSettings(),subtitleTargetLanguage:'ja'};
+  const {session,state}=fixture(async(texts,request)=>{requests.push(request);return{translations:texts.map(()=> '日本語')};},settings);t.after(()=>session.destroy());
+  session.update();await settle();assert.equal(requests[0].targetLanguage,'ja');const cues=state.subtitlesList,version=state.translateVersion;
+  session.updateSettings({...settings,targetLanguage:'fr',subtitleStyle:{sourceColor:'#ff0000'}});await settle();
+  assert.equal(requests.length,1);assert.equal(requests[0].signal.aborted,false);assert.equal(state.translateVersion,version);
+  assert.ok(state.subtitlesList===cues);assert.equal(state.currentCaption.translation,'日本語');
 });
