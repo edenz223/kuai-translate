@@ -41,7 +41,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
   const editor=createSettingsEditor({load:()=>getSettings(true),save:(settings,baseSettings)=>request('KUAI_SAVE_SETTINGS',{settings,baseSettings}),normalize:normalizeSettings});
   const presentation=createPresentationControls({document,editor,onError:fail});
   const interactions=createInteractionControls({document,editor,onError:fail,onValidationChange:()=>render(editor.get(),editor.status())});
-  const fields=Object.fromEntries(['name','enabled','baseUrl','apiKey','model','region','temperature'].map(key=>[key,byId<HTMLInputElement>(document,'provider-'+key)]));
+  const fields=Object.fromEntries(['name','enabled','baseUrl','apiKey','model','region','temperature','systemPrompt','userPrompt'].map(key=>[key,byId<HTMLInputElement>(document,'provider-'+key)]));
   const problemFields: ProviderField[]=['baseUrl','apiKey','model'];
   const modelSelect=byId<HTMLSelectElement>(document,'provider-model-list'),modelButton=byId<HTMLButtonElement>(document,'fetch-models'),modelStatus=byId(document,'model-status');
   let modelGeneration=0,modelRequestId:string|undefined,modelFingerprint='',models:ProviderModel[]=[];

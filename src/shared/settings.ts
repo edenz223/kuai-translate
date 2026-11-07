@@ -4,6 +4,7 @@ import { normalizeInteractionOptions, normalizeShortcut } from './interactions.j
 export interface Provider {
   id: string; type: string; name: string; enabled: boolean;
   baseUrl?: string; apiKey?: string; model: string; region?: string; temperature: number | null;
+  systemPrompt?: string; userPrompt?: string;
 }
 export interface SubtitleTrackPreference {languageCode:string;kind:string;name:string}
 export type Settings = ReturnType<typeof defaultSettings>;
@@ -11,11 +12,12 @@ export type PublicSettings = Settings;
 type LegacyRecord = Record<string, any>;
 
 export const APP_NAME = 'Kuai translate';
+export const PROMPT_LIMIT = 8000;
 export const SETTINGS_KEY = 'kuai.settings.v1';
 export const PROVIDER_TYPES = Object.freeze(['microsoft','google','transmart','yandex','openai','gemini','anthropic','azure','deepl','deeplx','ollama']);
 export const FREE_PROVIDERS = Object.freeze([
   ['microsoft','微软翻译'], ['google','谷歌翻译'], ['transmart','腾讯 Transmart'], ['yandex','Yandex'],
-].map(([id,name]) => Object.freeze({id,name,type:id,enabled:true,baseUrl:'',apiKey:'',model:'',region:'',temperature:0.2})));
+].map(([id,name]) => Object.freeze({id,name,type:id,enabled:true,baseUrl:'',apiKey:'',model:'',region:'',temperature:0.2,systemPrompt:'',userPrompt:''})));
 const freeIds = new Set(FREE_PROVIDERS.map(provider => provider.id));
 // Historic backups contain nested, provider-specific records; validate before normalization.
 const plain = (value: unknown): value is LegacyRecord => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -75,6 +77,7 @@ function providerConfig(input:unknown):Provider {
     id,type,name:text(input.name,type,120).trim() || type,enabled:flag(input.enabled,true),
     baseUrl,apiKey:text(input.apiKey),model:text(input.model,'',200).trim(),region:text(input.region,'',100).trim(),
     temperature:temperature===null ? null : Number.isFinite(temperature) ? Math.min(2,Math.max(0,temperature)) : 0.2,
+    systemPrompt:text(input.systemPrompt,'',PROMPT_LIMIT),userPrompt:text(input.userPrompt,'',PROMPT_LIMIT),
   };
 }
 

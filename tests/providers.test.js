@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as providers from '../dist/src/providers/index.js';
-import {translateWithProvider} from '../dist/src/providers/index.js';
+import {translateWithProvider, validateProvider} from '../dist/src/providers/index.js';
+import {defaultSettings, normalizeSettings} from '../dist/src/shared/settings.js';
 
 function responder(payloads) {
   const calls=[];
@@ -157,4 +158,21 @@ test('model discovery normalizes a full translation endpoint and follows Gemini 
 test('discovery rejects invalid config before network, but local Ollama needs no key',async()=>{
   for(const provider of [{...configModels('openai'),apiKey:''},{...configModels('openai'),baseUrl:'https://user:pass@api.example'},configModels('deepl')])await assert.rejects(discover(provider,{fetchImpl:()=>assert.fail('must not fetch')}),{code:'INVALID_CONFIG'});
   await discover({type:'ollama'},{fetchImpl:async(url)=>{assert.equal(new URL(url).pathname,'/api/tags');return Response.json({models:[]});}});
+});
+test('custom system and user prompts replace the built-in wording but keep the JSON contract',async()=>{
+  const payload={choices:[{message:{content:'["你好"]'}}]};
+  const settings=defaultSettings();settings.providers.push({...config('openai'),systemPrompt:'Translate {{from}} to {{ to }} formally.',userPrompt:'Strings ({{count}}): {{text}}'});
+  const h=responder(payload);
+  assert.deepEqual(await translateWithProvider(normalizeSettings(settings).providers.at(-1),{texts:['Hello'],targetLanguage:'zh-Hans',...h}),['你好']);
+  const [system,user]=h.calls[0].body.messages;
+  assert.match(system.content,/^Translate its detected language to zh-Hans formally\.\n\nReturn only a JSON array of 1 translated strings/);
+  assert.equal(user.content,'Strings ({{count}}): ["Hello"]');
+  const appended=responder({content:[{type:'text',text:'["こんにちは"]'}]});
+  await translateWithProvider({...config('anthropic'),userPrompt:'Keep $& and $1 literal.'},{texts:['Hello'],targetLanguage:'ja',...appended});
+  assert.match(appended.calls[0].body.system,/^Translate each input string/);
+  assert.equal(appended.calls[0].body.messages[0].content,'Keep $& and $1 literal.\n\n["Hello"]');
+  const blank=responder(payload);
+  await translateWithProvider({...config('openai'),systemPrompt:'  ',userPrompt:''},{texts:['Hello'],targetLanguage:'ja',...blank});
+  assert.equal(blank.calls[0].body.messages[1].content,'["Hello"]');
+  assert.throws(()=>validateProvider({...config('openai'),systemPrompt:'x'.repeat(8001)}),{code:'INVALID_CONFIG'});
 });
