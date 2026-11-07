@@ -3,7 +3,7 @@ import type {Provider, Settings} from '../shared/settings.js';
 export interface EditorStatus { revision: number; saving: boolean; error: unknown; }
 export type SettingsChange = (settings: Settings) => void;
 export type SettingsListener = (settings: Settings, status: EditorStatus) => void;
-export type ProviderPatch = Partial<Pick<Provider,'name' | 'enabled' | 'baseUrl' | 'apiKey' | 'model' | 'region' | 'temperature'>>;
+export type ProviderPatch = Partial<Pick<Provider,'name' | 'enabled' | 'baseUrl' | 'apiKey' | 'model' | 'region' | 'temperature' | 'systemPrompt' | 'userPrompt'>>;
 export type ProviderFields = Record<string, HTMLInputElement>;
 export interface SettingsEditorOptions {
   load: () => Promise<unknown>;
@@ -79,14 +79,14 @@ export function createSettingsEditor({load, save, normalize = structuredClone as
       return this.update(next => {
         const provider = next.providers.find(item => item.id === id);
         if (!provider) throw new Error('翻译服务已删除，请重新选择。');
-        for (const key of ['name','enabled','baseUrl','apiKey','model','region','temperature'] as const)
+        for (const key of ['name','enabled','baseUrl','apiKey','model','region','temperature','systemPrompt','userPrompt'] as const)
           if (Object.hasOwn(patch,key)) (provider as unknown as Record<string, unknown>)[key] = patch[key];
       });
     },
     async addProvider(type, name) {
       if (!['openai','gemini','anthropic','azure','deepl','deeplx','ollama'].includes(type)) throw new Error('不支持的自配服务。');
       const id = idFactory();
-      await this.update(next => next.providers.push({id,type,name:name || type + ' API',enabled:true,baseUrl:'',apiKey:'',model:'',region:'',temperature:null}));
+      await this.update(next => next.providers.push({id,type,name:name || type + ' API',enabled:true,baseUrl:'',apiKey:'',model:'',region:'',temperature:null,systemPrompt:'',userPrompt:''}));
       return id;
     },
     removeProvider(id) { return this.update(next => { next.providers = next.providers.filter(item => item.id !== id); }); },

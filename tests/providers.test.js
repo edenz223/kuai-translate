@@ -186,6 +186,23 @@ test('an invisible zero-width-only translation is rejected',async()=>{
 test('complete custom endpoints and optional temperature are preserved',()=>{
   assert.equal(validateProvider({...config('openai'),baseUrl:'https://api.example/v1/chat/completions',temperature:0}).temperature,0);
 });
+test('custom system and user prompts replace the built-in wording but keep the JSON contract',async()=>{
+  const payload={choices:[{message:{content:'["你好"]'}}]};
+  const settings=defaultSettings();settings.providers.push({...config('openai'),systemPrompt:'Translate {{from}} to {{ to }} formally.',userPrompt:'Strings ({{count}}): {{text}}'});
+  const h=responder(payload);
+  assert.deepEqual(await translateWithProvider(normalizeSettings(settings).providers.at(-1),{texts:['Hello'],targetLanguage:'zh-Hans',...h}),['你好']);
+  const [system,user]=h.calls[0].body.messages;
+  assert.match(system.content,/^Translate its detected language to zh-Hans formally\.\n\nReturn only a JSON array of 1 translated strings/);
+  assert.equal(user.content,'Strings ({{count}}): ["Hello"]');
+  const appended=responder({content:[{type:'text',text:'["こんにちは"]'}]});
+  await translateWithProvider({...config('anthropic'),userPrompt:'Keep $& and $1 literal.'},{texts:['Hello'],targetLanguage:'ja',...appended});
+  assert.match(appended.calls[0].body.system,/^Translate each input string/);
+  assert.equal(appended.calls[0].body.messages[0].content,'Keep $& and $1 literal.\n\n["Hello"]');
+  const blank=responder(payload);
+  await translateWithProvider({...config('openai'),systemPrompt:'  ',userPrompt:''},{texts:['Hello'],targetLanguage:'ja',...blank});
+  assert.equal(blank.calls[0].body.messages[1].content,'["Hello"]');
+  assert.throws(()=>validateProvider({...config('openai'),systemPrompt:'x'.repeat(8001)}),{code:'INVALID_CONFIG'});
+});
 test('clearing temperature in saved settings omits the optional field from all AI request bodies',async()=>{
   for(const type of ['openai','gemini','anthropic','ollama']) {
     const settings=defaultSettings();settings.providers.push({...config(type),temperature:null});
