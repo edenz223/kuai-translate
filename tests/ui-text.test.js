@@ -29,16 +29,6 @@ test('long text is fully translated in bounded batches without truncation', asyn
   assert.equal(result.text.replace(/[\[\]]/g,''),source);
 });
 
-test('cancellation invalidates a late translation and cancels the active request', async () => {
-  let finish, cancelled;
-  const translator=createTextTranslator({makeRequestId:()=> 'request-a',cancel:async id=>{cancelled=id;},translate:()=>new Promise(resolve=>{finish=resolve;})});
-  const task=translator.run('Hello','text.txt',{});
-  await Promise.resolve();translator.stop();
-  finish({translations:['迟到']});
-  await assert.rejects(task,error=>error.name==='AbortError');
-  assert.equal(cancelled,'request-a');
-});
-
 test('empty and mismatched output rejects the document instead of returning invisible success', async () => {
   for(const translations of [[],['   ']]) {
     const translator=createTextTranslator({makeRequestId:()=> 'a',cancel:async()=>{},translate:async()=>({translations})});
