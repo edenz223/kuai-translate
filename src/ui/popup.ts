@@ -12,7 +12,7 @@ import {getSettings, request} from '../shared/client.js';
 import {normalizeSettings} from '../shared/settings.js';
 import {createSettingsEditor} from './state.js';
 import {videoIdFromUrl} from '../youtube/captions.js';
-import {byId,fillProviders,fillSelect,LANGUAGES,setStatus,errorMessage,FREE_TYPES} from './common.js';
+import {byId,fillProviders,fillSelect,LANGUAGES,setStatus,errorMessage,needsKey} from './common.js';
 import {applySiteRule,siteHost,siteRuleState,type SiteRule} from '../shared/site-rules.js';
 
 export async function sendPageAction(type: PageActionType,chromeApi: typeof chrome=globalThis.chrome,targetTab?: chrome.tabs.Tab): Promise<PageActionResult> {
@@ -27,7 +27,6 @@ export async function sendPageAction(type: PageActionType,chromeApi: typeof chro
 
 const SETTINGS_CONTROLS=['source','target','swap-languages','provider','display-bilingual','paragraph-enabled','selection-enabled','input-enabled'];
 const SITE_RULES: SiteRule[]=['default','always','never'];
-const needsKey=(type: string)=>!FREE_TYPES.includes(type)&&!['deeplx','ollama'].includes(type);
 
 export async function startPopup(document: Document = globalThis.document, chromeApi: typeof chrome = globalThis.chrome): Promise<void> {
   const status=byId(document,'status'), fail=(error: unknown): void=>setStatus(status,errorMessage(error),true);

@@ -270,7 +270,7 @@ test('enabled provider choices stay current and invalid drafts can be explicitly
   assert.ok(h.node('selection-option-providerId'),'selection must have an independent service choice');
   assert.ok(h.node('selection-option-providerId').children.some(option=>option.value==='follow_page'));
   await h.edit('selection-option-providerId','google');await h.edit('input-option-providerId','google');
-  const googleButton=h.node('provider-list').children[1];await googleButton.fire('click');await h.edit('provider-enabled',false);
+  const googleButton=h.node('free-provider-list').children[1];await googleButton.fire('click');await h.edit('provider-enabled',false);
   assert.equal(h.stored.selectionOptions.providerId,'follow_page');assert.equal(h.stored.inputOptions.providerId,'follow_page');
   assert.equal(h.node('selection-option-providerId').children.some(option=>option.value==='google'),false);
   await h.edit('page-option-shortcut','Ctrl+','input');

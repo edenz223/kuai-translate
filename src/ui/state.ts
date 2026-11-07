@@ -22,7 +22,7 @@ export interface SettingsEditor {
   retry(): Promise<Settings>;
   flush(): Promise<void>;
   patchProvider(id: string | undefined, patch: ProviderPatch): Promise<Settings>;
-  addProvider(type: string): Promise<string>;
+  addProvider(type: string, name?: string): Promise<string>;
   removeProvider(id: string | undefined): Promise<Settings>;
 }
 export type ProviderTestState = {status: 'idle'} | {status: 'pending'; providerId: string} |
@@ -83,10 +83,10 @@ export function createSettingsEditor({load, save, normalize = structuredClone as
           if (Object.hasOwn(patch,key)) (provider as unknown as Record<string, unknown>)[key] = patch[key];
       });
     },
-    async addProvider(type) {
+    async addProvider(type, name) {
       if (!['openai','gemini','anthropic','azure','deepl','deeplx','ollama'].includes(type)) throw new Error('不支持的自配服务。');
       const id = idFactory();
-      await this.update(next => next.providers.push({id,type,name:type + ' API',enabled:true,baseUrl:'',apiKey:'',model:'',region:'',temperature:null}));
+      await this.update(next => next.providers.push({id,type,name:name || type + ' API',enabled:true,baseUrl:'',apiKey:'',model:'',region:'',temperature:null}));
       return id;
     },
     removeProvider(id) { return this.update(next => { next.providers = next.providers.filter(item => item.id !== id); }); },

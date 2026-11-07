@@ -200,9 +200,9 @@ try{
   const pages={};
   for(const name of ['options.html','text.html']){
     const cdp=await page(extensionOrigin+'/'+name);
-    await until(()=>evaluate(cdp,'document.querySelector("#provider")?.options.length>0 || document.querySelector("#provider-list")?.children.length>0'),'UI initialization '+name);
+    await until(()=>evaluate(cdp,'document.querySelector("#provider")?.options.length>0 || document.querySelector("#free-provider-list")?.children.length>0'),'UI initialization '+name);
     if(name==='options.html'){
-      await evaluate(cdp,`document.querySelector('#provider-type').value='openai';document.querySelector('#add-provider').click()`);
+      await evaluate(cdp,`document.querySelector('#add-provider').click();document.querySelector('#provider-types [data-type="openai"]').click()`);
       await until(()=>evaluate(cdp,`document.querySelector('#provider-kind').textContent==='OpenAI 兼容 API'`),'new AI provider');
       await evaluate(cdp,`(()=>{
         for(const [id,value] of [['provider-baseUrl',${JSON.stringify(fixtureURL+'v1')}],['provider-apiKey','fixture-model-key']]){
