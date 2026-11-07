@@ -35,11 +35,11 @@ test('actual options controls invalidate a connection result after selecting or 
   t.after(()=>{globalThis.chrome=previousChrome;});
   const h=documentBoundary('options');await startOptions(h.document);
   assert.equal(h.node('provider-name').readOnly,true,'built-in names are fixed by normalization and must not promise editable names');
-  await h.node('provider-list').children[4].fire('click');
+  await h.node('custom-provider-list').children[0].fire('click');
   assert.equal(h.node('provider-name').readOnly,false);
   const first=h.node('test-provider').fire('click');
   assert.equal(h.node('test-provider').disabled,true);
-  await h.node('provider-list').children[5].fire('click');
+  await h.node('custom-provider-list').children[1].fire('click');
   checks[0].result.resolve({ok:true,value:{translations:['Old selected service']}});await first;
   assert.equal(h.node('test-status').textContent,'');assert.equal(h.node('test-provider').disabled,false);
   const second=h.node('test-provider').fire('click');
@@ -49,7 +49,8 @@ test('actual options controls invalidate a connection result after selecting or 
   assert.deepEqual(cancelled,checks.slice(0,2).map(({message})=>message.requestId));
   const third=h.node('test-provider').fire('click');
   checks[2].result.resolve({ok:true,value:{translations:['Current result']}});await third;
-  assert.equal(h.node('test-status').textContent,'连接成功：Current result');
+  assert.match(h.node('test-status').textContent,/^连接成功 · \d+ ms$/);
+  assert.equal(h.node('test-detail').textContent,'示例译文：Current result');
 });
 
 test('a late local file read cannot overwrite a newer file in the actual text page controller',async t=>{
@@ -90,10 +91,10 @@ test('model controls fetch, select and save a model while ignoring a stale provi
   t.after(()=>{globalThis.chrome=previousChrome;});
   const h=documentBoundary('options');await startOptions(h.document);
   assert.ok(h.node('fetch-models'),'model discovery action exists');
-  await h.node('provider-list').children[4].fire('click');
+  await h.node('custom-provider-list').children[0].fire('click');
   const first=h.node('fetch-models').fire('click');
   assert.equal(h.node('fetch-models').disabled,true);
-  await h.node('provider-list').children[5].fire('click');
+  await h.node('custom-provider-list').children[1].fire('click');
   checks[0].result.resolve({ok:true,value:[{id:'stale',name:'Stale'}]});await first;
   assert.equal(h.node('model-status').textContent,'');
   assert.equal(h.node('fetch-models').disabled,false);
