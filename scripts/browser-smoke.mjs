@@ -111,7 +111,7 @@ try{
       await cdp('Fetch.enable',{patterns:[{urlPattern:'https://www.youtube.com/*',requestStage:'Request'}]});
     }
     if(process.env.SMOKE_BLOCK_MODULE_FETCH||process.env.SMOKE_YOUTUBE_BOOTSTRAP)await cdp('Page.navigate',{url});
-    await until(()=>evaluate(cdp,'document.readyState==="complete"'),'document ready');
+    await until(()=>evaluate(cdp,'location.href!=="about:blank"&&document.readyState==="complete"'),'document ready');
     return cdp;
   }
   const fixture=await page(fixtureURL);

@@ -1,0 +1,64 @@
+name: Manual test package
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit SHA to package (empty = the branch selected above)
+        required: false
+        default: ''
+      verify:
+        description: Run pnpm verify before packaging
+        type: boolean
+        default: true
+      retention-days:
+        description: Days to keep the artifact
+        type: number
+        default: 7
+permissions:
+  contents: read
+concurrency:
+  group: manual-package-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - if: inputs.verify
+        run: pnpm verify
+      - run: pnpm package
+      - id: meta
+        run: |
+          sha=$(git rev-parse --short HEAD)
+          version=$(node -p "require('./package.json').version")
+          echo "name=kuai-translate-${version}-${sha}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Test package"
+            echo
+            echo "- Ref: \`${INPUT_REF:-$GITHUB_REF_NAME}\` (\`$sha\`)"
+            echo "- Version: \`$version\`"
+            echo "- Verify: \`$VERIFY\`"
+            echo
+            echo '```'
+            cat release/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+          VERIFY: ${{ inputs.verify }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.meta.outputs.name }}
+          path: release/
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention-days }}
