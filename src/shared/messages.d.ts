@@ -3,6 +3,8 @@ import type {Provider, Settings, PublicSettings} from './settings.js';
 
 export type OptionsSection = 'webpage' | 'selection' | 'input' | 'hover' | 'subtitles';
 export type DisplayMode = 'bilingual' | 'translation_only';
+/** Toolbar badge summary of the top frame's page translation. */
+export type PageBadgeState = 'idle' | 'working' | 'done' | 'error' | 'blocked';
 export interface TranslationOptions {
   signal?: AbortSignal; requestId?: string; providerId?: string;
   sourceLanguage?: string; targetLanguage?: string;
@@ -22,6 +24,7 @@ export interface RequestPayloadMap {
   KUAI_CANCEL: {requestId: string};
   KUAI_LIST_MODELS: {provider: Provider; requestId: string};
   KUAI_TEST_PROVIDER: {provider: Provider; requestId?: string; text?: string};
+  KUAI_PAGE_STATE: {state: PageBadgeState};
 }
 export interface RequestResultMap {
   KUAI_GET_SETTINGS: Settings;
@@ -33,6 +36,7 @@ export interface RequestResultMap {
   KUAI_CANCEL: {cancelled: boolean};
   KUAI_LIST_MODELS: ProviderModel[];
   KUAI_TEST_PROVIDER: TranslationResult;
+  KUAI_PAGE_STATE: {shown: boolean};
 }
 export type RequestType = keyof RequestPayloadMap;
 export type RequestPayload<T extends RequestType> = RequestPayloadMap[T];
@@ -41,7 +45,7 @@ export interface PublicFailure {code: string; message: string}
 export type MessageResponse<T> = {ok: true; value: T} | {ok: false; error: PublicFailure};
 export type BackgroundResponse = MessageResponse<RequestResultMap[RequestType]>;
 export type PageActionType = 'KUAI_PAGE_TRANSLATE' | 'KUAI_PAGE_RESTORE' | 'KUAI_SELECTION_TRANSLATE' |
-  'KUAI_INPUT_TRANSLATE' | 'KUAI_PAGE_STATUS' | 'KUAI_YOUTUBE_OPEN_LIST';
+  'KUAI_INPUT_TRANSLATE' | 'KUAI_PAGE_STATUS' | 'KUAI_YOUTUBE_OPEN_LIST' | 'KUAI_PAGE_TOGGLE' | 'KUAI_PAGE_DISPLAY_MODE';
 export type PageRequest = {type: PageActionType; text?: string};
 export interface SettingsChanged {type: 'KUAI_SETTINGS_CHANGED'; settings: PublicSettings}
 export interface PageStatus {

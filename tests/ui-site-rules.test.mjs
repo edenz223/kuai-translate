@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {applySiteRule,siteRuleState,siteHost} from '../dist/src/ui/site-rules.js';
+import {applySiteRule,siteRuleState,siteHost} from '../dist/src/shared/site-rules.js';
 import {defaultSettings} from '../dist/src/shared/settings.js';
 
 test('site rules leave broader patterns from the options page untouched',()=>{

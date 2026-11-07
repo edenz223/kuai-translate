@@ -1,6 +1,6 @@
-/** Popup shortcuts for per-site page rules; the options page keeps the full rule lists. */
-import type {Settings} from '../shared/settings.js';
-import {isSiteListed,normalizeSiteList} from '../shared/interactions.js';
+/** Per-site page rule shortcuts for the popup and context menu; the options page keeps the full rule lists. */
+import type {Settings} from './settings.js';
+import {isSiteListed,normalizeSiteList} from './interactions.js';
 
 export type SiteRule = 'default' | 'always' | 'never';
 const LIMIT=100;

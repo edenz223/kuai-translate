@@ -9,7 +9,7 @@ const page={id:extensionId,url:'https://example.com/article',tab:{id:4},frameId:
 const options={id:extensionId,url:'chrome-extension://'+extensionId+'/options.html',documentId:'options-a'};
 function event(){const callbacks=new Set();return {addListener:fn=>callbacks.add(fn),removeListener:fn=>callbacks.delete(fn),emit:(...args)=>{for(const fn of callbacks)fn(...args);},get size(){return callbacks.size;}};}
 function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenuHook,createMenuHook}={}){
-  let data=structuredClone(stored);const access=[],writes=[],broadcasts=[],menus=[],menuCalls=[],requests=[];
+  let data=structuredClone(stored);const access=[],writes=[],broadcasts=[],menus=[],menuCalls=[],requests=[],badges=[];
   const changed=event();
   const chromeApi={
     runtime:{id:extensionId,getURL:path=>'chrome-extension://'+extensionId+'/'+path,onMessage:event(),onInstalled:event(),sendMessage:async message=>{broadcasts.push(message);}},
@@ -19,13 +19,14 @@ function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenu
       set:async values=>{const next=values[SETTINGS_KEY];writes.push(structuredClone(next));await setHook?.(next);data=structuredClone(next);changed.emit({[SETTINGS_KEY]:{newValue:data}},'local');},
     }},
     tabs:{query:async()=>[{id:4},{id:5}],sendMessage:async(tabId,message,target)=>{broadcasts.push({tabId,message,target});},onRemoved:event()},
-    webNavigation:{onCommitted:event()},
+    webNavigation:{onCommitted:event()},commands:{onCommand:event()},
+    action:{setBadgeText:async value=>{badges.push(['text',value]);},setBadgeBackgroundColor:async value=>{badges.push(['color',value]);}},
     contextMenus:{onClicked:event(),removeAll:async callback=>{menuCalls.push('remove');await removeMenuHook?.();menus.length=0;callback?.();},
       create:(menu,callback)=>{menuCalls.push(menu.id);if(createMenuHook)Promise.resolve(createMenuHook(menu)).then(()=>{menus.push(menu);callback?.();});else{menus.push(menu);callback?.();}return menu.id;}},
   };
   const fetchImpl=async(url,init)=>{requests.push({url,init});const texts=JSON.parse(init.body);return Response.json(texts.map(text=>({translations:[{text:'译文:'+text}]})));};
   const controller=createBackground({chromeApi,fetchImpl}).start();
-  return {controller,chromeApi,access,writes,broadcasts,menus,menuCalls,requests,get data(){return data;}};
+  return {controller,chromeApi,access,writes,broadcasts,menus,menuCalls,requests,badges,get data(){return data;}};
 }
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 async function flush(){for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));}
@@ -125,7 +126,7 @@ test('provider testing is available to extension pages and errors remain redacte
 });
 test('context menu listeners survive startup and forward explicit selection to its frame',async()=>{
   const stored=defaultSettings();stored.selectionEnabled=true;const h=fixture({stored});await h.controller.ready;await flush();
-  assert.equal(h.menus.length,4);
+  assert.equal(h.menus.length,7);
   h.chromeApi.contextMenus.onClicked.emit({menuItemId:'kuai.selection',selectionText:'Selected text',frameId:3},{id:4});await flush();
   const call=h.broadcasts.find(item=>item.message?.type==='KUAI_SELECTION_TRANSLATE');
   assert.deepEqual(call,{tabId:4,message:{type:'KUAI_SELECTION_TRANSLATE',text:'Selected text'},target:{frameId:3}});
@@ -451,7 +452,7 @@ test('initial menu visibility waits for stored global and feature preferences',a
   const gate=deferred(),stored=defaultSettings();stored.selectionEnabled=false;stored.inputOptions.enabled=false;
   const h=fixture({stored,accessHook:()=>gate.promise});await flush();assert.deepEqual(h.menuCalls,[]);
   gate.resolve();await h.controller.ready;await flush();
-  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore']);h.controller.stop();
+  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore','kuai.site.always','kuai.site.never','kuai.site.default']);h.controller.stop();
   stored.pageOptions.contextMenuEnabled=false;
   const hidden=fixture({stored});await hidden.controller.ready;await flush();assert.deepEqual(hidden.menus,[]);hidden.controller.stop();
 });
@@ -462,12 +463,12 @@ test('menus rebuild only for relevant preference changes and preserve independen
   current.pageStyle.fontSize=120;current.targetLanguage='ja';await saveSnapshot(h,current);await flush();
   h.chromeApi.runtime.onInstalled.emit();await flush();assert.equal(h.menuCalls.length,firstCount);
   current=await privateSettings(h);current.selectionEnabled=false;await saveSnapshot(h,current);await flush();
-  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore','kuai.input']);
+  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore','kuai.input','kuai.site.always','kuai.site.never','kuai.site.default']);
   current=await privateSettings(h);current.inputOptions.enabled=false;await saveSnapshot(h,current);await flush();
-  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore']);
+  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore','kuai.site.always','kuai.site.never','kuai.site.default']);
   current=await privateSettings(h);current.pageOptions.contextMenuEnabled=false;await saveSnapshot(h,current);await flush();assert.deepEqual(h.menus,[]);
   current=await privateSettings(h);current.pageOptions.contextMenuEnabled=true;await saveSnapshot(h,current);await flush();
-  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore']);h.controller.stop();
+  assert.deepEqual(h.menus.map(menu=>menu.id),['kuai.page','kuai.restore','kuai.site.always','kuai.site.never','kuai.site.default']);h.controller.stop();
 });
 
 test('a preference change while menu removal waits cannot publish obsolete menu items',async()=>{
@@ -551,4 +552,44 @@ test('model discovery is restricted to extension pages and cancellation owns its
   assert.equal((await controller.handleMessage({type:'KUAI_CANCEL',requestId:'models'},options)).value.cancelled,true);
   assert.equal((await pending).error.code,'CANCELLED');assert.equal(aborted,true);
   assert.equal(h.writes.length,0);controller.stop();
+});
+
+test('site menu items edit only the clicked host and are limited to web pages',async()=>{
+  const h=fixture();await h.controller.ready;await flush();
+  const site=h.menus.find(menu=>menu.id==='kuai.site.never');
+  assert.deepEqual(site.documentUrlPatterns,['http://*/*','https://*/*']);assert.equal(site.rule,undefined);
+  h.chromeApi.contextMenus.onClicked.emit({menuItemId:'kuai.site.never',pageUrl:'https://news.example.com/a',frameId:2},{id:4});await flush();
+  assert.deepEqual(h.data.pageOptions.neverSites,['news.example.com']);
+  h.chromeApi.contextMenus.onClicked.emit({menuItemId:'kuai.site.default',pageUrl:'https://news.example.com/b'},{id:4});await flush();
+  assert.deepEqual(h.data.pageOptions.neverSites,[]);
+  assert.equal(h.broadcasts.some(item=>item.tabId!==undefined&&String(item.message?.type).startsWith('KUAI_PAGE')),false,'site rules never message the page');
+  h.controller.stop();
+});
+
+test('only the top document of a web tab sets its toolbar badge, and navigation clears it',async()=>{
+  const h=fixture();await h.controller.ready;
+  assert.deepEqual((await h.controller.handleMessage({type:'KUAI_PAGE_STATE',state:'done'},page)).value,{shown:true});
+  assert.deepEqual(h.badges,[['color',{tabId:4,color:'#087e8b'}],['text',{tabId:4,text:'✓'}]]);
+  h.badges.length=0;
+  assert.deepEqual((await h.controller.handleMessage({type:'KUAI_PAGE_STATE',state:'working'},{...page,frameId:3})).value,{shown:false});
+  assert.deepEqual((await h.controller.handleMessage({type:'KUAI_PAGE_STATE',state:'done'},options)).value,{shown:false});
+  assert.equal((await h.controller.handleMessage({type:'KUAI_PAGE_STATE',state:'bogus'},page)).error.code,'INVALID_INPUT');
+  assert.equal((await h.controller.handleMessage({type:'KUAI_PAGE_STATE',state:'done',text:'X'},page)).error.code,'INVALID_INPUT');
+  assert.deepEqual(h.badges,[]);
+  h.chromeApi.webNavigation.onCommitted.emit({tabId:4,frameId:1,documentId:'d'});
+  h.chromeApi.webNavigation.onCommitted.emit({tabId:4,frameId:0,documentId:'d'});await flush();
+  assert.deepEqual(h.badges,[['text',{tabId:4,text:''}]]);h.controller.stop();
+});
+
+test('keyboard commands toggle the active web tab through its top frame only',async()=>{
+  const h=fixture();await h.controller.ready;
+  h.chromeApi.commands.onCommand.emit('toggle-page',{id:7,url:'https://example.com/'});
+  h.chromeApi.commands.onCommand.emit('toggle-display-mode',{id:7,url:'https://example.com/'});
+  h.chromeApi.commands.onCommand.emit('toggle-page',{id:8,url:'chrome://extensions/'});
+  h.chromeApi.commands.onCommand.emit('unknown',{id:7,url:'https://example.com/'});await flush();
+  assert.deepEqual(h.broadcasts.filter(item=>item.tabId!==undefined),[
+    {tabId:7,message:{type:'KUAI_PAGE_TOGGLE'},target:{frameId:0}},
+    {tabId:7,message:{type:'KUAI_PAGE_DISPLAY_MODE'},target:{frameId:0}},
+  ]);
+  h.controller.stop();assert.equal(h.chromeApi.commands.onCommand.size,0);
 });

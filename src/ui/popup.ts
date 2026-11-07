@@ -13,7 +13,7 @@ import {normalizeSettings} from '../shared/settings.js';
 import {createSettingsEditor} from './state.js';
 import {videoIdFromUrl} from '../youtube/captions.js';
 import {byId,fillProviders,fillSelect,LANGUAGES,setStatus,errorMessage,FREE_TYPES} from './common.js';
-import {applySiteRule,siteHost,siteRuleState,type SiteRule} from './site-rules.js';
+import {applySiteRule,siteHost,siteRuleState,type SiteRule} from '../shared/site-rules.js';
 
 export async function sendPageAction(type: PageActionType,chromeApi: typeof chrome=globalThis.chrome,targetTab?: chrome.tabs.Tab): Promise<PageActionResult> {
   const tab=targetTab || (await chromeApi.tabs.query({active:true,currentWindow:true}))[0];
@@ -138,6 +138,8 @@ export async function startPopup(document: Document = globalThis.document, chrom
   byId(document,'page-settings').addEventListener('click',()=>openOptions('webpage'));
   byId(document,'provider-settings').addEventListener('click',()=>openOptions('providers'));
   byId(document,'options').addEventListener('click',()=>chromeApi.runtime.openOptionsPage());
+  // Browser-level shortcuts work even when the page has focus elsewhere, e.g. the address bar.
+  byId(document,'shortcuts').addEventListener('click',()=>chromeApi.tabs.create({url:'chrome://extensions/shortcuts'}));
   byId(document,'text-tool').addEventListener('click',()=>chromeApi.tabs.create({url:chromeApi.runtime.getURL('text.html')}));
   try {
     [tab]=await chromeApi.tabs.query({active:true,currentWindow:true});available=!!tab?.id&&/^https?:/.test(tab.url || '');
