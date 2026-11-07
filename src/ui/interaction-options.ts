@@ -3,7 +3,7 @@ import type {SettingsEditor, SettingsChange} from './state.js';
 import type {SelectEntry} from './common.js';
 
 type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-type InteractionKind = 'checkbox' | 'languages' | 'sites' | 'selectors' | 'number' | 'shortcut' | 'provider' | 'select' | 'keys' | 'color';
+type InteractionKind = 'checkbox' | 'languages' | 'sites' | 'selectors' | 'number' | 'shortcut' | 'provider' | 'select' | 'keys' | 'color' | 'writeBack';
 type InteractionField = [kind: InteractionKind, entriesOrOther?: SelectEntry[] | string, label?: string];
 type InteractionProperty = 'pageOptions' | 'selectionOptions' | 'inputOptions' | 'hoverOptions';
 interface InteractionGroup { property: InteractionProperty; defaults: Settings[InteractionProperty]; fields: Record<string,InteractionField>; }
@@ -12,10 +12,17 @@ export interface InteractionControlOptions { document: Document; editor: Setting
 export interface InteractionControls { render(settings: Settings): void; bind(): void; resetDrafts(group?: string): void; validationCount(): number; incompleteCount(): number; }
 
 import {PAGE_OPTIONS_DEFAULTS,SELECTION_OPTIONS_DEFAULTS,INPUT_OPTIONS_DEFAULTS,HOVER_OPTIONS_DEFAULTS,normalizeShortcut,normalizeKey,normalizeSiteList} from '../shared/interactions.js';
-import {byId,fillProviders,fillSelect,LANGUAGES} from './common.js';
+import {byId,fillProviders,fillSelect,languageName,LANGUAGES} from './common.js';
 
 const sourceLanguages: SelectEntry[]=[['follow_page','跟随网页原文语言'],...LANGUAGES];
 const targetLanguages: SelectEntry[]=[['follow_page','跟随网页目标语言'],...LANGUAGES.filter(([id])=>id!=='auto')];
+const writeBackEntries: SelectEntry[]=[['translation','仅译文（替换原文）'],['original-translation','原文 + 译文'],['translation-original','译文 + 原文']];
+/** One select for what ends up in the box; stored as `includeOriginal` + `displayOrder`. */
+const writeBackValue=(input: Settings['inputOptions']): string=>input.includeOriginal?input.displayOrder:'translation';
+/** Follow-page labels name the language the web page settings currently resolve to. */
+function languageEntries(entries: SelectEntry[],current: string): SelectEntry[] {
+  return entries.map(([id,label])=>id==='follow_page'?[id,`${label}（当前：${languageName(current)}）`]:[id,label]);
+}
 const groups: Record<string,InteractionGroup>={
   page:{property:'pageOptions',defaults:PAGE_OPTIONS_DEFAULTS,fields:{
     autoTranslate:['checkbox'],alwaysLanguages:['languages'],neverLanguages:['languages'],alwaysSites:['sites'],neverSites:['sites'],
@@ -30,8 +37,7 @@ const groups: Record<string,InteractionGroup>={
   input:{property:'inputOptions',defaults:INPUT_OPTIONS_DEFAULTS,fields:{
     enabled:['checkbox'],providerId:['provider'],sourceLanguage:['select',sourceLanguages],targetLanguage:['select',targetLanguages],
     shortcut:['shortcut','restoreShortcut','已保存的还原快捷键'],
-    icon:['select',[['none','不显示入口'],['dot','小圆点'],['icon','翻译图标']]],autoApply:['checkbox'],includeOriginal:['checkbox'],
-    displayOrder:['select',[['original-translation','原文在前，译文在后'],['translation-original','译文在前，原文在后']]],disabledSites:['sites'],
+    icon:['select',[['none','不显示入口'],['dot','小圆点'],['icon','翻译图标']]],autoApply:['checkbox'],writeBack:['writeBack'],disabledSites:['sites'],
   }},
   hover:{property:'hoverOptions',defaults:HOVER_OPTIONS_DEFAULTS,fields:{
     trigger:['select',[['shift','按一次 Shift'],['alt','按一次 Alt'],['ctrl','按一次 Control'],['custom','自定义快捷键'],['left_hold','长按鼠标左键'],['hover','直接悬停（自动触发）']]],
@@ -103,7 +109,8 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
       for(const [key,[kind,entries]] of Object.entries(fields)){
         const id=idFor(group,key),field=node<FormControl>(id);
         if(kind==='provider')fillProviders(document,field,settings,values[key] as string,true);
-        else if(kind==='select')fillSelect(document,field,entries as SelectEntry[],values[key] as string);
+        else if(kind==='writeBack')fillSelect(document,field,writeBackEntries,writeBackValue(settings.inputOptions));
+        else if(kind==='select')fillSelect(document,field,key==='sourceLanguage'||key==='targetLanguage'?languageEntries(entries as SelectEntry[],settings[key]):entries as SelectEntry[],values[key] as string);
         else if(kind==='checkbox')(field as HTMLInputElement).checked=!!values[key];
         else if(field!==document.activeElement)field.value=drafts.has(id)?drafts.get(id) as string:format(values[key],kind);
         if(kind==='shortcut' && drafts.has(id)){
@@ -119,7 +126,13 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
     node('selection-trigger-action-field').hidden=!buttonTrigger;
     node('selection-delay-field').hidden=buttonTrigger && selection.triggerAction==='click';
     node('input-options-panel').hidden=!input.enabled;
-    node('input-display-order-field').hidden=!input.includeOriginal;
+    const inputSource=input.sourceLanguage==='follow_page'?settings.sourceLanguage:input.sourceLanguage;
+    node<HTMLButtonElement>('input-swap-languages').disabled=inputSource==='auto';
+    node('input-swap-help').hidden=inputSource!=='auto';
+    node('input-icon-help').textContent=input.icon==='dot'?'聚焦输入框时右下角显示小圆点；点击展开翻译图标，再点图标翻译，完成后再点还原。':
+      input.icon==='icon'?'聚焦输入框时显示翻译图标，点击即翻译，完成后再点还原。':'不显示入口，只用快捷键或右键菜单翻译。';
+    node('input-write-back-help').hidden=!input.includeOriginal;
+    node('input-apply-help').textContent=input.autoApply?'不弹出结果卡，译文直接替换输入框内容。':'先在小卡片中预览译文，确认后点“应用”写回。';
     node('hover-options-panel').hidden=!settings.hoverEnabled;
     node('hover-custom-keys-field').hidden=hover.trigger!=='custom';
     node('hover-delay-field').hidden=!['hover','left_hold'].includes(hover.trigger);
@@ -134,6 +147,13 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
   }
   function commit(group: string,key: string,{blur=false}: {blur?: boolean}={}) {
     const {property,fields}=groups[group],[kind]=fields[key],id=idFor(group,key),field=node<FormControl>(id);
+    if(kind==='writeBack'){
+      const value=field.value;
+      return save(settings=>{
+        settings.inputOptions.includeOriginal=value!=='translation';
+        if(value!=='translation')settings.inputOptions.displayOrder=value as Settings['inputOptions']['displayOrder'];
+      });
+    }
     const editable=!['checkbox','select','provider'].includes(kind),raw=kind==='checkbox'?(field as HTMLInputElement).checked:field.value;
     if(editable)drafts.set(id,raw);
     const parsed=parse(group,key,raw,blur);
@@ -165,7 +185,7 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
   function bind(): void {
     for(const [group,{property,fields,defaults}] of Object.entries(groups)){
       for(const [key,[kind]] of Object.entries(fields)){
-        const field=node(idFor(group,key)),type=['checkbox','select','provider'].includes(kind)?'change':'input';
+        const field=node(idFor(group,key)),type=['checkbox','select','provider','writeBack'].includes(kind)?'change':'input';
         field.addEventListener(type,()=>commit(group,key));
         if(type==='input')field.addEventListener('blur',()=>commit(group,key,{blur:true}));
       }
@@ -173,6 +193,12 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
         resetDrafts(group);return save(settings=>{(settings as unknown as Record<string,unknown>)[property]=structuredClone(defaults);});
       });
     }
+    // Swaps the languages input translation resolves to, so a follow-page value becomes explicit.
+    node('input-swap-languages').addEventListener('click',()=>save(settings=>{
+      const input=settings.inputOptions,source=input.sourceLanguage==='follow_page'?settings.sourceLanguage:input.sourceLanguage;
+      if(source==='auto')return;
+      input.sourceLanguage=input.targetLanguage==='follow_page'?settings.targetLanguage:input.targetLanguage;input.targetLanguage=source;
+    }));
   }
   return {render,bind,resetDrafts,validationCount:()=>errors.size,incompleteCount:()=>incomplete.size};
 }

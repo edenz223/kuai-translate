@@ -14,7 +14,7 @@ Builds on the P3 options restructure (`2026-11-07-popup-settings-ux.md`); can sh
 - Label `输出语言（默认英文）` hardcodes the default; free-text shortcut fields only validate after typing.
 - Disabling input translation for one site means typing its host into a textarea; the popup 本站 rule only covers page translation.
 
-## I1 — Layout and copy
+## I1 — Layout and copy (done)
 - Order: 启用 → 语言对（原文 → 输出, with swap like the popup） → 服务 → 触发方式 → 写回 → 网站.
 - Group into three fieldsets: **怎么触发**（快捷键、入口样式）/ **写回什么**（自动写回、写回内容）/ **在哪里不用**.
 - Split `#input-apply-help` into one short hint per control; move the safety note
@@ -22,7 +22,7 @@ Builds on the P3 options restructure (`2026-11-07-popup-settings-ux.md`); can sh
 - Label `输出语言`; show the default only via the reset button.
 - `follow_page` options read `跟随网页翻译（当前：中文）` so the effective value is visible.
 
-## I2 — Write-back as one choice
+## I2 — Write-back as one choice (done)
 - Replace the `includeOriginal` checkbox + `displayOrder` select with one select 写回内容:
   仅译文 / 原文 + 译文 / 译文 + 原文. Maps onto the existing two fields in `interaction-options.ts`
   (new field kind, render reads both, commit writes both in one `editor.update`).

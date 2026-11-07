@@ -11,6 +11,41 @@ import {appendIcon} from './icons.js';
 import {batches,makeId,requestOptions,splitText,translationsOf} from './dom.js';
 import {resolveFeatureSettings} from '../shared/interactions.js';
 
+const spring='cubic-bezier(.34,1.56,.64,1)';
+/** The dot reflects the request state even while collapsed; motion is dropped for reduced-motion users. */
+const TRIGGER_STYLE=[
+  ':host{all:initial;--accent:#087e8b;--accent-2:#14b8a6;--ok:#16a34a;--bad:#dc2626}*{box-sizing:border-box}[hidden]{display:none!important}',
+  'button{font:12px/1.4 system-ui,sans-serif;cursor:pointer;border:1px solid #5888c0;border-radius:5px;background:#fff;color:#173f71;padding:2px 5px;-webkit-tap-highlight-color:transparent}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}button:disabled{opacity:.5}',
+  `.trigger{position:relative;width:18px;height:18px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--accent);display:grid;place-items:center;animation:kuai-appear .32s ${spring} both}`,
+  `.trigger:not(.icon)::before{content:"";position:absolute;inset:1px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 8%,transparent);opacity:0;transform:scale(.4);transition:opacity .2s,transform .28s ${spring},border-color .2s}`,
+  `.trigger:empty::after{content:"";width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,var(--accent-2),var(--accent));box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--accent) 45%,transparent);transition:transform .28s ${spring},background .25s,box-shadow .25s}`,
+  '.trigger:not(.icon):hover::before,.trigger:not(.icon):focus-visible::before,.trigger[aria-expanded=true]::before{opacity:1;transform:scale(1)}',
+  '.trigger:empty:hover::after{transform:scale(1.2)}.trigger[aria-expanded=true]:empty::after{transform:scale(.75)}.trigger:active::after{transform:scale(.6)}',
+  '.trigger[data-state=loading]::before{opacity:1;transform:scale(1);border-color:color-mix(in srgb,var(--accent) 18%,transparent);border-top-color:var(--accent);background:transparent;animation:kuai-spin .8s linear infinite}',
+  '.trigger[data-state=loading]:empty::after{animation:kuai-breathe 1.1s ease-in-out infinite}',
+  '.trigger[data-state=translated]::before{border-color:color-mix(in srgb,var(--ok) 40%,transparent);background:color-mix(in srgb,var(--ok) 8%,transparent)}.trigger[data-state=error]::before{border-color:color-mix(in srgb,var(--bad) 40%,transparent);background:color-mix(in srgb,var(--bad) 8%,transparent)}',
+  `.trigger[data-state=translated]:empty::after{background:var(--ok);box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--ok) 50%,transparent);animation:kuai-pop .4s ${spring}}`,
+  '.trigger[data-state=error]:empty::after{background:var(--bad);box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--bad) 50%,transparent)}.trigger[data-state=error]{animation:kuai-shake .4s ease-in-out}',
+  '.trigger.icon{width:28px;height:28px;border-radius:8px;background:#fff;border:1px solid #e2e8f0;box-shadow:0 1px 2px rgb(15 23 42/.06),0 3px 10px rgb(15 23 42/.08);font-weight:600;transition:transform .2s,box-shadow .2s,color .2s}.trigger.icon:hover{transform:translateY(-1px);box-shadow:0 2px 4px rgb(15 23 42/.08),0 6px 16px rgb(15 23 42/.12)}',
+  `.translate-action{--from:6px;position:absolute;right:calc(100% + 5px);bottom:-6px;display:grid;place-items:center;width:30px;height:30px;padding:0;background:rgb(255 255 255/.92);color:#475569;border:1px solid rgb(15 23 42/.08);border-radius:10px;box-shadow:0 1px 2px rgb(15 23 42/.06),0 6px 18px rgb(15 23 42/.14);backdrop-filter:blur(8px);transform-origin:var(--origin,right center);transition:opacity .18s,transform .3s ${spring},border-radius .3s ${spring},color .2s,background .2s,border-color .2s,box-shadow .2s,display .3s allow-discrete,overlay .3s allow-discrete}`,
+  '.translate-action[data-side=right]{--from:-6px;--origin:left center}',
+  '@starting-style{.translate-action{opacity:0;transform:translateX(var(--from)) scale(.6)}}',
+  '.translate-action:hover{color:var(--accent);transform:translateY(-1px);box-shadow:0 2px 4px rgb(15 23 42/.08),0 10px 24px rgb(15 23 42/.16)}.translate-action:active{transform:scale(.92);transition-duration:.08s}',
+  '.translate-action[data-state=loading]{color:var(--accent);border-radius:50%}.translate-action[data-state=loading]>svg:first-child{animation:kuai-breathe 1.1s ease-in-out infinite}',
+  '.translate-action[data-state=loading]::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:2px solid transparent;border-top-color:var(--accent);border-right-color:color-mix(in srgb,var(--accent) 35%,transparent);animation:kuai-spin .9s linear infinite}',
+  '.translate-action[data-state=translated]{color:var(--ok);border-color:#bbf7d0;background:rgb(240 253 244/.95)}',
+  `.completion-check{position:absolute;right:-5px;top:-5px;width:14px;height:14px;padding:2px;border-radius:50%;background:var(--ok);color:#fff;stroke-width:3;box-shadow:0 0 0 2px #fff;animation:kuai-pop .4s ${spring}}`,
+  '.translate-action[data-state=error]{color:var(--bad);border-color:#fecaca;animation:kuai-shake .4s ease-in-out}',
+  '.feedback{position:absolute;right:0;bottom:100%;display:flex;gap:4px;align-items:center;padding:4px;background:#fff;color:#172033;border:1px solid #d5dce6;border-radius:8px;box-shadow:0 6px 18px rgb(15 23 42/.14);width:max-content;max-width:min(300px,calc(100vw - 16px));flex-wrap:wrap;font:12px/1.4 system-ui,sans-serif;animation:kuai-appear .22s ease-out both}',
+  '.status{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+  '@keyframes kuai-spin{to{transform:rotate(360deg)}}',
+  '@keyframes kuai-appear{from{opacity:0;transform:scale(.4)}}',
+  '@keyframes kuai-pop{0%{transform:scale(.3)}60%{transform:scale(1.35)}100%{transform:scale(1)}}',
+  '@keyframes kuai-breathe{50%{transform:scale(.55);opacity:.6}}',
+  '@keyframes kuai-shake{25%{transform:translateX(-2px)}50%{transform:translateX(2px)}75%{transform:translateX(-1px)}}',
+  '@media(prefers-reduced-motion:reduce){*,::before,::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.trigger[data-state=loading]::before{border-color:var(--accent)}}',
+].join('');
+
 /** Input requests and feedback deliberately have no selection-card ownership. */
 export function createInputFeedback({document,env,editor,translate,cancel,getSettings,options,allowed,key,labels,onState,makeRequestId=makeId}: InputFeedbackOptions){
   let generation=0,context: (InputContext & {element:EditorElement})|null=null,snapshot: InputSnapshot|null=null,pendingApply: (InputContext & {snapshot:InputSnapshot;text:string})|null=null,restoreContext: InputContext|null=null,trigger: HTMLDivElement|null=null,preview: HTMLDivElement|null=null,enabled=false,renderedElement: EditorElement|null=null,renderedConfig='',uiInteraction=false;
@@ -79,7 +114,7 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     if(!trigger||!renderedElement?.isConnected)return;
     const rect=renderedElement.getBoundingClientRect(),button=trigger.shadowRoot!.querySelector<HTMLButtonElement>('[data-trigger]')!,icon=options().icon==='icon';
     const size=Math.max(1,Math.min(icon?28:18,rect.width||rect.right-rect.left,rect.height||rect.bottom-rect.top));button.style.width=size+'px';button.style.height=size+'px';position(trigger,rect,size);
-    const actionButton=trigger.shadowRoot!.querySelector<HTMLButtonElement>('[data-translate]')!;actionButton.style.right=parseFloat(trigger.style.left)>=37?'calc(100% + 5px)':'auto';actionButton.style.left=parseFloat(trigger.style.left)>=37?'auto':'calc(100% + 5px)';
+    const actionButton=trigger.shadowRoot!.querySelector<HTMLButtonElement>('[data-translate]')!;actionButton.style.right=parseFloat(trigger.style.left)>=37?'calc(100% + 5px)':'auto';actionButton.style.left=parseFloat(trigger.style.left)>=37?'auto':'calc(100% + 5px)';actionButton.setAttribute('data-side',parseFloat(trigger.style.left)>=37?'left':'right');
     const box=trigger.shadowRoot!.querySelector<HTMLElement>('.feedback')!;if(!box||box.hidden)return;
     const viewportWidth=env.innerWidth||1200,viewportHeight=env.innerHeight||800;
     box.style.position='fixed';box.style.right='auto';box.style.bottom='auto';box.style.maxWidth=Math.max(0,Math.min(300,viewportWidth-8))+'px';box.style.maxHeight=Math.max(0,viewportHeight-8)+'px';box.style.overflow='auto';
@@ -96,7 +131,7 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     button.textContent=config.icon==='dot'?'':loading?'…':config.icon==='icon'?'译':'';
     button.setAttribute('aria-expanded',String(expanded));button.title=labels().inputTrigger;
     const translateButton=root.querySelector<HTMLButtonElement>('[data-translate]')!,mode=restorable?'translated':loading?'loading':failed?'error':copyResult?'copy':'idle';
-    translateButton.hidden=!expanded;translateButton.setAttribute('data-state',mode);translateButton.setAttribute('aria-pressed',String(restorable));
+    button.setAttribute('data-state',mode);translateButton.hidden=!expanded;translateButton.setAttribute('data-state',mode);translateButton.setAttribute('aria-pressed',String(restorable));
     const check=translateButton.querySelector<SVGElement>('[data-check]')!;if(restorable)check.removeAttribute('hidden');else check.setAttribute('hidden','');
     const actionLabel=restorable?labels().restore:loading?labels().cancel:failed?labels().retry:copyResult?labels().copy:labels().inputTrigger+' ('+resolveFeatureSettings(getSettings(),'input').targetLanguage+')';
     translateButton.title=actionLabel;translateButton.setAttribute('aria-label',actionLabel);
@@ -124,7 +159,7 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     hide();renderedElement=element;renderedConfig=configKey;
     const host=document.createElement('div');host.id='kuai-input-trigger';host.setAttribute('data-kuai-owned','');host.setAttribute('data-kuai-ui','');
     const shadow=host.attachShadow({mode:'open'}),style=append('style',shadow);
-    style.textContent=':host{all:initial}*{box-sizing:border-box}[hidden]{display:none!important}button{font:12px/1.4 system-ui,sans-serif;cursor:pointer;border:1px solid #5888c0;border-radius:5px;background:#fff;color:#173f71;padding:2px 5px}button:focus-visible{outline:2px solid #1976d2}button:disabled{opacity:.5}.trigger{width:18px;height:18px;padding:0;border-radius:50%;background:transparent;color:#64748b;border:0;display:grid;place-items:center}.trigger:empty::after{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.trigger:hover{background:#e2e8f0;color:#334155}.translate-action{position:absolute;right:calc(100% + 5px);bottom:0;display:grid;place-items:center;width:28px;height:28px;padding:5px;background:#fff;color:#475569;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 2px 6px #0001}.translate-action:hover{background:#f1f5f9}.translate-action[data-state=translated]{color:#15803d;border-color:#86efac;background:#f0fdf4}.completion-check{position:absolute;right:-4px;top:-4px;width:12px;height:12px;border-radius:50%;background:#15803d;color:#fff;box-shadow:0 0 0 2px #fff}.translate-action[data-state=loading]>svg:first-child{animation:kuai-spin 1s linear infinite}.translate-action[data-state=error]{color:#dc2626;border-color:#fca5a5}@keyframes kuai-spin{to{transform:rotate(360deg)}}.trigger.icon{width:28px;height:28px;border-radius:7px}.feedback{position:absolute;right:0;bottom:100%;display:flex;gap:4px;align-items:center;padding:4px;background:#fff;color:#172033;border:1px solid #bbc5d6;border-radius:6px;box-shadow:0 2px 8px #0002;width:max-content;max-width:min(300px,calc(100vw - 16px));flex-wrap:wrap;font:12px/1.4 system-ui,sans-serif}.status{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}';
+    style.textContent=TRIGGER_STYLE;
     const button=action(shadow,'trigger',labels().inputTrigger,()=>{if(state.status==='loading'&&context?.element===renderedElement)cancelCurrent();else if(config.icon==='dot'){expanded=!expanded;sync();}else if(canRestore())restore();else void run().catch(()=>{});});
     const translateButton=action(shadow,'translate',labels().inputTrigger,()=>{
       if(state.status==='loading'&&context?.element===renderedElement){cancelCurrent();return;}
