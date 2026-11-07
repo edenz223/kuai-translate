@@ -9,7 +9,7 @@ function styleBoundary() {
 }
 function createDocument(file) {
   const nodes=new Map();
-  const document={activeElement:null,defaultView:{addEventListener(){}},getElementById:id=>nodes.get(id)||null,createElement};
+  const document={activeElement:null,addEventListener(){},defaultView:{addEventListener(){}},getElementById:id=>nodes.get(id)||null,createElement};
   function createElement(tag) {
     const node={tagName:tag.toUpperCase(),value:'',type:'text',checked:false,disabled:false,hidden:false,files:[],dataset:{},listeners:{},children:[],style:styleBoundary(),className:'',textContent:'',
       setAttribute(name,value){this[name]=String(value);},getAttribute(name){return this[name]??null;},removeAttribute(name){delete this[name];},append(...children){this.children.push(...children);},replaceChildren(...children){this.children=children;},

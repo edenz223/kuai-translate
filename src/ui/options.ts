@@ -11,8 +11,26 @@ import {byId,TYPE_NAMES,FREE_TYPES,LANGUAGES,PROVIDER_INFO,fillProviders,fillSel
 import type {ProviderField} from './common.js';
 import type {Provider} from '../shared/settings.js';
 
+/** Hint icons sit inside labels: clicking must not toggle the control, and bubbles stay inside the viewport. */
+function bindHints(document: Document): void {
+  const hintOf=(event: Event): HTMLElement | null=>(event.target as Element | null)?.closest?.<HTMLElement>('.hint') ?? null;
+  document.addEventListener('click',event=>{if(hintOf(event))event.preventDefault();});
+  const place=(event: Event): void=>{
+    const hint=hintOf(event),bubble=hint?.querySelector<HTMLElement>('.hint-text'),view=document.documentElement;
+    if(!hint || !bubble)return;
+    hint.classList.remove('above');bubble.style.setProperty('--hint-shift','0px');
+    const rect=bubble.getBoundingClientRect(),margin=8;
+    const shift=rect.left<margin ? margin-rect.left : rect.right>view.clientWidth-margin ? view.clientWidth-margin-rect.right : 0;
+    bubble.style.setProperty('--hint-shift',shift+'px');
+    hint.classList.toggle('above',rect.bottom>view.clientHeight-margin && rect.height+margin<hint.getBoundingClientRect().top);
+  };
+  document.addEventListener('mouseover',place);
+  document.addEventListener('focusin',place);
+}
+
 export async function startOptions(document: Document = globalThis.document): Promise<void> {
   document.title=APP_NAME + ' · 设置';
+  bindHints(document);
   const status=byId(document,'status'), testStatus=byId(document,'test-status');
   const fail=(error: unknown): void=>setStatus(status,errorMessage(error),true);
   let selectedId: string | undefined,providerFingerprint: string | undefined='',pickerOpen=false;
