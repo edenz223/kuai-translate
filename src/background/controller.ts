@@ -15,7 +15,7 @@ import { applyPreferencePatch } from './preferences.js';
 import { applySiteRule, inputSiteDisabled, setInputSiteDisabled } from '../shared/site-rules.js';
 
 const messageTypes = new Set(['KUAI_GET_SETTINGS', 'KUAI_SAVE_SETTINGS', 'KUAI_UPDATE_PREFERENCES', 'KUAI_UPDATE_PAGE_PREFERENCES', 'KUAI_OPEN_OPTIONS', 'KUAI_TRANSLATE', 'KUAI_CANCEL', 'KUAI_TEST_PROVIDER', 'KUAI_LIST_MODELS', 'KUAI_PAGE_STATE']);
-const providerIdentity=(provider?:Provider)=>provider ? JSON.stringify(['id','type','enabled','baseUrl','apiKey','model','region','temperature'].map(key=>provider[key as keyof Provider])) : '';
+const providerIdentity=(provider?:Provider)=>provider ? JSON.stringify(['id','type','enabled','baseUrl','apiKey','model','region','temperature','systemPrompt','userPrompt'].map(key=>provider[key as keyof Provider])) : '';
 const menuItems: {id:string;title:string;contexts:NonNullable<chrome.contextMenus.CreateProperties['contexts']>;message:PageActionType}[] = [
   { id: 'kuai.page', title: 'Kuai translate · 翻译网页', contexts: ['page'], message: 'KUAI_PAGE_TRANSLATE' },
   { id: 'kuai.restore', title: 'Kuai translate · 恢复原文', contexts: ['page'], message: 'KUAI_PAGE_RESTORE' },

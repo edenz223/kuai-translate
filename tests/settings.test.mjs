@@ -32,6 +32,15 @@ test('blank custom temperature remains omitted while explicit numeric choices su
   }
 });
 
+test('custom prompts default to empty, are capped and survive saving and backup',()=>{
+  const value=defaults();value.providers.push({id:'api',type:'openai',enabled:true,systemPrompt:'Be formal.',userPrompt:'x'.repeat(9000)});
+  const normalized=settings.normalizeSettings(value),provider=normalized.providers.at(-1);
+  assert.equal(provider.systemPrompt,'Be formal.');assert.equal(provider.userPrompt.length,8000);
+  assert.equal(settings.importSettings(settings.exportSettings(normalized),normalized).providers.at(-1).systemPrompt,'Be formal.');
+  value.providers.push({id:'bare',type:'openai',enabled:true});
+  assert.deepEqual([settings.normalizeSettings(value).providers.at(-1).systemPrompt,settings.normalizeSettings(value).providers.at(-1).userPrompt],['','']);
+});
+
 test('disabling a selected service reconciles selection without turning it on again', () => {
   const value = defaults(); value.providers[0].enabled = false;
   const once = settings.normalizeSettings(value), twice = settings.normalizeSettings(once);
