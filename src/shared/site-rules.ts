@@ -1,9 +1,15 @@
-/** Per-site page rule shortcuts for the popup and context menu; the options page keeps the full rule lists. */
+/** Per-site rule shortcuts for the popup and context menu; the options page keeps the full rule lists. */
 import type {Settings} from './settings.js';
 import {isSiteListed,normalizeSiteList} from './interactions.js';
 
 export type SiteRule = 'default' | 'always' | 'never';
 const LIMIT=100;
+const withoutHost=(list: string[],host: string): string[]=>list.filter(item=>item!==host);
+function withHost(list: string[],host: string): string[]{
+  const next=normalizeSiteList([...withoutHost(list,host),host]);
+  if(!next.includes(host))throw Error(`网站规则已达 ${LIMIT} 项上限，请在设置中整理后重试。`);
+  return next;
+}
 
 export function siteHost(url: string): string{
   try{const parsed=new URL(url);return /^https?:$/.test(parsed.protocol)?parsed.hostname.toLowerCase().replace(/\.+$/,''):'';}catch{return '';}
@@ -21,12 +27,7 @@ export function siteRuleState(settings: Settings,url: string): SiteRule{
 export function applySiteRule(settings: Settings,url: string,rule: SiteRule): void{
   const host=siteHost(url);
   if(!host)throw Error('只能为普通网页设置网站规则。');
-  const value=settings.pageOptions,without=(list: string[])=>list.filter(item=>item!==host);
-  const add=(list: string[]): string[]=>{
-    const next=normalizeSiteList([...without(list),host]);
-    if(!next.includes(host))throw Error(`网站规则已达 ${LIMIT} 项上限，请在设置中整理后重试。`);
-    return next;
-  };
+  const value=settings.pageOptions,without=(list: string[])=>withoutHost(list,host),add=(list: string[])=>withHost(list,host);
   const scopedToHost=value.alwaysSites.includes(host);
   value.neverSites=without(value.neverSites);value.alwaysSites=without(value.alwaysSites);
   // An emptied allow-list would otherwise widen auto-translate from this host to every site.
@@ -36,4 +37,14 @@ export function applySiteRule(settings: Settings,url: string,rule: SiteRule): vo
     // Enabling auto-translate with empty lists would match every site, so record this host explicitly.
     value.alwaysSites=add(value.alwaysSites);value.autoTranslate=true;
   }
+}
+
+export function inputSiteDisabled(settings: Settings,url: string): boolean{return isSiteListed(url,settings.inputOptions.disabledSites);}
+
+/** Adds or removes only this host's entry. Returns whether input translation is still off here, e.g. through a broader pattern. */
+export function setInputSiteDisabled(settings: Settings,url: string,disabled: boolean): boolean{
+  const host=siteHost(url),value=settings.inputOptions;
+  if(!host)throw Error('只能为普通网页设置网站规则。');
+  value.disabledSites=disabled?withHost(value.disabledSites,host):withoutHost(value.disabledSites,host);
+  return inputSiteDisabled(settings,url);
 }

@@ -10,7 +10,7 @@ export const SELECTION_OPTIONS_DEFAULTS=defaults({
 });
 export const INPUT_OPTIONS_DEFAULTS=defaults({
   enabled:true,providerId:'follow_page',sourceLanguage:'follow_page',targetLanguage:'en',shortcut:'Alt+X',
-  restoreShortcut:'Control+Shift+Z',icon:'dot',autoApply:true,includeOriginal:false,displayOrder:'original-translation',disabledSites:[],
+  restoreShortcut:'',icon:'dot',autoApply:true,includeOriginal:false,displayOrder:'original-translation',disabledSites:[],
 });
 export const HOVER_OPTIONS_DEFAULTS=defaults({
   trigger:'shift',customKeys:[],mode:'paragraph',displayMode:'inline',delay:300,holdDelay:800,showIndicator:true,borderColor:'#cfcfcf',disabledSites:[],

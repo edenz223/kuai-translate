@@ -12,7 +12,7 @@ import { translateWithProvider, listProviderModels } from '../providers/index.js
 import { failure, publicError } from '../providers/errors.js';
 import { mergeSettings } from './settings-merge.js';
 import { applyPreferencePatch } from './preferences.js';
-import { applySiteRule } from '../shared/site-rules.js';
+import { applySiteRule, inputSiteDisabled, setInputSiteDisabled } from '../shared/site-rules.js';
 
 const messageTypes = new Set(['KUAI_GET_SETTINGS', 'KUAI_SAVE_SETTINGS', 'KUAI_UPDATE_PREFERENCES', 'KUAI_UPDATE_PAGE_PREFERENCES', 'KUAI_OPEN_OPTIONS', 'KUAI_TRANSLATE', 'KUAI_CANCEL', 'KUAI_TEST_PROVIDER', 'KUAI_LIST_MODELS', 'KUAI_PAGE_STATE']);
 const providerIdentity=(provider?:Provider)=>provider ? JSON.stringify(['id','type','enabled','baseUrl','apiKey','model','region','temperature'].map(key=>provider[key as keyof Provider])) : '';
@@ -28,6 +28,8 @@ const siteMenuItems: {id:string;title:string;rule:SiteRule}[] = [
   { id: 'kuai.site.never', title: 'Kuai translate · 本站从不翻译', rule: 'never' },
   { id: 'kuai.site.default', title: 'Kuai translate · 本站恢复默认', rule: 'default' },
 ];
+// A checkbox whose state follows the active tab; Chrome has no menu onShown event to compute it on demand.
+const INPUT_SITE_MENU = { id: 'kuai.site.input', title: 'Kuai translate · 本站禁用输入翻译' };
 const WEB_PAGES = ['http://*/*', 'https://*/*'];
 const BADGES: Record<PageBadgeState,[text:string,color:string]> = {
   idle:['',''], working:['…','#087e8b'], done:['✓','#087e8b'], error:['!','#b32332'], blocked:['–','#7b8d99'],
@@ -39,7 +41,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
   const jobs = new Map<string,TranslationJob>(), disposers:(()=>void)[] = [];
   let settings = defaultSettings(), serialized = JSON.stringify(settings);
   let initialization:Promise<void>|null|undefined, writeQueue:Promise<unknown> = Promise.resolve(), menuTask:Promise<void>|null|undefined, menuRequested = false, appliedMenuSignature:string|null = null;
-  let started = false, stopped = false, settingsEpoch = 0;
+  let started = false, stopped = false, settingsEpoch = 0, menuUrl = '';
 
   function identify(sender:chrome.runtime.MessageSender):Owner {
     if (!sender || sender.id !== chromeApi.runtime.id) throw failure('FORBIDDEN', 'This request is not permitted.');
@@ -105,6 +107,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     // Notifications are advisory; an unrelated tab must never hold settings writes.
     void broadcast(publicSettings(next));
     if(started && previousMenus!==menuSignature()) void setupMenus();
+    else syncInputSiteMenu();
   }
   function initialize():Promise<void> {
     if (initialization) return initialization;
@@ -275,7 +278,21 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
   function visibleMenus():chrome.contextMenus.CreateProperties[] {
     if (!settings.pageOptions.contextMenuEnabled) return [];
     return [...menuItems.filter(menuEnabled).map(({message,...item})=>item),
-      ...siteMenuItems.map(({rule,...item}):chrome.contextMenus.CreateProperties=>({...item,contexts:['page'],documentUrlPatterns:WEB_PAGES}))];
+      ...siteMenuItems.map(({rule,...item}):chrome.contextMenus.CreateProperties=>({...item,contexts:['page'],documentUrlPatterns:WEB_PAGES})),
+      ...settings.inputOptions.enabled ? [{...INPUT_SITE_MENU,type:'checkbox' as const,checked:inputSiteDisabled(settings,menuUrl),
+        contexts:['page','editable'] as chrome.contextMenus.CreateProperties['contexts'],documentUrlPatterns:WEB_PAGES}] : []];
+  }
+  function syncInputSiteMenu(url=menuUrl) {
+    menuUrl=url;
+    if(!started || stopped || !chromeApi.contextMenus?.update || !visibleMenus().some(item=>item.id===INPUT_SITE_MENU.id)) return;
+    // Before the menu exists this fails harmlessly; creation reads menuUrl itself.
+    Promise.resolve().then(()=>chromeApi.contextMenus.update(INPUT_SITE_MENU.id,{checked:inputSiteDisabled(settings,url)},()=>void chromeApi.runtime.lastError)).catch(()=>{});
+  }
+  function syncActiveTab(tab?:chrome.tabs.Tab) {
+    if(tab?.active) syncInputSiteMenu(tab.url || '');
+  }
+  function refreshActiveTab() {
+    Promise.resolve().then(()=>chromeApi.tabs.query({active:true,lastFocusedWindow:true})).then(([tab])=>syncActiveTab(tab)).catch(()=>{});
   }
   function menuSignature() {
     return visibleMenus().map(item=>item.id).join('|');
@@ -323,7 +340,21 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
       return writeSettings(current=>{const next=structuredClone(current);applySiteRule(next,url,rule);return normalizeSettings(next);});
     }).catch(()=>{});
   }
+  function onInputSiteMenu(disabled:boolean|undefined, url:string) {
+    if (stopped || !/^https?:/.test(url)) return;
+    let blocked = false;
+    initialize().then(()=>{
+      if (stopped || !settings.pageOptions.contextMenuEnabled || !settings.inputOptions.enabled) return;
+      return writeSettings(current=>{
+        const next=structuredClone(current);blocked=setInputSiteDisabled(next,url,disabled ?? !inputSiteDisabled(current,url));return normalizeSettings(next);
+      }).then(()=>{if (disabled===false && blocked) throw Error('A broader pattern still matches.');});
+    }).catch(()=>{
+      // A broader pattern or the list limit can only be handled in the full rule list.
+      if (!stopped) return chromeApi.tabs.create({url:chromeApi.runtime.getURL('options.html')+'#input'});
+    }).catch(()=>{}).finally(()=>syncInputSiteMenu(url));
+  }
   function onMenu(info:chrome.contextMenus.OnClickData, tab?:chrome.tabs.Tab) {
+    if (info.menuItemId === INPUT_SITE_MENU.id) return onInputSiteMenu(info.checked, info.pageUrl || tab?.url || '');
     const site = siteMenuItems.find(menu => menu.id === info.menuItemId);
     if (site) return onSiteMenu(site.rule, info.pageUrl || tab?.url || '');
     const item = menuItems.find(menu => menu.id === info.menuItemId);
@@ -366,13 +397,19 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     listen(chromeApi.commands?.onCommand, onCommand);
     listen(chromeApi.webNavigation?.onCommitted, (details:chrome.webNavigation.WebNavigationTransitionCallbackDetails) => {
       if (details.frameId === 0 && chromeApi.action) Promise.resolve().then(()=>chromeApi.action.setBadgeText({tabId:details.tabId,text:''})).catch(()=>{});
+      if (details.frameId === 0 && chromeApi.tabs?.get) Promise.resolve().then(()=>chromeApi.tabs.get(details.tabId)).then(tab=>syncActiveTab({...tab,url:details.url})).catch(()=>{});
     });
+    listen(chromeApi.tabs?.onActivated, ({tabId}:chrome.tabs.OnActivatedInfo) => {
+      Promise.resolve().then(()=>chromeApi.tabs.get(tabId)).then(syncActiveTab).catch(()=>{});
+    });
+    listen(chromeApi.windows?.onFocusChanged, refreshActiveTab);
     listen(chromeApi.storage.onChanged, onStorage);
     listen(chromeApi.tabs?.onRemoved, (tabId:number) => cancelJobs(job => job.owner.tabId === tabId));
     listen(chromeApi.webNavigation?.onCommitted, (details:chrome.webNavigation.WebNavigationTransitionCallbackDetails) => cancelJobs(job => !job.owner.trusted && job.owner.tabId === details.tabId &&
       (details.frameId === 0 || job.owner.frameId === details.frameId) && job.owner.documentId !== details.documentId));
     void initialize();
     void setupMenus();
+    refreshActiveTab();
     return api;
   }
   function stop() {

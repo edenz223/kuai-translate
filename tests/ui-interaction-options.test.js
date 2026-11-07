@@ -54,7 +54,7 @@ test('the actual settings controller saves every interaction option and reloads 
   await h.edit('hover-enabled',true);await h.edit('selection-enabled',false);
   assert.deepEqual(h.stored.pageOptions,{autoTranslate:true,alwaysLanguages:['en','ja'],neverLanguages:['ko'],alwaysSites:['example.com','https://news.example/articles/**'],neverSites:['private.example'],translateFullPage:false,excludeSelectors:['.advert','[data-private]'],minTextLength:12,translateDynamic:true,contextMenuEnabled:false,shortcut:'Control+Shift+P',displayModeShortcut:'Alt+D'});
   assert.deepEqual(h.stored.selectionOptions,{providerId:'google',sourceLanguage:'en',targetLanguage:'ja',triggerMode:'dot',triggerAction:'hover',delay:600,maxLength:12000,showOriginal:false,autoSpeak:true,disabledSites:['private.example']});
-  assert.deepEqual(h.stored.inputOptions,{enabled:true,providerId:'yandex',sourceLanguage:'ja',targetLanguage:'en',shortcut:'Alt+K',restoreShortcut:'Control+Shift+Z',icon:'icon',autoApply:false,includeOriginal:true,displayOrder:'translation-original',disabledSites:['billing.example']});
+  assert.deepEqual(h.stored.inputOptions,{enabled:true,providerId:'yandex',sourceLanguage:'ja',targetLanguage:'en',shortcut:'Alt+K',restoreShortcut:'',icon:'icon',autoApply:false,includeOriginal:true,displayOrder:'translation-original',disabledSites:['billing.example']});
   assert.deepEqual(h.stored.hoverOptions,{trigger:'custom',customKeys:['Control','K'],mode:'area',displayMode:'inline',delay:450,holdDelay:1000,showIndicator:false,borderColor:'#aabbcc',disabledSites:['chat.example']});
   assert.equal(h.stored.activeProviderId,'microsoft');assert.equal(h.stored.targetLanguage,'zh-Hans');
   assert.equal(h.stored.hoverEnabled,true);assert.equal(h.stored.selectionEnabled,false);
@@ -117,7 +117,7 @@ test('hover instructions describe direct hover, held mouse and empty custom trig
 });
 
 test('invalid or same-context conflicting shortcuts stay visible and never overwrite a saved shortcut',async t=>{
-  const h=options(t);await h.start();
+  const h=options(t,settings=>{settings.inputOptions.restoreShortcut='Control+Shift+Z';});await h.start();
   await h.edit('page-option-shortcut','Alt+P','input');
   const writes=h.writes();
   const shortcut=await h.edit('page-option-shortcut','Ctrl+','input');
@@ -224,7 +224,7 @@ test('input form shows upgraded defaults and retains explicit follow-page choice
   await h.start();
   assert.equal(h.node('input-option-targetLanguage').value,'en');assert.equal(h.node('input-option-icon').value,'dot');
   await h.edit('input-option-targetLanguage','follow_page');await h.edit('input-option-icon','none');
-  assert.equal(h.stored.inputDefaultsVersion,2);assert.equal(h.stored.inputOptions.targetLanguage,'follow_page');assert.equal(h.stored.inputOptions.icon,'none');
+  assert.equal(h.stored.inputDefaultsVersion,3);assert.equal(h.stored.inputOptions.targetLanguage,'follow_page');assert.equal(h.stored.inputOptions.icon,'none');
   await h.node('reload-settings').fire('click');
   assert.equal(h.node('input-option-targetLanguage').value,'follow_page');assert.equal(h.node('input-option-icon').value,'none');
   assert.equal(h.node('reset-input-options'),null);
