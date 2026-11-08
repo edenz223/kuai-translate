@@ -12,11 +12,11 @@ test('the control opens a bilingual list beside YouTube without requesting capti
   const f = fixture({ translated: false });
   await f.flush();
   assert.equal(f.requests.length, 0);
-  assert.equal(f.toggleButton().getAttribute('aria-expanded'), 'false');assert.equal(f.toggleButton().style.opacity,'.55');assert.equal(f.toggleButton().style.background,'transparent');
+  assert.equal(f.toggleButton().getAttribute('aria-expanded'), 'false');assert.equal(f.toggleButton().querySelector('[data-kuai-active-mark]').style.display,'none');assert.equal(f.toggleButton().querySelector('svg').getAttribute('data-icon'),'list');assert.equal(f.toggleButton().style.background,'transparent');
   assert.ok(!f.panel() || f.panel().hidden);
   f.emit(f.toggleButton(), 'click');
   await f.flush();
-  assert.equal(f.toggleButton().getAttribute('aria-expanded'), 'true');assert.equal(f.toggleButton().style.opacity,'1');assert.equal(f.toggleButton().style.background,'transparent');
+  assert.equal(f.toggleButton().getAttribute('aria-expanded'), 'true');assert.equal(f.toggleButton().querySelector('[data-kuai-active-mark]').style.display,'block');assert.equal(f.toggleButton().style.background,'transparent');
   assert.equal(f.panel().parentElement, f.right);
   assert.equal(f.panel().shadowRoot.querySelector('.timestamp').textContent, '0:00');
   assert.equal(f.panel().shadowRoot.querySelector('.original-text').textContent, 'Original 1');
@@ -250,5 +250,56 @@ test('a failed timeline explains itself and can be retried from the list', async
   assert.match(status.textContent, /Couldn't load/); assert.equal(retry.hidden, false); assert.equal(retry.textContent, 'Retry');
   f.emit(retry, 'click'); await f.flush();
   assert.deepEqual(retries, ['video-one']); assert.equal(retry.hidden, true); assert.match(status.textContent, /Loading/);
+  f.controller.stop();
+});
+
+test('searching filters the reading list by source or translation and Escape clears it', async () => {
+  const f = fixture({ count: 30 });
+  f.controller.toggle(f.session.id, true); await f.flush();
+  const root = f.panel().shadowRoot, search = root.querySelector('.search');
+  assert.equal(search.getAttribute('aria-label'), 'Search subtitles');
+  search.value = 'Translation 2'; f.emit(search, 'input'); await f.flush();
+  const texts = () => root.querySelectorAll('.original-text').map(node => node.textContent);
+  assert.deepEqual(texts().slice(0, 3), ['Original 2', 'Original 20', 'Original 21']);
+  assert.equal(root.querySelector('.cue-count').textContent, '11 matches');
+  const typing = f.emit(search, 'keydown', { key: 'k' }); assert.equal(typing.propagationStopped, true, 'page shortcuts never see typing');
+  search.value = 'nothing'; f.emit(search, 'input'); await f.flush();
+  assert.equal(root.querySelector('.panel-status').textContent, 'No matching subtitles');
+  f.emit(search, 'keydown', { key: 'Escape' }); await f.flush();
+  assert.equal(search.value, ''); assert.equal(root.querySelector('.cue-count').textContent, '30 captions');
+  f.controller.stop();
+});
+
+test('the list view shows both languages, only the source, or only translations without changing text nodes', async () => {
+  const f = fixture({ translated: false });
+  f.cues[0].translation = 'Translation 1'; f.cues[0].status = 'success';
+  f.controller.toggle(f.session.id, true); await f.flush();
+  const root = f.panel().shadowRoot, button = value => root.querySelector(`[data-view="${value}"]`);
+  const rows = () => root.querySelectorAll('.cue');
+  const requests = f.requests.length;
+  f.emit(button('translation'), 'click'); await f.flush();
+  assert.equal(button('translation').getAttribute('aria-pressed'), 'true');
+  assert.equal(rows()[0].querySelector('.original-text').hidden, true);
+  assert.equal(rows()[0].querySelector('.translation-text').hidden, false);
+  f.emit(button('original'), 'click'); await f.flush();
+  assert.equal(rows()[0].querySelector('.original-text').hidden, false);
+  assert.equal(rows()[0].querySelector('.translation-text').hidden, true);
+  f.cues.slice(1).forEach(cue => { cue.status = 'pending'; cue.translation = ''; }); f.notify(); await f.flush();
+  assert.equal(f.requests.length, requests, 'the source-only view requests no translations');
+  f.emit(button('both'), 'click'); await f.flush();
+  assert.equal(rows()[0].querySelector('.translation-text').hidden, false);
+  f.controller.stop();
+});
+
+test('wheel and touch scrolling in the list never reach the player or its fullscreen grid', async () => {
+  const f = fixture({ count: 30 });
+  f.document.fullscreenElement = f.player;
+  f.controller.toggle(f.session.id, true); await f.flush();
+  assert.equal(f.panel().parentElement, f.player); assert.equal(f.panel().dataset.placement, 'drawer');
+  let reached = 0; f.player.addEventListener('wheel', () => reached++); f.player.addEventListener('touchmove', () => reached++);
+  const list = f.panel().shadowRoot.querySelector('.subtitle-list');
+  f.emit(list, 'wheel', { deltaY: 120 }); f.emit(list, 'touchmove');
+  f.emit(f.panel().shadowRoot.querySelector('.panel-title'), 'wheel', { deltaY: 120 });
+  assert.equal(reached, 0);
   f.controller.stop();
 });

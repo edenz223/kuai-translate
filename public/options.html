@@ -123,12 +123,14 @@
 
 <section id="subtitles" class="card settings-section" aria-labelledby="subtitles-heading">
   <div class="section-heading"><h2 id="subtitles-heading">YouTube 字幕与学习<span class="hint" tabindex="0"><span class="hint-text">播放器中使用“译”开关、字幕设置和列表按钮；视频需提供字幕并开启 CC。选中字幕文字会暂停播放并固定字幕，取消选中后恢复播放。</span></span></h2></div>
-  <label class="check"><input type="checkbox" id="subtitles-enabled">启用 YouTube 字幕翻译和侧边列表</label>
+  <label class="check"><input type="checkbox" id="subtitles-enabled">启用 Kuai YouTube 字幕（断句、样式和侧边列表）</label>
+  <label class="check"><input type="checkbox" id="subtitle-translation-enabled">翻译字幕<span class="hint" tabindex="0"><span class="hint-text">关闭后仍使用 Kuai 的断句、字幕样式和字幕列表，只显示原文，不再请求翻译服务。播放器里的“译”按钮切换的就是这一项。</span></span></label>
   <div class="form-grid">
     <label>翻译服务<select id="subtitle-provider"></select></label>
     <label>目标语言<select id="subtitle-target-language"></select></label>
     <label>显示模式<select id="subtitle-style-displayMode"></select></label>
     <label>显示顺序<select id="subtitle-style-displayOrder"></select></label>
+    <label>播放器快捷键<select id="subtitle-shortcuts"></select></label>
   </div>
   <label class="check"><input id="subtitle-style-hideTranslation" type="checkbox">学习时模糊译文<span class="hint" tabindex="0"><span class="hint-text">悬停或聚焦后显示。同时用于视频浮层和右侧字幕列表。</span></span></label>
   <div class="preview-heading"><strong>效果预览</strong></div>
@@ -156,7 +158,8 @@
       <label>背景范围<select id="subtitle-style-backgroundMode"></select></label>
       <label>背景不透明度（%）<input id="subtitle-style-backgroundOpacity" type="number" min="0" max="100" step="5"></label>
       <label>字幕位置<select id="subtitle-style-position"></select></label>
-      <label>距上 / 下边缘（px）<input id="subtitle-style-offset" type="number" min="0" max="300" step="5"></label>
+      <label>距上 / 下边缘（px）<input id="subtitle-style-offset" type="number" min="0" max="2000" step="5"></label>
+      <label>水平偏移（播放器宽度的 %，负数向左）<span class="hint" tabindex="0"><span class="hint-text">在播放器里拖动字幕背景可同时调整上下和左右位置；双击字幕背景恢复到所选位置。</span></span><input id="subtitle-style-horizontalOffset" type="number" min="-50" max="50" step="1"></label>
       <label>最大宽度（播放器的 %）<input id="subtitle-style-maxWidth" type="number" min="40" max="100" step="1"></label>
     </div>
     <div class="actions"><button id="reset-subtitle-style" type="button">恢复字幕样式默认值</button><span class="hint" tabindex="0"><span class="hint-text">保留字幕服务和目标语言选择。</span></span></div>

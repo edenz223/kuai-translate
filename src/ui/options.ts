@@ -11,6 +11,10 @@ import {byId,TYPE_NAMES,FREE_TYPES,LANGUAGES,PROVIDER_INFO,fillProviders,fillSel
 import type {ProviderField} from './common.js';
 import type {Provider} from '../shared/settings.js';
 
+const SUBTITLE_SHORTCUT_CHOICES:[string,string][]=[
+  ['ctrl-alt','Ctrl+Alt+方向键：← 上一句 · ↓ 重播 · → 下一句 · ↑ 循环'],['letters','字母键：A 上一句 · S 重播 · D 下一句 · R 循环'],['off','关闭'],
+];
+
 /** Hint icons sit inside labels: clicking must not toggle the control, and bubbles stay inside the viewport. */
 function bindHints(document: Document): void {
   const hintOf=(event: Event): HTMLElement | null=>(event.target as Element | null)?.closest?.<HTMLElement>('.hint') ?? null;
@@ -69,7 +73,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
     modelRequestId=undefined;models=[];modelButton.disabled=false;modelSelect.hidden=true;
     modelSelect.replaceChildren();setStatus(modelStatus,'');
   }
-  const preferences: Record<'subtitlesEnabled' | 'selectionEnabled' | 'hoverEnabled',string>={subtitlesEnabled:'subtitles-enabled',selectionEnabled:'selection-enabled',hoverEnabled:'hover-enabled'};
+  const preferences: Record<'subtitlesEnabled' | 'subtitleTranslationEnabled' | 'selectionEnabled' | 'hoverEnabled',string>={subtitlesEnabled:'subtitles-enabled',subtitleTranslationEnabled:'subtitle-translation-enabled',selectionEnabled:'selection-enabled',hoverEnabled:'hover-enabled'};
   function select(id: string,focus=false): void {
     selectedId=id;pickerOpen=false;setStatus(testStatus,'');render(editor.get(),editor.status());
     if(focus)rows.get(id)?.focus();
@@ -150,6 +154,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
     fillProviders(document,byId<HTMLSelectElement>(document,'subtitle-provider'),settings,settings.subtitleProviderId,true);
     fillSelect(document,byId<HTMLSelectElement>(document,'source-language'),LANGUAGES,settings.sourceLanguage);
     fillSelect(document,byId<HTMLSelectElement>(document,'target-language'),LANGUAGES.filter(([id])=>id!=='auto'),settings.targetLanguage);
+    fillSelect(document,byId<HTMLSelectElement>(document,'subtitle-shortcuts'),SUBTITLE_SHORTCUT_CHOICES,settings.subtitleShortcuts);
     for(const [key,id] of Object.entries(preferences))byId<HTMLInputElement>(document,id).checked=!!settings[key as keyof Settings];
     presentation.render(settings);
     interactions.render(settings);
@@ -179,7 +184,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
     syncProviderFields({fields,provider:editor.get().providers.find(item=>item.id===selectedId)});
     if(selectedId && problemFields.includes(key as ProviderField)){touched.add(selectedId+':'+key);render(editor.get(),editor.status());}
   });
-  const selectFields={'active-provider':'activeProviderId','subtitle-provider':'subtitleProviderId','source-language':'sourceLanguage','target-language':'targetLanguage'};
+  const selectFields={'active-provider':'activeProviderId','subtitle-provider':'subtitleProviderId','source-language':'sourceLanguage','target-language':'targetLanguage','subtitle-shortcuts':'subtitleShortcuts'};
   for(const [id,key] of Object.entries(selectFields))byId(document,id).addEventListener('change',event=>editor.update(settings=>{(settings as unknown as Record<string,unknown>)[key]=(event.target as HTMLSelectElement).value;}).catch(fail));
   for(const [key,id] of Object.entries(preferences))byId(document,id).addEventListener('change',event=>editor.update(settings=>{(settings as unknown as Record<string,unknown>)[key]=(event.target as HTMLInputElement).checked;}).catch(fail));
   byId(document,'retry-save').addEventListener('click',()=>editor.retry().catch(fail));

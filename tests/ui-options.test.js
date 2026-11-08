@@ -309,7 +309,10 @@ test('actual settings page saves presentation controls and updates its local pre
   color.value='#ffcc00';await color.fire('input');
   h.node('subtitle-style-displayOrder').value='translation_on_top';await h.node('subtitle-style-displayOrder').fire('change');
   h.node('subtitle-target-language').value='ja';await h.node('subtitle-target-language').fire('change');
+  h.node('subtitle-shortcuts').value='letters';await h.node('subtitle-shortcuts').fire('change');
+  h.node('subtitle-translation-enabled').checked=false;await h.node('subtitle-translation-enabled').fire('change');
   await h.settle();
+  assert.equal(h.stored.subtitleShortcuts,'letters');assert.equal(h.stored.subtitleTranslationEnabled,false);
   assert.equal(h.stored.pageStyle.fontSize,135);
   assert.equal(h.stored.subtitleStyle.targetColor,'#ffcc00');
   assert.equal(h.stored.subtitleStyle.displayOrder,'translation_on_top');

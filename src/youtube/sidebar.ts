@@ -4,14 +4,16 @@ interface SidebarEntry {
  session:SubtitleSession;video:HTMLVideoElement;open:boolean;follow:boolean;forceFollow:boolean;programmaticTop:number|null;
  rows:Map<number,SidebarRow>;cues:CaptionCue[];offsets:number[];heights:number[];failedRequests:WeakSet<CaptionCue>;start:number;end:number;active:number;
  source?:CaptionCue[];sourceLength?:number;version?:number;seekError?:boolean;dispose?:()=>void;observer?:MutationObserver;resizeObserver?:ResizeObserver;
- toggleHost?:HTMLElement|null;anchor?:HTMLElement|null;toggleButton?:HTMLButtonElement;
- panel:HTMLElement;title:HTMLElement;closeButton:HTMLButtonElement;count:HTMLElement;followButton:HTMLButtonElement;followState:HTMLElement;status:HTMLElement;retryButton:HTMLButtonElement;list:HTMLElement;rowsHost:HTMLElement;topSpacer:HTMLElement;bottomSpacer:HTMLElement;
+ toggleHost?:HTMLElement|null;anchor?:HTMLElement|null;toggleButton?:HTMLButtonElement;toggleMark?:HTMLElement;
+ panel:HTMLElement;title:HTMLElement;closeButton:HTMLButtonElement;count:HTMLElement;followButton:HTMLButtonElement;followState:HTMLElement;status:HTMLElement;retryButton:HTMLButtonElement;search:HTMLInputElement;viewButtons:Map<SidebarView,HTMLButtonElement>;list:HTMLElement;rowsHost:HTMLElement;topSpacer:HTMLElement;bottomSpacer:HTMLElement;
 }
+type SidebarView='both'|'original'|'translation';
 interface SidebarTranslationJob {entry:SidebarEntry;source:CaptionCue[]|undefined;version:number|undefined;batch:CaptionCue[];refused:boolean}
 /* YouTube subtitle list. Runs in the extension's isolated content-script world. */
 import {applySubtitleMask} from './presentation.js';
 import {subtitleWords,type SubtitleWords} from './i18n.js';
 import {timelineStatus} from './status.js';
+import {createToolbarIcon,createActiveMark,setActiveMark} from './icons.js';
 const root = globalThis;
 "use strict";
 
@@ -38,7 +40,15 @@ const panelStyle = `
   .panel-status[hidden],.retry-timeline[hidden],.subtitle-list[hidden],.follow-current[hidden],.follow-state[hidden]{display:none}
   .subtitle-list{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;overflow-anchor:none;scrollbar-width:thin;touch-action:pan-y;padding:0;position:relative}
   .cue{display:flex;gap:10px;padding:10px 12px 10px 10px;min-height:60px;border-left:2px solid transparent;border-bottom:1px solid var(--yt-spec-10-percent-layer,var(--reading-border))}
-  .cue[aria-current="true"]{border-left-color:var(--yt-spec-call-to-action,var(--reading-accent));background:#3ea6ff0d}
+  .cue[aria-current="true"]{border-left:3px solid var(--yt-spec-call-to-action,var(--reading-accent));padding-left:9px;background:#3ea6ff24}
+  .cue[aria-current="true"] .original-text{font-weight:600}
+  .panel-filters{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));flex:none}
+  .search{flex:1;min-width:0;height:28px;padding:0 10px;border:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));border-radius:14px;background:transparent;color:inherit;font:inherit;font-size:13px}
+  .search:focus-visible{outline:2px solid var(--yt-spec-call-to-action,var(--reading-accent));outline-offset:-1px}
+  .views{display:inline-flex;flex:none;border:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));border-radius:14px;overflow:hidden}
+  .views button{border:0;background:transparent;padding:4px 9px;font-size:12px;line-height:18px;color:var(--yt-spec-text-secondary,var(--reading-muted))}
+  .views[hidden]{display:none}
+  .views button[aria-pressed="true"]{background:var(--yt-spec-badge-chip-background,var(--reading-hover));color:var(--yt-spec-text-primary,var(--reading-text));font-weight:600}
   .timestamp{align-self:flex-start;flex:none;min-width:43px;border:0;border-radius:4px;background:transparent;color:var(--yt-spec-call-to-action,var(--reading-accent));padding:1px 3px;font-size:12px;font-variant-numeric:tabular-nums;line-height:20px}
   .timestamp:hover{background:var(--yt-spec-badge-chip-background,var(--reading-hover))}
   .cue-text{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px}
@@ -83,6 +93,8 @@ function offsetIndex(offsets:number[], top:number) {
 function createController(bridge:SubtitleBridge, env = root) {
   const doc = env.document, entries = new Map<string,SidebarEntry>();
   let configuredOpen = bridge.getConfig?.()?.subtitleListOpen;
+  // Reading-list filters are page-local; they never change the video captions.
+  let query = "", view: SidebarView = "both";
   let preferredOpen = configuredOpen === true, preferenceVersion = 0, pendingPreference:{version:number}|null = null, stopped = false, started = false, frame:number|null = null, unsubscribe:(()=>void)|undefined, translationJob:SidebarTranslationJob|null = null;
 
   function labels() {
@@ -155,8 +167,9 @@ function createController(bridge:SubtitleBridge, env = root) {
     host.dataset.noCaptionDrag = "true";
     host.style.cssText = "display:inline-flex;vertical-align:middle;align-items:center;height:100%;float:left;color:inherit;visibility:inherit;";
     const shadow = host.attachShadow({ mode: "open" }), style = element("style");
-    style.textContent = ":host{color:inherit}button{box-sizing:border-box;width:36px;height:100%;min-height:28px;padding:5px;border:0;background:transparent;color:inherit;font:24px/1 sans-serif;cursor:pointer;opacity:.85}button:hover{opacity:1}button:focus-visible{outline:2px solid #7eb6ff;outline-offset:-3px}";
-    const button = element("button", "subtitle-list-toggle", "☷");
+    style.textContent = ":host{color:inherit}button{position:relative;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:40px;height:100%;min-height:28px;padding:0;border:0;background:transparent;color:inherit;cursor:pointer;opacity:.9}button:hover{opacity:1}button:focus-visible{outline:2px solid #7eb6ff;outline-offset:-3px}";
+    const button = element("button", "subtitle-list-toggle"), mark = createActiveMark(doc);
+    button.append(createToolbarIcon(doc, "list"), mark);
     button.type = "button";
     button.setAttribute("aria-controls", "kuai-subtitle-sidebar-" + entry.session.id);
     button.addEventListener("click", event => {
@@ -165,7 +178,7 @@ function createController(bridge:SubtitleBridge, env = root) {
     for (const type of ["pointerdown", "mousedown", "dblclick"]) host.addEventListener(type, event => event.stopPropagation());
     shadow.append(style, button);
     anchor.parentNode!.insertBefore(host, anchor);
-    entry.toggleHost = host; entry.toggleButton = button;
+    entry.toggleHost = host; entry.toggleButton = button; entry.toggleMark = mark;
   }
 
   function stopFollowing(entry:SidebarEntry) {
@@ -212,6 +225,21 @@ function createController(bridge:SubtitleBridge, env = root) {
         entry.follow = true; entry.forceFollow = true; schedule();
       });
       tools.append(count, followState, follow);
+      const filters = element("div", "panel-filters"), search = element("input", "search"), views = element("div", "views"), viewButtons = new Map<SidebarView,HTMLButtonElement>();
+      search.type = "search"; search.autocomplete = "off"; search.value = query;
+      search.addEventListener("input", () => { setQuery(search.value); });
+      // YouTube's page shortcuts must not see typing in the reading list.
+      search.addEventListener("keydown", event => {
+        if (event.key === "Escape" && search.value) { event.preventDefault(); search.value = ""; setQuery(""); }
+        event.stopPropagation();
+      });
+      views.setAttribute("role", "group");
+      for (const value of ["both", "original", "translation"] as const) {
+        const button = element("button"); button.type = "button"; button.dataset.view = value;
+        button.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); view = value; for (const current of entries.values()) refresh(current); });
+        views.append(button); viewButtons.set(value, button);
+      }
+      filters.append(search, views);
       const status = element("p", "panel-status"), list = element("div", "subtitle-list"), retry = element("button", "retry-timeline");
       status.setAttribute("role", "status"); list.tabIndex = 0;
       retry.type = "button"; retry.hidden = true;
@@ -235,8 +263,11 @@ function createController(bridge:SubtitleBridge, env = root) {
       });
       // Preserve selection defaults and mouseup propagation to selection translation.
       for (const type of ["pointerdown", "mousedown", "click", "dblclick"]) host.addEventListener(type, event => event.stopPropagation());
-      panel.append(header, tools, status, retry, list); shadow.append(style, panel);
-      Object.assign(entry, { panel: host, title, closeButton: close, count, followButton: follow, followState, status, retryButton: retry, list, rowsHost: rows, topSpacer: top, bottomSpacer: bottom });
+      // In fullscreen, YouTube's player scrolls its recommendation grid on any wheel
+      // that reaches it; its own menus stop wheel propagation the same way.
+      for (const type of ["wheel", "touchmove"]) host.addEventListener(type, event => event.stopPropagation(), { passive: true });
+      panel.append(header, tools, filters, status, retry, list); shadow.append(style, panel);
+      Object.assign(entry, { panel: host, title, closeButton: close, count, followButton: follow, followState, status, retryButton: retry, search, viewButtons, list, rowsHost: rows, topSpacer: top, bottomSpacer: bottom });
       if (env.ResizeObserver) {
         entry.resizeObserver = new env.ResizeObserver(schedule);
         entry.resizeObserver.observe(list);
@@ -254,9 +285,22 @@ function createController(bridge:SubtitleBridge, env = root) {
     return !!target.parent&&entry.panel.isConnected;
   }
 
+  function matches(cue:CaptionCue) {
+    return !query || cue.text.toLowerCase().includes(query) || !!cue.translation?.toLowerCase().includes(query);
+  }
+  function setQuery(value:string) {
+    const next = value.trim().toLowerCase();
+    if (next === query) return;
+    query = next;
+    for (const entry of entries.values()) {
+      if (entry.search && entry.search.value.trim().toLowerCase() !== query) entry.search.value = value;
+      if (entry.rowsHost) { resetTimeline(entry, entry.source); entry.list.scrollTop = 0; }
+    }
+    schedule();
+  }
   function resetTimeline(entry:SidebarEntry, source:CaptionCue[]|undefined) {
     entry.source = source; entry.sourceLength = source?.length || 0;
-    entry.cues = Array.from(source || []).filter(cue => cue && Number.isFinite(cue.start) && Number.isFinite(cue.end) && cue.start >= 0 && cue.end > cue.start && typeof cue.text === "string" && cue.text.trim()).sort((a, b) => a.start - b.start);
+    entry.cues = Array.from(source || []).filter(cue => cue && Number.isFinite(cue.start) && Number.isFinite(cue.end) && cue.start >= 0 && cue.end > cue.start && typeof cue.text === "string" && cue.text.trim() && matches(cue)).sort((a, b) => a.start - b.start);
     entry.heights = entry.cues.map(() => 96);
     entry.offsets = Array.from({ length: entry.cues.length + 1 }, (_, index) => index * 96);
     entry.rows.clear(); entry.rowsHost.replaceChildren();
@@ -315,10 +359,15 @@ function createController(bridge:SubtitleBridge, env = root) {
   function patchRows(entry:SidebarEntry, active:number, config:SubtitleBridgeConfig, text:SubtitleWords) {
     // The study mask is shared; video typography, boxes and display order are not.
     const hideTranslation = config.subtitleStyle ? config.subtitleStyle.hideTranslation === true : config.hideTranslation === "1";
+    // With translation off the list is a source-only transcript.
+    const shown: SidebarView = config.translationEnabled === false ? "original" : view;
     for (const [index, item] of entry.rows) {
       const cue = item.cue;
       setText(item.original, cue.text);
       setText(item.translation, typeof cue.translation === "string" ? cue.translation : "");
+      // The translation view still shows the source until its translation exists.
+      item.original.hidden = shown === "translation" && !!cue.translation;
+      item.translation.hidden = item.status.hidden = shown === "original";
       setText(item.status, cue.status === "error" ? text.error : cue.status === "translating" ? text.translating : !cue.translation ? text.pending : "");
       item.status.title = cue.status === "error" ? String(cue.errorMessage || "") : "";
       item.time.title = text.seek + " " + timestamp(cue.start);
@@ -352,7 +401,7 @@ function createController(bridge:SubtitleBridge, env = root) {
   }
 
   function requestVisible(entry:SidebarEntry) {
-    if (translationJob || !entry.open || held(entry) || !enabled(entry) || doc.visibilityState === "hidden" || !entry.panel?.isConnected || entry.video.seeking || entry.video.closest?.(".ad-showing, .ad-interrupting")) return;
+    if (translationJob || view === "original" || bridge.getConfig?.()?.translationEnabled === false || !entry.open || held(entry) || !enabled(entry) || doc.visibilityState === "hidden" || !entry.panel?.isConnected || entry.video.seeking || entry.video.closest?.(".ad-showing, .ad-interrupting")) return;
     const bounds = entry.list.getBoundingClientRect();
     const top = Math.max(0, bounds.top), bottom = Math.min(env.innerHeight || Infinity, bounds.bottom);
     if (bounds.width <= 0 || bottom <= top || bounds.right <= 0 || bounds.left >= (env.innerWidth || Infinity)) return;
@@ -390,7 +439,9 @@ function createController(bridge:SubtitleBridge, env = root) {
       entry.toggleButton.title = text.listTitle;
       entry.toggleButton.setAttribute("aria-label", text.listTitle);
       entry.toggleButton.setAttribute("aria-expanded", String(entry.open));
-      entry.toggleButton.style.opacity=entry.open?"1":".55";entry.toggleButton.style.background="transparent";entry.toggleButton.style.color="#fff";
+      // Like the video toggle: a red underline marks the open list.
+      if (entry.toggleMark) setActiveMark(entry.toggleMark, entry.open);
+      entry.toggleButton.style.background="transparent";entry.toggleButton.style.color="#fff";
     }
     if (!entry.open) { if (entry.panel) entry.panel.hidden = true; return; }
     // Moving even a shadow host can invalidate the browser's live selection.
@@ -404,10 +455,17 @@ function createController(bridge:SubtitleBridge, env = root) {
     const source = state?.subtitlesList;
     if (source !== entry.source || source?.length !== entry.sourceLength) resetTimeline(entry, source);
     if (entry.version !== state?.translateVersion) { entry.version = state?.translateVersion; entry.failedRequests = new WeakSet(); }
-    setText(entry.count, entry.cues.length + " " + text.count);
+    setText(entry.count, entry.cues.length + " " + (query ? text.matches : text.count));
+    entry.search.placeholder = text.search; entry.search.setAttribute("aria-label", text.search);
+    const views = entry.viewButtons.get("both")!.parentElement!;
+    views.setAttribute("aria-label", text.view); views.hidden = config.translationEnabled === false;
+    for (const [value, button] of entry.viewButtons) {
+      setText(button, value === "both" ? text.viewBoth : value === "original" ? text.viewOriginal : text.viewTranslation);
+      button.setAttribute("aria-pressed", String(view === value));
+    }
     const status = timelineStatus({ enabled: enabled(entry), subtitlesEnabled: config.isEnable === "1", state, video: entry.video }), failed = status === "failed";
     const reason = { disabled: text.disabled, "captions-off": text.nativeDisabled, failed: text.failed, live: text.unavailable, loading: text.loading, ready: "" }[status];
-    const statusMessage = reason || (entry.seekError ? text.seekError : "");
+    const statusMessage = reason || (query && !entry.cues.length ? text.noMatches : "") || (entry.seekError ? text.seekError : "");
     entry.status.hidden = !statusMessage; setText(entry.status, statusMessage);
     entry.retryButton.hidden = !failed || !bridge.retryTimeline; setText(entry.retryButton, text.retry);
     entry.list.hidden = !!reason;

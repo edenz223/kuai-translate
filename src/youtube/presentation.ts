@@ -8,7 +8,7 @@ export function subtitleStyle(settings:Partial<Settings>={}) {
 
 export function subtitleLayoutKey(settings:Partial<Settings>) {
   const style=subtitleStyle(settings);
-  return JSON.stringify(['displayMode','displayOrder','hideTranslation','fontSizeMode','sourceFontSize','targetFontSize','sourceWeight','targetWeight','fontFamily','position','offset','maxWidth'].map(key=>style[key as keyof typeof style]));
+  return JSON.stringify([settings.subtitleTranslationEnabled!==false,...['displayMode','displayOrder','hideTranslation','fontSizeMode','sourceFontSize','targetFontSize','sourceWeight','targetWeight','fontFamily','position','offset','horizontalOffset','maxWidth'].map(key=>style[key as keyof typeof style])]);
 }
 
 const masks=new WeakMap<HTMLElement,MaskState>();

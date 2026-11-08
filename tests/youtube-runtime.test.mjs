@@ -290,3 +290,40 @@ test('session translation errors follow the interface language',async t=>{
   session.setCues([{start:0,end:3,text:'Hello'}]);session.update();await settle();
   assert.equal(session.state.currentCaption.errorMessage,'The translation came back empty or incomplete. Please retry.');
 });
+
+test('a sentence loop restarts its cue at the end, follows seeks to another sentence and ends in a gap',async t=>{
+  const {session,state,video}=fixture();t.after(()=>session.destroy());session.start();
+  assert.equal(session.setLoop(true),true);assert.deepEqual(state.loopingCaption,{start:0,end:3});
+  video.currentTime=2.98;session.update();assert.equal(video.currentTime,0);
+  assert.equal(session.seek(10),true);assert.equal(video.currentTime,10,'next sentence is not pulled back into the old loop');
+  assert.deepEqual(state.loopingCaption,{start:10,end:14});
+  video.currentTime=13.98;session.update();assert.equal(video.currentTime,10);
+  video.currentTime=1;video.dispatchEvent(new Event('seeking'));assert.deepEqual(state.loopingCaption,{start:0,end:3},'a native progress-bar seek also moves the loop');
+  video.currentTime=6;video.dispatchEvent(new Event('seeking'));assert.equal(state.loopingCaption,null,'a seek into a gap ends the loop');
+  video.currentTime=20;session.update();assert.equal(session.setLoop(true),false,'nothing to loop between captions');
+});
+test('subtitle shortcut schemes are normalized and accepted as player preferences',async()=>{
+  const {normalizeSettings}=await import('../dist/src/shared/settings.js');
+  const {applyPreferencePatch}=await import('../dist/src/background/preferences.js');
+  assert.equal(defaultSettings().subtitleShortcuts,'ctrl-alt');
+  assert.equal(normalizeSettings({subtitleShortcuts:'letters'}).subtitleShortcuts,'letters');
+  assert.equal(normalizeSettings({subtitleShortcuts:'vim'}).subtitleShortcuts,'ctrl-alt');
+  assert.equal(applyPreferencePatch(defaultSettings(),{subtitleShortcuts:'off'}).subtitleShortcuts,'off');
+  assert.throws(()=>applyPreferencePatch(defaultSettings(),{subtitleShortcuts:'vim'}));
+  assert.equal(applyPreferencePatch(defaultSettings(),{subtitleStyle:{horizontalOffset:-10}}).subtitleStyle.horizontalOffset,-10);
+});
+
+test('a session with translation off shows source captions and keeps earlier translations for later',async t=>{
+  let calls=0;const {session,state}=fixture(async texts=>{calls++;return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.update();await settle();assert.equal(state.currentCaption.translation,'译:Hello');assert.equal(calls,1);
+  session.updateSettings({...defaultSettings(),subtitleTranslationEnabled:false});session.setCues([{start:0,end:3,text:'Hello'},{start:5,end:8,text:'Later'}]);session.update();await settle();
+  assert.equal(calls,1);assert.equal(state.currentCaption.original,'Hello');assert.equal(session.translateCues(state.subtitlesList),false);
+  session.updateSettings({...defaultSettings(),subtitleTranslationEnabled:true});await settle();assert.equal(calls,2);
+});
+test('the translation switch is a normalized, patchable player preference',async()=>{
+  const {normalizeSettings}=await import('../dist/src/shared/settings.js');
+  const {applyPreferencePatch}=await import('../dist/src/background/preferences.js');
+  assert.equal(defaultSettings().subtitleTranslationEnabled,true);assert.equal(normalizeSettings({subtitleTranslationEnabled:false}).subtitleTranslationEnabled,false);
+  assert.equal(applyPreferencePatch(defaultSettings(),{subtitleTranslationEnabled:false}).subtitleTranslationEnabled,false);
+  assert.throws(()=>applyPreferencePatch(defaultSettings(),{subtitleTranslationEnabled:'no'}));
+});

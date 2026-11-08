@@ -12,7 +12,7 @@ export const SUBTITLE_STYLE_DEFAULTS = Object.freeze({
   fontSizeMode:'responsive',sourceFontSize:24,targetFontSize:24,sourceColor:'#ffffff',targetColor:'#ffffff',
   sourceWeight:400,targetWeight:400,sourceStroke:'soft',targetStroke:'soft',
   fontFamily:'system-ui, sans-serif',backgroundColor:'#000000',backgroundOpacity:50,backgroundMode:'panel',
-  position:'bottom-center',offset:70,maxWidth:88,
+  position:'bottom-center',offset:70,horizontalOffset:0,maxWidth:88,
 });
 
 const record = (value: unknown): Record<string, unknown> => value && typeof value==='object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -58,7 +58,11 @@ export function normalizeSubtitleStyle(input?: unknown) {
     backgroundOpacity:bound(value.backgroundOpacity,0,100,defaults.backgroundOpacity),
     backgroundMode:choice(value.backgroundMode,['line','panel'],defaults.backgroundMode),
     position:choice(value.position,['top-left','top-center','top-right','bottom-left','bottom-center','bottom-right'],defaults.position),
-    offset:bound(value.offset,0,300,defaults.offset),maxWidth:bound(value.maxWidth,40,100,defaults.maxWidth),
+    // Pixels from the anchored edge; renderers keep it inside the current player.
+    offset:bound(value.offset,0,2000,defaults.offset),
+    // Percent of the player width the caption moves right (+) or left (−) from its anchor.
+    horizontalOffset:Math.round(bound(value.horizontalOffset,-50,50,defaults.horizontalOffset)*10)/10,
+    maxWidth:bound(value.maxWidth,40,100,defaults.maxWidth),
   };
 }
 
