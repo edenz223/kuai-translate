@@ -196,10 +196,13 @@ export function resolveFeatureSettings<T extends Record<string, any>>(settings:T
   const value=record(settings) as T,options=normalizeInteractionOptions(value,value.providers);
   const selected=feature==='selection'?options.selectionOptions:feature==='input'?options.inputOptions:null;
   if(!selected) return {...value};
+  const source=selected.sourceLanguage==='follow_page'?value.sourceLanguage:selected.sourceLanguage;
+  const target=selected.targetLanguage==='follow_page'?value.targetLanguage:selected.targetLanguage;
+  // Services echo text unchanged for a same-language pair, e.g. a page source of English with input target English.
+  const same=typeof source==='string'&&typeof target==='string'&&source.replaceAll('_','-').toLowerCase()===target.replaceAll('_','-').toLowerCase();
   return {
     ...value,activeProviderId:selected.providerId==='follow_page'?value.activeProviderId:selected.providerId,
-    sourceLanguage:selected.sourceLanguage==='follow_page'?value.sourceLanguage:selected.sourceLanguage,
-    targetLanguage:selected.targetLanguage==='follow_page'?value.targetLanguage:selected.targetLanguage,
+    sourceLanguage:same?'auto':source,targetLanguage:target,
   };
 }
 
