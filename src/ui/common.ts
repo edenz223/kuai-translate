@@ -73,6 +73,14 @@ export function describeProviderError(error: unknown): {title:string;hint:string
   return match ? {title:match[1],hint:match[2],detail} : {title:'测试失败',hint:detail,detail:''};
 }
 export const LANGUAGES: SelectEntry[] = [['auto','自动检测'],['zh-Hans','简体中文'],['zh-Hant','繁體中文'],['en','English'],['ja','日本語'],['ko','한국어'],['fr','Français'],['de','Deutsch'],['es','Español'],['pt','Português'],['ru','Русский'],['ar','العربية'],['hi','हिन्दी'],['it','Italiano'],['vi','Tiếng Việt'],['th','ไทย'],['id','Bahasa Indonesia']];
+/** Key names follow the platform the extension runs on: Option / Cmd on Mac, Alt / Win elsewhere. */
+export const isMac = (nav: Navigator | undefined = globalThis.navigator): boolean => /Mac|iPhone|iPad/i.test((nav as Navigator & {userAgentData?: {platform?: string}})?.userAgentData?.platform || nav?.platform || '');
+export const keyName = (key: string, mac = isMac()): string => ({Control:'Ctrl',Alt:mac?'Option':'Alt',Meta:mac?'Cmd':'Win'} as Record<string,string>)[key] || key;
+export const keyLabel = (keys: string, mac = isMac()): string => keys.split('+').map(key=>keyName(key,mac)).join(' + ');
+// One set of choice labels for the popup and the options page; the field label supplies the context.
+export const hoverTriggers = (mac = isMac()): SelectEntry[] => [['shift','Shift'],['alt',keyName('Alt',mac)],['ctrl','Ctrl'],['custom','自定义按键'],['left_hold','长按左键'],['hover','直接悬停']];
+export const selectionTriggers = (mac = isMac()): SelectEntry[] => [['auto','选中即翻译'],['icon','显示图标'],['dot','显示小圆点'],['shift','Shift'],['alt',keyName('Alt',mac)],['ctrl','Ctrl'],['meta',keyName('Meta',mac)]];
+export const DISPLAY_MODES: SelectEntry[] = [['bilingual','双语对照'],['translation_only','仅显示译文']];
 export const languageName = (id: string): string => LANGUAGES.find(([value])=>value===id)?.[1] || id;
 export const byId = <T extends HTMLElement = HTMLElement>(document: Document,id: string): T => document.getElementById(id) as T;
 export function setStatus(node: HTMLElement, message: string, error = false): void { node.textContent = message; node.classList.toggle('error',error); }

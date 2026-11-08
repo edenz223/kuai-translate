@@ -12,7 +12,7 @@ export interface InteractionControlOptions { document: Document; editor: Setting
 export interface InteractionControls { render(settings: Settings): void; bind(): void; resetDrafts(group?: string): void; validationCount(): number; incompleteCount(): number; }
 
 import {PAGE_OPTIONS_DEFAULTS,SELECTION_OPTIONS_DEFAULTS,INPUT_OPTIONS_DEFAULTS,HOVER_OPTIONS_DEFAULTS,normalizeShortcut,normalizeKey,normalizeSiteList} from '../shared/interactions.js';
-import {byId,fillProviders,fillSelect,languageName,LANGUAGES} from './common.js';
+import {byId,fillProviders,fillSelect,languageName,LANGUAGES,hoverTriggers,selectionTriggers} from './common.js';
 
 const sourceLanguages: SelectEntry[]=[['follow_page','跟随网页原文语言'],...LANGUAGES];
 const targetLanguages: SelectEntry[]=[['follow_page','跟随网页目标语言'],...LANGUAGES.filter(([id])=>id!=='auto')];
@@ -31,7 +31,7 @@ const groups: Record<string,InteractionGroup>={
   }},
   selection:{property:'selectionOptions',defaults:SELECTION_OPTIONS_DEFAULTS,fields:{
     providerId:['provider'],sourceLanguage:['select',sourceLanguages],targetLanguage:['select',targetLanguages],
-    triggerMode:['select',[['auto','选中后自动翻译'],['icon','显示翻译图标'],['dot','显示小圆点'],['shift','选中后按 Shift'],['alt','选中后按 Alt'],['ctrl','选中后按 Control'],['meta','选中后按 Meta / Command']]],
+    triggerMode:['select',selectionTriggers()],
     triggerAction:['select',[['click','点击入口'],['hover','悬停入口']]],delay:['number'],maxLength:['number'],showOriginal:['checkbox'],autoSpeak:['checkbox'],disabledSites:['sites'],
   }},
   input:{property:'inputOptions',defaults:INPUT_OPTIONS_DEFAULTS,fields:{
@@ -40,7 +40,7 @@ const groups: Record<string,InteractionGroup>={
     icon:['select',[['none','不显示入口'],['dot','小圆点'],['icon','翻译图标']]],autoApply:['checkbox'],writeBack:['writeBack'],disabledSites:['sites'],
   }},
   hover:{property:'hoverOptions',defaults:HOVER_OPTIONS_DEFAULTS,fields:{
-    trigger:['select',[['shift','按一次 Shift'],['alt','按一次 Alt'],['ctrl','按一次 Control'],['custom','自定义快捷键'],['left_hold','长按鼠标左键'],['hover','直接悬停（自动触发）']]],
+    trigger:['select',hoverTriggers()],
     customKeys:['keys'],mode:['select',[['paragraph','当前段落'],['area','当前区域内的可读段落']]],
     delay:['number'],holdDelay:['number'],showIndicator:['checkbox'],borderColor:['color'],disabledSites:['sites'],
   }},

@@ -5,6 +5,7 @@ import {startPopup} from '../dist/src/ui/popup.js';
 import {defaultSettings,normalizeSettings} from '../dist/src/shared/settings.js';
 import {createDocument} from './helpers/ui-document.cjs';
 import {setImmediate} from 'node:timers/promises';
+import {keyLabel,keyName,isMac,selectionTriggers} from '../dist/src/ui/common.js';
 import {applySiteRule,siteRuleState,siteHost,inputSiteDisabled,setInputSiteDisabled} from '../dist/src/shared/site-rules.js';
 
 test('popup page actions target only the main frame and unwrap the content response',async()=>{
@@ -79,8 +80,9 @@ test('unsupported browser pages explain why the main action is unavailable witho
 
 test('quick switches save display mode, selection and input without starting a translation',async t=>{
   const h=setup(t);await h.start();
-  assert.equal(h.node('display-bilingual').checked,true);
-  h.node('display-bilingual').checked=false;await h.node('display-bilingual').fire('change');
+  assert.equal(h.node('display-bilingual').checked,true);assert.equal(h.node('display-translation').checked,false);
+  h.node('display-translation').checked=true;await h.node('display-translation').fire('change');
+  assert.equal(h.node('display-bilingual').checked,false);
   h.node('selection-enabled').checked=true;await h.node('selection-enabled').fire('change');
   h.node('input-enabled').checked=false;await h.node('input-enabled').fire('change');
   assert.equal(h.settings.pageDisplayMode,'translation_only');
@@ -92,16 +94,74 @@ test('quick switches save display mode, selection and input without starting a t
 test('site rule writes only this host and keeps auto-translate scoped to it',async t=>{
   const h=setup(t,{url:'https://news.example.com/a'});await h.start();
   assert.equal(h.node('site-host').textContent,'news.example.com');
-  assert.equal(h.node('site-default').checked,true);
-  h.node('site-always').checked=true;await h.node('site-always').fire('change');
+  assert.equal(h.node('site-rule-field').hidden,false);
+  assert.equal(h.node('site-rule').value,'default');
+  const choose=async rule=>{h.node('site-rule').value=rule;await h.node('site-rule').fire('change');};
+  await choose('always');
   assert.deepEqual(h.settings.pageOptions.alwaysSites,['news.example.com']);
   assert.equal(h.settings.pageOptions.autoTranslate,true);
-  h.node('site-never').checked=true;await h.node('site-never').fire('change');
+  assert.equal(h.node('site-rule-note').hidden,true);
+  await choose('never');
   assert.deepEqual(h.settings.pageOptions.alwaysSites,[]);assert.deepEqual(h.settings.pageOptions.neverSites,['news.example.com']);
-  assert.equal(h.node('page-badge').dataset.state,'blocked');
-  h.node('site-default').checked=true;await h.node('site-default').fire('change');
+  assert.equal(h.node('page-badge').dataset.state,'blocked');assert.equal(h.node('page-badge').hidden,false);
+  await choose('default');
   assert.deepEqual(h.settings.pageOptions.neverSites,[]);
-  assert.equal(h.node('site-default').checked,true);
+  assert.equal(h.node('site-rule').value,'default');
+  assert.equal(h.node('page-badge').hidden,true);
+});
+
+test('site rule picker is hidden on browser pages and points to settings for broader patterns',async t=>{
+  const h=setup(t,{url:'chrome://extensions/'});await h.start();
+  assert.equal(h.node('site-rule-field').hidden,true);
+  const g=setup(t,{url:'https://a.example.com/x'});g.settings.pageOptions.neverSites=['*.example.com'];await g.start();
+  assert.equal(g.node('site-rule').value,'never');
+  assert.equal(g.node('site-rule-note').hidden,false);
+  assert.match(g.node('site-rule-text').textContent,/设置中的网站规则/);
+});
+
+test('idle popup stays quiet: no badge, no scope text and no page shortcut',async t=>{
+  const h=setup(t);await h.start();
+  assert.equal(h.node('page-badge').hidden,true);
+  assert.equal(h.node('page-scope').textContent,'');
+  assert.equal(h.node('page-shortcut'),null);
+  h.node('selection-enabled').checked=true;await h.node('selection-enabled').fire('change');
+  assert.equal(h.node('status').textContent,'','autosave success is silent');
+  await h.node('translate-page').fire('click');
+  assert.equal(h.node('status').textContent,'');
+  assert.match(h.node('page-scope').textContent,/正在翻译 0 \/ 2 段/);
+  assert.equal(h.node('page-badge').hidden,false);
+});
+
+test('feature rows pick triggers, the input shortcut and the translation style',async t=>{
+  const h=setup(t);await h.start();
+  const values=id=>h.node(id).children.map(option=>option.value);
+  assert.equal(h.node('hover-trigger').value,'shift');assert.ok(!values('hover-trigger').includes('custom'));
+  assert.equal(h.node('selection-trigger').value,h.settings.selectionOptions.triggerMode);
+  assert.equal(h.node('input-shortcut').value,'Alt+X');
+  assert.equal(h.node('input-shortcut').children[0].textContent,keyLabel('Alt+X'));
+  assert.ok(!values('input-shortcut').includes('Alt+Z'),'the page shortcut is never offered');
+  assert.equal(h.node('page-style').value,'border');
+  const pick=async(id,value)=>{h.node(id).value=value;await h.node(id).fire('change');};
+  await pick('hover-trigger','left_hold');await pick('selection-trigger','alt');await pick('input-shortcut','Alt+T');await pick('page-style','plain');
+  assert.equal(h.settings.hoverOptions.trigger,'left_hold');
+  assert.equal(h.settings.selectionOptions.triggerMode,'alt');
+  assert.equal(h.settings.inputOptions.shortcut,'Alt+T');
+  assert.equal(h.settings.pageStyle.preset,'plain');
+  assert.equal(h.actions().length,0);
+});
+
+test('custom hover keys and other input shortcuts from the options page stay selectable',async t=>{
+  const h=setup(t);h.settings.hoverOptions.trigger='custom';h.settings.hoverOptions.customKeys=['Control','Q'];h.settings.inputOptions.shortcut='Control+Alt+K';await h.start();
+  assert.equal(h.node('hover-trigger').value,'custom');
+  assert.equal(h.node('hover-trigger').children.find(option=>option.value==='custom').textContent,'Ctrl + Q');
+  assert.equal(h.node('input-shortcut').value,'Control+Alt+K');
+  assert.equal(h.node('paragraph-shortcut').hidden,true);
+});
+
+test('hover translation without a usable trigger asks for one in settings',async t=>{
+  const h=setup(t);h.settings.hoverOptions.trigger='custom';h.settings.hoverOptions.customKeys=[];await h.start();
+  assert.equal(h.node('paragraph-shortcut').hidden,false);
+  assert.equal(h.node('hover-trigger').value,'custom');
 });
 
 test('a keyed service without an API key links to its configuration',async t=>{
@@ -139,4 +199,75 @@ test('input site switch edits only this host and reports a broader pattern that 
   settings.inputOptions.disabledSites=Array.from({length:100},(_,index)=>`site${index}.example`);
   assert.throws(()=>setInputSiteDisabled(settings,'https://new.example/',true),/100/);
   assert.throws(()=>setInputSiteDisabled(settings,'chrome://settings/',true));
+});
+
+test('trigger choices dim with their switch and the main button takes focus',async t=>{
+  const h=setup(t);await h.start();
+  assert.equal(h.document.activeElement,h.node('translate-page'));
+  assert.equal(h.node('hover-trigger').disabled,false);
+  h.node('paragraph-enabled').checked=false;await h.node('paragraph-enabled').fire('change');
+  assert.equal(h.node('hover-trigger').disabled,true);
+  h.node('paragraph-enabled').checked=true;await h.node('paragraph-enabled').fire('change');
+  assert.equal(h.node('hover-trigger').disabled,false);
+  const g=setup(t);g.settings.selectionEnabled=false;g.settings.inputOptions.enabled=false;await g.start();
+  assert.equal(g.node('selection-trigger').disabled,true);assert.equal(g.node('input-shortcut').disabled,true);
+});
+
+test('auto source names the detected page language',async t=>{
+  const h=setup(t);let detect;
+  const chromeApi=globalThis.chrome;chromeApi.tabs.detectLanguage=async id=>{detect=id;return 'en-US';};
+  await h.start();await setImmediate();
+  assert.equal(detect,12);
+  assert.equal(h.node('source').children[0].textContent,'自动检测（English）');
+  assert.equal(popup.languageId('zh-TW'),'zh-Hant');assert.equal(popup.languageId('zh-CN'),'zh-Hans');assert.equal(popup.languageId('und'),'');assert.equal(popup.languageId('xx'),'');
+});
+
+test('a tab without the content script offers a reload instead of a dead end',async t=>{
+  const h=setup(t),chromeApi=globalThis.chrome,reloaded=[];
+  chromeApi.tabs.sendMessage=async()=>{throw Error('Could not establish connection. Receiving end does not exist.');};
+  chromeApi.tabs.reload=async id=>{reloaded.push(id);};
+  await h.start();
+  assert.match(h.node('page-scope').textContent,/刷新页面/);
+  assert.equal(h.node('status').textContent,'','the message is not repeated in the status line');
+  assert.equal(h.node('reload-page').hidden,false);
+  assert.equal(h.node('translate-page').disabled,true);
+  assert.notEqual(h.document.activeElement,h.node('translate-page'));
+  await h.node('reload-page').fire('click');
+  assert.deepEqual(reloaded,[12]);
+});
+
+test('key names follow the platform and both pages share one set of trigger labels',async t=>{
+  assert.equal(isMac({platform:'MacIntel'}),true);assert.equal(isMac({userAgentData:{platform:'Windows'},platform:''}),false);
+  assert.equal(keyLabel('Alt+X',true),'Option + X');assert.equal(keyLabel('Alt+X',false),'Alt + X');
+  assert.equal(keyName('Meta',true),'Cmd');assert.equal(keyName('Meta',false),'Win');assert.equal(keyName('Control',true),'Ctrl');
+  assert.deepEqual(selectionTriggers(true).find(([id])=>id==='alt'),['alt','Option']);
+  const h=setup(t);await h.start();
+  assert.deepEqual(h.node('selection-trigger').children.map(option=>[option.value,option.textContent]),selectionTriggers());
+});
+
+test('errors appear next to the control that caused them instead of the bottom status line',async t=>{
+  let failSave=false;
+  const h=setup(t,{url:'https://news.example.com/a',onSave:()=>{if(failSave)throw Error('存储空间不足');}});await h.start();
+  failSave=true;
+  h.node('selection-enabled').checked=true;await h.node('selection-enabled').fire('change');
+  assert.equal(h.node('features-error').hidden,false);assert.match(h.node('features-error').textContent,/尚未保存/);
+  assert.equal(h.node('page-error').hidden,true);
+  assert.equal(h.node('status').textContent,'');
+  failSave=false;
+  h.node('selection-enabled').checked=true;await h.node('selection-enabled').fire('change');
+  assert.equal(h.node('features-error').hidden,true);
+  const full=setup(t,{url:'https://new.example/'});
+  full.settings.pageOptions.neverSites=Array.from({length:100},(_,index)=>`site${index}.example`);await full.start();
+  full.node('site-rule').value='never';await full.node('site-rule').fire('change');
+  assert.equal(full.node('page-error').hidden,false);assert.match(full.node('page-error').textContent,/100/);
+  assert.equal(full.node('site-rule').value,'default','the picker snaps back to the saved rule');
+  assert.equal(full.node('status').textContent,'');
+});
+
+test('a failed page action is reported under the main button',async t=>{
+  const h=setup(t,{onAction:()=>{throw Error('翻译服务暂时不可用');}});await h.start();
+  await h.node('translate-page').fire('click');
+  assert.match(h.node('page-scope').textContent,/翻译服务暂时不可用/);
+  assert.equal(h.node('page-badge').dataset.state,'error');
+  assert.equal(h.node('status').textContent,'');
 });

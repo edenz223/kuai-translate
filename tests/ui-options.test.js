@@ -424,3 +424,10 @@ test('model controls fetch, select and save a model while ignoring a stale provi
   assert.match(h.node('model-status').textContent,/Check key/);
   assert.equal(h.node('provider-model').value,'chosen');
 });
+
+test('settings page opens the browser shortcut page that the popup no longer links to',async t=>{
+  const s=options(t),opened=[];await s.start();
+  globalThis.chrome.tabs={create:async value=>{opened.push(value.url);}};
+  await s.node('browser-shortcuts').fire('click');
+  assert.deepEqual(opened,['chrome://extensions/shortcuts']);
+});

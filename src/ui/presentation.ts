@@ -10,11 +10,11 @@ export interface PresentationControls { render(settings: Settings): void; bind()
 
 import {PAGE_STYLE_DEFAULTS,SUBTITLE_STYLE_DEFAULTS,PAGE_PRESETS} from '../shared/presentation.js';
 import {applyPageStyle,applySubtitleTextStyle,applySubtitleBoxStyle} from '../shared/styles.js';
-import {byId,fillSelect,LANGUAGES} from './common.js';
+import {byId,fillSelect,LANGUAGES,DISPLAY_MODES} from './common.js';
 
-const presetNames: Record<string,string>={border:'左侧边线',plain:'跟随原文', 'thin-dashed':'细虚线下划线',dashed:'虚线下划线',dotted:'点状下划线',background:'背景色',transparent:'透明效果','orange-underline':'橙色下划线',underline:'实线下划线',wavy:'波浪下划线',marker:'马克笔',highlight:'高亮',blur:'模糊遮盖（悬停显示）',italic:'斜体',bold:'加粗','dashed-border':'虚线边框'};
+export const presetNames: Record<string,string>={border:'左侧边线',plain:'跟随原文', 'thin-dashed':'细虚线下划线',dashed:'虚线下划线',dotted:'点状下划线',background:'背景色',transparent:'透明效果','orange-underline':'橙色下划线',underline:'实线下划线',wavy:'波浪下划线',marker:'马克笔',highlight:'高亮',blur:'模糊遮盖（悬停显示）',italic:'斜体',bold:'加粗','dashed-border':'虚线边框'};
 const weights: SelectEntry[]=Array.from({length:9},(_,index)=>{const value=(index+1)*100;return [String(value),value===400?'400 · 正常':value===600?'600 · 半粗':value===700?'700 · 粗体':String(value)];});
-const modes: SelectEntry[]=[['bilingual','原文 + 译文'],['translation_only','仅译文']];
+const modes=DISPLAY_MODES;
 const orders: SelectEntry[]=[['original_on_top','原文在上'],['translation_on_top','译文在上']];
 const strokes: SelectEntry[]=[['soft','柔和投影'],['none','无阴影'],['light','轻阴影'],['normal','普通阴影'],['bold','加粗阴影'],['shadow45','45° 投影']];
 const positions: SelectEntry[]=[['bottom-center','底部居中'],['top-center','顶部居中'],['bottom-left','左下角'],['bottom-right','右下角'],['top-left','左上角'],['top-right','右上角']];
