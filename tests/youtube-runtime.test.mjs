@@ -270,3 +270,23 @@ test('a requested track that comes back empty is reported to the list and can be
   assert.notEqual(second.requestId,first.requestId);assert.equal(session.state.timelineFailed,false);
   caption(h,second.requestId,'Recovered');await settle();assert.equal(session.state.currentCaption.original,'Recovered');assert.equal(session.state.timelineFailed,false);
 });
+
+test('one timeline status drives the list, navigation and settings surfaces',async()=>{
+  const {timelineStatus}=await import('../dist/src/youtube/status.js');
+  const video={duration:60},cue={start:0,end:1,text:'Hi'};
+  const status=(state,options={})=>timelineStatus({enabled:true,subtitlesEnabled:true,state,video,...options});
+  assert.equal(status(undefined,{enabled:false,subtitlesEnabled:false}),'disabled');
+  assert.equal(status(undefined,{enabled:false}),'captions-off');
+  assert.equal(status({subtitlesList:[]}),'loading');
+  assert.equal(status({subtitlesList:[],timelineFailed:true}),'failed');
+  assert.equal(status({subtitlesList:[cue],isLiveDomCaptions:true,timelineFailed:true}),'failed');
+  assert.equal(status({subtitlesList:[cue],isLiveDomCaptions:true}),'live');
+  assert.equal(status({subtitlesList:[cue]},{video:{duration:Infinity}}),'live');
+  assert.equal(status({subtitlesList:[cue],timelineFailed:true}),'ready','a loaded timeline outranks an older failure');
+});
+test('session translation errors follow the interface language',async t=>{
+  const video=new EventTarget();Object.assign(video,{isConnected:true,currentTime:1,duration:100,paused:true,ended:false,seekable:{length:0},closest:()=>null});
+  const session=sessionApi.createSubtitleSession({id:'en',video,settings:defaultSettings(),getLanguage:()=>'en',translate:async()=>({translations:['']})});t.after(()=>session.destroy());
+  session.setCues([{start:0,end:3,text:'Hello'}]);session.update();await settle();
+  assert.equal(session.state.currentCaption.errorMessage,'The translation came back empty or incomplete. Please retry.');
+});

@@ -18,6 +18,7 @@ import {createCaptionView} from './overlay.js';
 import {subtitleStyle,subtitleLayoutKey} from './presentation.js';
 import {navigationState} from './navigation.js';
 import {normalizeSubtitleTrackPreference} from '../shared/settings.js';
+import {subtitleWords} from './i18n.js';
 
 /** Coordinates one current YouTube player, independent of the website's UI framework. */
 export function createYouTubeController({settings,subscribeSettings,translate,updatePreferences,openOptions,env=globalThis,createSidebar=sidebarAPI.createController,createSelection=selectionAPI.createController,createView=createCaptionView}:YouTubeControllerOptions) {
@@ -27,6 +28,8 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   const origin=()=>new URL(env.location.href).origin;
   const post=(data:Record<string,unknown>)=>env.postMessage({source:'kuai-youtube-request',...data},origin());
   const currentRecord=()=>records.values().next().value;
+  const language=()=>config.interfaceLanguage==='auto'?env.navigator?.language:config.interfaceLanguage;
+  const words=()=>subtitleWords(language());
   // The same logical caption track, whichever URL token or metadata ID reached us.
   function sameTrack(a:CaptionTrack,b:CaptionTrack,{urlKind=false}={}){
     const left=new URL(a.baseUrl),right=new URL(b.baseUrl);
@@ -48,7 +51,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     getConfig:()=>{const style=subtitleStyle(config);return{isEnable:config.subtitlesEnabled?'1':'0',hideTranslation:style.hideTranslation?'1':'0',styleConfig:{displayOrder:style.displayOrder},subtitleStyle:style,subtitleListOpen:config.subtitleListOpen===true};},
     saveSidebarOpen:open=>preferences({subtitleListOpen:open}),
     reportPreferenceError:error=>currentRecord()?.view.reportError?.(error),
-    getLanguage:()=>config.interfaceLanguage==='auto'?env.navigator?.language:config.interfaceLanguage,
+    getLanguage:language,
     isEnabled:session=>records.get(session.id)?.session===session&&session.isEnabled(),
     isSelectionHeld:id=>!!records.get(id)?.session.state.isSubtitleSelectionHeld,
     getMediaKey:session=>videoIdFromUrl(env.location.href)+'|'+(session.video.currentSrc||''),
@@ -101,7 +104,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     const requestId='kuai-caption-'+(++requestSequence),id=record.videoId;
     const timer=env.setTimeout(()=>{
       if(record.pending?.id!==requestId)return;
-      clearPending(record);failTimeline(record,track.id,'字幕读取超时，请重试。');
+      clearPending(record);failTimeline(record,track.id,words().readTimeout);
     },23000);
     record.pending={id:requestId,trackId:track.id,track:{...track},timer};record.failedTrack='';record.session.state.timelineFailed=false;
     post({kind:'fetch-track',requestId,videoId:id,url:track.baseUrl});
@@ -133,9 +136,9 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   }
   function captionsOn(video:HTMLVideoElement){const button=video.closest?.('.html5-video-player')?.querySelector<HTMLElement>('.ytp-subtitles-button');return !button||button.getAttribute('aria-pressed')!=='false';}
   function preferences(patch:SettingsPatch){
-    if(!updatePreferences)throw new Error('字幕设置暂不可用，请刷新页面后重试');
+    if(!updatePreferences)throw new Error(words().preferencesUnavailable);
     const operation=preferenceQueue.catch(()=>{}).then(async()=>{
-      if(stopped)throw new Error('页面已经离开，请在当前视频重试');
+      if(stopped)throw new Error(words().pageLeft);
       const epoch=settingsEpoch,next=await updatePreferences(patch);
       // A newer broadcast already contains this save or a later change from another window.
       if(!stopped&&epoch===settingsEpoch&&next)updateSettings(next);
@@ -146,14 +149,14 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   function navigate(record:YouTubeRecord,direction:number){
     const state=navigationState(record.session),time=direction===-1?state.previous:state.next;
     if(time===null)return false;
-    if(!bridge.seek(record.session.id,time))throw new Error('暂时无法跳转到这句字幕');
+    if(!bridge.seek(record.session.id,time))throw new Error(words().seekError);
     changed();return true;
   }
   function create(video:HTMLVideoElement,id:string) {
-    const session=createSubtitleSession({id:'video-'+id+'-'+(++sequence),video,settings:config,translate,onChange:changed});
+    const session=createSubtitleSession({id:'video-'+id+'-'+(++sequence),video,settings:config,translate,onChange:changed,getLanguage:language});
     const record={session,videoId:id,togglePending:false,tracks:[],pending:null,loadedTrack:'',failedTrack:'',timelineSignature:'',domText:''} as unknown as YouTubeRecord;
     records.set(session.id,record);
-    record.view=createView(session,{env,cancelSelection:bridge.cancelSelection,
+    record.view=createView(session,{env,getLanguage:language,cancelSelection:bridge.cancelSelection,
       onToggle:async()=>{
         if(record.togglePending)return;
         record.togglePending=true;selection?.cancel(session.id,'toggle');
@@ -168,7 +171,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
       },
       onTrackChange:async trackId=>{
         const track=record.tracks.find(item=>item.id===trackId);
-        if(trackId&&!track)throw new Error('这条字幕已不可用，请重新选择');
+        if(trackId&&!track)throw new Error(words().trackGone);
         const subtitleTrackPreference=normalizeSubtitleTrackPreference(track?{languageCode:track.languageCode,kind:track.kind,name:track.name}:undefined);
         await preferences({subtitleTrackPreference});
         if(!stopped&&records.get(session.id)===record&&record.videoId===videoIdFromUrl(env.location.href)&&video.isConnected)requestTrack(record,true);
@@ -216,7 +219,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     if(data.requestId&&data.requestId!==record.pending?.id)return;
     if(data.kind==='caption-error'){
       const trackId=record.pending?.trackId||record.track?.id;clearPending(record,false);
-      failTimeline(record,trackId,'暂时无法读取这条字幕，请切换字幕语言或重试。');return;
+      failTimeline(record,trackId,words().readFailed);return;
     }
     if(data.kind!=='captions'||typeof data.body!=='string'||data.body.length>4_000_000)return;
     if(!data.requestId&&record.track&&data.languageCode&&data.languageCode!==record.track.languageCode)return;

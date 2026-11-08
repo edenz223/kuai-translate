@@ -10,27 +10,10 @@ interface SidebarEntry {
 interface SidebarTranslationJob {entry:SidebarEntry;source:CaptionCue[]|undefined;version:number|undefined;batch:CaptionCue[];refused:boolean}
 /* YouTube subtitle list. Runs in the extension's isolated content-script world. */
 import {applySubtitleMask} from './presentation.js';
+import {subtitleWords,type SubtitleWords} from './i18n.js';
+import {timelineStatus} from './status.js';
 const root = globalThis;
 "use strict";
-
-const words = {
-  en: {
-    title: "Subtitle list", close: "Close subtitle list", follow: "Back to current", following: "Following current", reading: "Reading freely",
-    loading: "Loading the subtitle timeline…", failed: "Couldn't load the full subtitles for this video.", retry: "Retry",
-    disabled: "Enable subtitle translation to use this list.", nativeDisabled: "Turn on captions in the video to continue.",
-    unavailable: "A complete subtitle timeline is unavailable for this video.",
-    pending: "Waiting for translation", translating: "Translating…", error: "Translation unavailable",
-    seek: "Seek to", seekError: "Unable to seek to this subtitle", count: "captions",
-  },
-  zh: {
-    title: "字幕列表", close: "关闭字幕列表", follow: "回到当前字幕", following: "正在跟随", reading: "自由阅读中",
-    loading: "正在读取字幕时间轴…", failed: "暂时无法读取这条字幕的完整时间轴。", retry: "重试",
-    disabled: "请开启字幕翻译后使用字幕列表。", nativeDisabled: "请开启视频字幕后继续。",
-    unavailable: "此视频暂时没有完整的字幕时间轴。",
-    pending: "等待翻译", translating: "翻译中…", error: "翻译暂不可用",
-    seek: "跳转到", seekError: "无法跳转到这句字幕", count: "句字幕",
-  },
-};
 
 const panelStyle = `
   :host{--reading-surface:#fff;--reading-text:#202124;--reading-muted:#606060;--reading-border:#e5e7eb;--reading-hover:#f1f3f5;--reading-accent:#065fd4;display:block;box-sizing:border-box;margin-bottom:16px;color:var(--yt-spec-text-primary,var(--reading-text));font:14px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;color-scheme:light dark}
@@ -103,7 +86,7 @@ function createController(bridge:SubtitleBridge, env = root) {
   let preferredOpen = configuredOpen === true, preferenceVersion = 0, pendingPreference:{version:number}|null = null, stopped = false, started = false, frame:number|null = null, unsubscribe:(()=>void)|undefined, translationJob:SidebarTranslationJob|null = null;
 
   function labels() {
-    return /^zh/i.test(String(bridge.getLanguage?.() || env.navigator?.language || "en")) ? words.zh : words.en;
+    return subtitleWords(bridge.getLanguage?.() || env.navigator?.language);
   }
   function held(entry:SidebarEntry) {
     return !!(bridge.isSelectionHeld?.(entry.session.id) || bridge.getState(entry.session.id)?.isSubtitleSelectionHeld);
@@ -329,7 +312,7 @@ function createController(bridge:SubtitleBridge, env = root) {
     }
     updateSpacers(entry);
   }
-  function patchRows(entry:SidebarEntry, active:number, config:SubtitleBridgeConfig, text:typeof words.en) {
+  function patchRows(entry:SidebarEntry, active:number, config:SubtitleBridgeConfig, text:SubtitleWords) {
     // The study mask is shared; video typography, boxes and display order are not.
     const hideTranslation = config.subtitleStyle ? config.subtitleStyle.hideTranslation === true : config.hideTranslation === "1";
     for (const [index, item] of entry.rows) {
@@ -404,8 +387,8 @@ function createController(bridge:SubtitleBridge, env = root) {
     mountToggle(entry);
     const text = labels();
     if (entry.toggleButton) {
-      entry.toggleButton.title = text.title;
-      entry.toggleButton.setAttribute("aria-label", text.title);
+      entry.toggleButton.title = text.listTitle;
+      entry.toggleButton.setAttribute("aria-label", text.listTitle);
       entry.toggleButton.setAttribute("aria-expanded", String(entry.open));
       entry.toggleButton.style.opacity=entry.open?"1":".55";entry.toggleButton.style.background="transparent";entry.toggleButton.style.color="#fff";
     }
@@ -414,24 +397,21 @@ function createController(bridge:SubtitleBridge, env = root) {
     // A hold only freezes the list: selecting a word on the video is not manual reading.
     if (held(entry)) return;
     if (!mountPanel(entry)) {entry.panel.hidden=true;return;}
-    entry.panel.setAttribute("aria-label", text.title);
-    setText(entry.title, text.title);
-    entry.closeButton.title = text.close; entry.closeButton.setAttribute("aria-label", text.close);
+    entry.panel.setAttribute("aria-label", text.listTitle);
+    setText(entry.title, text.listTitle);
+    entry.closeButton.title = text.listClose; entry.closeButton.setAttribute("aria-label", text.listClose);
     const config = bridge.getConfig?.() || {}, state = bridge.getState(entry.session.id);
     const source = state?.subtitlesList;
     if (source !== entry.source || source?.length !== entry.sourceLength) resetTimeline(entry, source);
     if (entry.version !== state?.translateVersion) { entry.version = state?.translateVersion; entry.failedRequests = new WeakSet(); }
     setText(entry.count, entry.cues.length + " " + text.count);
-    const failed = enabled(entry) && !!state?.timelineFailed && (!entry.cues.length || !!state.isLiveDomCaptions);
-    const reason = !enabled(entry) ? (config.isEnable === "1" ? text.nativeDisabled : text.disabled)
-      : failed ? text.failed
-      : state?.isLiveDomCaptions || entry.video.duration === Infinity ? text.unavailable
-      : !entry.cues.length ? text.loading : "";
+    const status = timelineStatus({ enabled: enabled(entry), subtitlesEnabled: config.isEnable === "1", state, video: entry.video }), failed = status === "failed";
+    const reason = { disabled: text.disabled, "captions-off": text.nativeDisabled, failed: text.failed, live: text.unavailable, loading: text.loading, ready: "" }[status];
     const statusMessage = reason || (entry.seekError ? text.seekError : "");
     entry.status.hidden = !statusMessage; setText(entry.status, statusMessage);
     entry.retryButton.hidden = !failed || !bridge.retryTimeline; setText(entry.retryButton, text.retry);
     entry.list.hidden = !!reason;
-    entry.list.setAttribute("aria-label", text.title);
+    entry.list.setAttribute("aria-label", text.listTitle);
     updateFollow(entry);
     if (reason || doc.visibilityState === "hidden") return;
     // The caption renderer may retain an earlier timestamp for repeated text.
