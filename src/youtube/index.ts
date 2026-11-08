@@ -48,7 +48,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   const bridge:SubtitleBridge={
     getSessions:()=>Array.from(records.values(),record=>record.session),
     getState:id=>records.get(id)?.session.state,
-    getConfig:()=>{const style=subtitleStyle(config);return{isEnable:config.subtitlesEnabled?'1':'0',hideTranslation:style.hideTranslation?'1':'0',styleConfig:{displayOrder:style.displayOrder},subtitleStyle:style,subtitleListOpen:config.subtitleListOpen===true};},
+    getConfig:()=>{const style=subtitleStyle(config);return{isEnable:config.subtitlesEnabled?'1':'0',hideTranslation:style.hideTranslation?'1':'0',styleConfig:{displayOrder:style.displayOrder},subtitleStyle:style,subtitleListOpen:config.subtitleListOpen===true,translationEnabled:config.subtitleTranslationEnabled!==false};},
     saveSidebarOpen:open=>preferences({subtitleListOpen:open}),
     reportPreferenceError:error=>currentRecord()?.view.reportError?.(error),
     getLanguage:language,
@@ -166,11 +166,13 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
         if(record.togglePending)return;
         record.togglePending=true;selection?.cancel(session.id,'toggle');
         try{
-          const enable=!config.subtitlesEnabled||!captionsOn(video);
-          await preferences({subtitlesEnabled:enable});
+          // 译 switches translation only; Kuai captions and the list stay. From
+          // captions off, it turns captions, CC and translation on together.
+          const showing=config.subtitlesEnabled&&captionsOn(video);
+          await preferences(showing?{subtitleTranslationEnabled:config.subtitleTranslationEnabled===false}:{subtitlesEnabled:true,subtitleTranslationEnabled:true});
           if(stopped||records.get(session.id)!==record||record.videoId!==videoIdFromUrl(env.location.href)||!video.isConnected)return;
           const cc=video.closest?.('.html5-video-player')?.querySelector<HTMLElement>('.ytp-subtitles-button');
-          if(enable&&config.subtitlesEnabled&&cc?.getAttribute('aria-pressed')==='false')cc.click();
+          if(!showing&&config.subtitlesEnabled&&cc?.getAttribute('aria-pressed')==='false')cc.click();
           record.failedTrack='';sync();
         }finally{record.togglePending=false;}
       },

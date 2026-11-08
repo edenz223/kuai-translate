@@ -171,7 +171,8 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     mount();preferences.render(settings);
     const text=words(),label=(node:HTMLElement,value:string)=>{if(node.title!==value){node.title=value;node.setAttribute('aria-label',value);}};
     toolbar.setAttribute('aria-label',text.toolbar);label(button,text.toggle);label(settingsButton,text.settings);if(retry.textContent!==text.retry)retry.textContent=text.retry;
-    const pressed=String(session.isEnabled());if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);setActiveMark(activeMark,session.isEnabled());
+    const translate=settings.subtitleTranslationEnabled!==false,on=session.isEnabled()&&translate;
+    const pressed=String(on);if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);setActiveMark(activeMark,on);
     const navigation=navigationState(session,{words:text,subtitlesEnabled:settings.subtitlesEnabled!==false});
     const compact=(player.getBoundingClientRect().width||1200)<COMPACT_WIDTH;
     previousIcon.style.setProperty('display',navigation.replay?'none':'block','important');replayIcon.style.setProperty('display',navigation.replay?'block':'none','important');
@@ -187,13 +188,14 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     position();
     if(session.state.isSubtitleSelectionHeld||dragState)return;
     const caption=session.state.currentCaption,enabled=session.isEnabled();
-    const set=(node:HTMLElement,value:string)=>{if(node.textContent!==value)node.textContent=value;};set(original,caption?.original||'');set(translation,caption?.translation||'');
+    const set=(node:HTMLElement,value:string)=>{if(node.textContent!==value)node.textContent=value;};const shown=translate?caption?.translation||'':'';set(original,caption?.original||'');set(translation,shown);
     // Translation-only still shows the source until its translation exists.
-    originalLine.hidden=original.hidden=presentation.displayMode==='translation_only'&&!!caption?.translation;translationLine.hidden=translation.hidden=!caption?.translation;
+    // Without translation, Kuai still shows its segmented, styled source captions.
+    originalLine.hidden=original.hidden=presentation.displayMode==='translation_only'&&!!shown;translationLine.hidden=translation.hidden=!shown;
     translationLine.style.order=translation.style.order=presentation.displayOrder==='translation_on_top'?'-1':'1';applySubtitleMask(translation,presentation.hideTranslation);
     // A quiet indicator replaces per-caption "waiting/translating" text.
-    const error=caption?.errorMessage||session.state.errorMessage||'',message=error||(session.state.loopingCaption?'⟲ '+text.looping:'');
-    busy.hidden=!caption||!!caption.translation||!!error||caption.status==='error';busy.setAttribute('aria-label',caption?.status==='translating'?text.translating:text.pending);
+    const error=(translate?caption?.errorMessage:'')||session.state.errorMessage||'',message=error||(session.state.loopingCaption?'⟲ '+text.looping:'');
+    busy.hidden=!translate||!caption||!!caption.translation||!!error||caption.status==='error';busy.setAttribute('aria-label',caption?.status==='translating'?text.translating:text.pending);
     set(status,message);status.hidden=!message;retry.hidden=!error;host.hidden=!enabled||(!caption&&!message);host.style.display=host.hidden?'none':'block';nativeVisible(!enabled||!caption?.original);
   }
   function destroy(){if(destroyed)return;destroyed=true;cancelDrag();clearClick();restoreNative();preferences.destroy();host.remove();toolbar.remove();listeners.splice(0).forEach(dispose=>dispose());}

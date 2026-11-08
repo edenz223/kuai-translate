@@ -47,6 +47,7 @@ const panelStyle = `
   .search:focus-visible{outline:2px solid var(--yt-spec-call-to-action,var(--reading-accent));outline-offset:-1px}
   .views{display:inline-flex;flex:none;border:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));border-radius:14px;overflow:hidden}
   .views button{border:0;background:transparent;padding:4px 9px;font-size:12px;line-height:18px;color:var(--yt-spec-text-secondary,var(--reading-muted))}
+  .views[hidden]{display:none}
   .views button[aria-pressed="true"]{background:var(--yt-spec-badge-chip-background,var(--reading-hover));color:var(--yt-spec-text-primary,var(--reading-text));font-weight:600}
   .timestamp{align-self:flex-start;flex:none;min-width:43px;border:0;border-radius:4px;background:transparent;color:var(--yt-spec-call-to-action,var(--reading-accent));padding:1px 3px;font-size:12px;font-variant-numeric:tabular-nums;line-height:20px}
   .timestamp:hover{background:var(--yt-spec-badge-chip-background,var(--reading-hover))}
@@ -358,13 +359,15 @@ function createController(bridge:SubtitleBridge, env = root) {
   function patchRows(entry:SidebarEntry, active:number, config:SubtitleBridgeConfig, text:SubtitleWords) {
     // The study mask is shared; video typography, boxes and display order are not.
     const hideTranslation = config.subtitleStyle ? config.subtitleStyle.hideTranslation === true : config.hideTranslation === "1";
+    // With translation off the list is a source-only transcript.
+    const shown: SidebarView = config.translationEnabled === false ? "original" : view;
     for (const [index, item] of entry.rows) {
       const cue = item.cue;
       setText(item.original, cue.text);
       setText(item.translation, typeof cue.translation === "string" ? cue.translation : "");
       // The translation view still shows the source until its translation exists.
-      item.original.hidden = view === "translation" && !!cue.translation;
-      item.translation.hidden = item.status.hidden = view === "original";
+      item.original.hidden = shown === "translation" && !!cue.translation;
+      item.translation.hidden = item.status.hidden = shown === "original";
       setText(item.status, cue.status === "error" ? text.error : cue.status === "translating" ? text.translating : !cue.translation ? text.pending : "");
       item.status.title = cue.status === "error" ? String(cue.errorMessage || "") : "";
       item.time.title = text.seek + " " + timestamp(cue.start);
@@ -398,7 +401,7 @@ function createController(bridge:SubtitleBridge, env = root) {
   }
 
   function requestVisible(entry:SidebarEntry) {
-    if (translationJob || view === "original" || !entry.open || held(entry) || !enabled(entry) || doc.visibilityState === "hidden" || !entry.panel?.isConnected || entry.video.seeking || entry.video.closest?.(".ad-showing, .ad-interrupting")) return;
+    if (translationJob || view === "original" || bridge.getConfig?.()?.translationEnabled === false || !entry.open || held(entry) || !enabled(entry) || doc.visibilityState === "hidden" || !entry.panel?.isConnected || entry.video.seeking || entry.video.closest?.(".ad-showing, .ad-interrupting")) return;
     const bounds = entry.list.getBoundingClientRect();
     const top = Math.max(0, bounds.top), bottom = Math.min(env.innerHeight || Infinity, bounds.bottom);
     if (bounds.width <= 0 || bottom <= top || bounds.right <= 0 || bounds.left >= (env.innerWidth || Infinity)) return;
@@ -454,7 +457,8 @@ function createController(bridge:SubtitleBridge, env = root) {
     if (entry.version !== state?.translateVersion) { entry.version = state?.translateVersion; entry.failedRequests = new WeakSet(); }
     setText(entry.count, entry.cues.length + " " + (query ? text.matches : text.count));
     entry.search.placeholder = text.search; entry.search.setAttribute("aria-label", text.search);
-    entry.viewButtons.get("both")!.parentElement!.setAttribute("aria-label", text.view);
+    const views = entry.viewButtons.get("both")!.parentElement!;
+    views.setAttribute("aria-label", text.view); views.hidden = config.translationEnabled === false;
     for (const [value, button] of entry.viewButtons) {
       setText(button, value === "both" ? text.viewBoth : value === "original" ? text.viewOriginal : text.viewTranslation);
       button.setAttribute("aria-pressed", String(view === value));

@@ -29,7 +29,7 @@ export function createSubtitlePreferences({env,player,id,trigger,onChange,onTrac
     const row=element('label','row'),text=element('span'),control=element(type==='select'?'select':'input',className);
     if(type!=='select')(control as HTMLInputElement).type='checkbox';row.append(text,control);panel.append(row);controls.push(control);labels.push([text,control,label]);return control;
   }
-  const enabled=field('fieldEnabled','subtitles-enabled','checkbox'),tracks=field('fieldTrack','subtitle-track'),provider=field('fieldProvider','subtitle-provider'),target=field('fieldTarget','subtitle-target'),mode=field('fieldMode','subtitle-mode'),order=field('fieldOrder','subtitle-order'),mask=field('fieldMask','subtitle-mask','checkbox'),
+  const enabled=field('fieldEnabled','subtitles-enabled','checkbox'),translate=field('fieldTranslate','subtitle-translate','checkbox'),tracks=field('fieldTrack','subtitle-track'),provider=field('fieldProvider','subtitle-provider'),target=field('fieldTarget','subtitle-target'),mode=field('fieldMode','subtitle-mode'),order=field('fieldOrder','subtitle-order'),mask=field('fieldMask','subtitle-mask','checkbox'),
     loop=field('loop','subtitle-loop','checkbox'),shortcuts=field('fieldShortcuts','subtitle-shortcuts');
   const status=element('p','settings-status'),all=element('button','all-subtitle-settings');all.type='button';status.setAttribute('role','status');panel.append(status,all);shadow.append(style,panel);player.append(host);
   trigger.setAttribute('aria-controls',host.id);trigger.setAttribute('aria-haspopup','dialog');host.setAttribute('role','dialog');
@@ -59,13 +59,15 @@ export function createSubtitlePreferences({env,player,id,trigger,onChange,onTrac
     const text=words();applyLabels(text);if(busy)return;
     renderTracks(text);
     const presentation=subtitleStyle(settings);
-    enabled.checked=settings.subtitlesEnabled!==false;mask.checked=presentation.hideTranslation;
+    enabled.checked=settings.subtitlesEnabled!==false;translate.checked=settings.subtitleTranslationEnabled!==false;mask.checked=presentation.hideTranslation;
     options(provider,[['follow_page',text.followPageProvider],...(settings.providers||[]).filter(item=>item.enabled).map((item):[string,string]=>[item.id,item.name||item.id])],settings.subtitleProviderId||'follow_page');
     options(target,[['follow_page',text.followPageTarget],...languages],settings.subtitleTargetLanguage||'follow_page');
     options(mode,[['bilingual',text.modeBilingual],['translation_only',text.modeTranslation]],presentation.displayMode);
     options(order,[['original_on_top',text.orderOriginal],['translation_on_top',text.orderTranslation]],presentation.displayOrder);
     options(shortcuts,[['ctrl-alt',text.shortcutsCtrlAlt],['letters',text.shortcutsLetters],['off',text.shortcutsOff]],settings.subtitleShortcuts||'ctrl-alt');
     loop.checked=isLooping();place();
+    // Translation choices rest while captions show only their source.
+    for(const control of [provider,target,mode,order,mask])control.disabled=!translate.checked;
   }
   function error(value:unknown){if(!destroyed)status.textContent=String((value as {message?:unknown}|null)?.message||value||words().actionFailed);}
   async function perform(action:()=>unknown,reason='preferences'){
@@ -75,7 +77,7 @@ export function createSubtitlePreferences({env,player,id,trigger,onChange,onTrac
     finally{busy=false;if(!destroyed){controls.forEach(control=>control.disabled=false);render(settings);}}
   }
   function save(patch:SettingsPatch){return perform(()=>{if(!onChange)throw new Error(words().settingsUnavailable);return onChange(patch);});}
-  for(const [control,patch]of [[enabled,()=>({subtitlesEnabled:enabled.checked})],[provider,()=>({subtitleProviderId:provider.value})],[target,()=>({subtitleTargetLanguage:target.value})],[mode,()=>({subtitleStyle:{displayMode:mode.value}})],[order,()=>({subtitleStyle:{displayOrder:order.value}})],[mask,()=>({subtitleStyle:{hideTranslation:mask.checked}})],[shortcuts,()=>({subtitleShortcuts:shortcuts.value as Settings['subtitleShortcuts']})]] as const)
+  for(const [control,patch]of [[enabled,()=>({subtitlesEnabled:enabled.checked})],[translate,()=>({subtitleTranslationEnabled:translate.checked})],[provider,()=>({subtitleProviderId:provider.value})],[target,()=>({subtitleTargetLanguage:target.value})],[mode,()=>({subtitleStyle:{displayMode:mode.value}})],[order,()=>({subtitleStyle:{displayOrder:order.value}})],[mask,()=>({subtitleStyle:{hideTranslation:mask.checked}})],[shortcuts,()=>({subtitleShortcuts:shortcuts.value as Settings['subtitleShortcuts']})]] as const)
     control.addEventListener('change',()=>{void save(patch());});
   tracks.addEventListener('change',()=>{
     if(tracks.disabled)return;const selected=tracks.value;

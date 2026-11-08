@@ -44,7 +44,8 @@ export function defaultSettings() {
     schemaVersion:1, inputDefaultsVersion:3, paragraphDefaultsVersion:1, subtitleStyleDefaultsVersion:2, providerRevision:0, providers:structuredClone(FREE_PROVIDERS) as Provider[],
     activeProviderId:'microsoft', subtitleProviderId:'follow_page',
     sourceLanguage:'auto', targetLanguage:'zh-Hans', interfaceLanguage:'auto',
-    subtitlesEnabled:true, selectionEnabled:false, hoverEnabled:true, showOriginal:true,
+    // subtitlesEnabled turns Kuai captions and the list on; translation can be off within them.
+    subtitlesEnabled:true, subtitleTranslationEnabled:true, selectionEnabled:false, hoverEnabled:true, showOriginal:true,
     pageDisplayMode:'bilingual',pageStyle:normalizePageStyle(),
     subtitleTargetLanguage:'follow_page',subtitleStyle:normalizeSubtitleStyle(),
     subtitleTrackPreference:normalizeSubtitleTrackPreference(),subtitleListOpen:false,subtitleShortcuts:'ctrl-alt' as SubtitleShortcutScheme,
@@ -127,7 +128,7 @@ export function normalizeSettings(input:unknown):Settings {
     subtitleProviderId:input.subtitleProviderId==='follow_page' || !enabled(input.subtitleProviderId) ? 'follow_page' : input.subtitleProviderId,
     sourceLanguage:language(input.sourceLanguage,'auto',true),targetLanguage:language(input.targetLanguage,'zh-Hans'),
     interfaceLanguage:['auto','en','zh-CN'].includes(input.interfaceLanguage) ? input.interfaceLanguage : 'auto',
-    subtitlesEnabled:flag(input.subtitlesEnabled,true),selectionEnabled:flag(input.selectionEnabled,false),
+    subtitlesEnabled:flag(input.subtitlesEnabled,true),subtitleTranslationEnabled:flag(input.subtitleTranslationEnabled,true),selectionEnabled:flag(input.selectionEnabled,false),
     hoverEnabled:flag(input.hoverEnabled,true),showOriginal:subtitleStyle.displayMode!=='translation_only',
     pageDisplayMode:input.pageDisplayMode==='translation_only' ? 'translation_only' : 'bilingual',
     pageStyle:normalizePageStyle(input.pageStyle),subtitleStyle,

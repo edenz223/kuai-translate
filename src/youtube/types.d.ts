@@ -15,7 +15,7 @@ export interface SubtitleSession {
  translateCues:(cues:CaptionCue[])=>false|Promise<void>;retry:()=>void;setLoop:(enabled:boolean)=>boolean;isEnabled:()=>boolean;
  synchronizer:{isSyncEnabled:boolean;update:()=>void;triggerTranslation:(cues:CaptionCue[])=>false|Promise<void>};
 }
-export interface SubtitleBridgeConfig {isEnable?:string;hideTranslation?:string;styleConfig?:{displayOrder:string};subtitleStyle?:Partial<Settings['subtitleStyle']>;subtitleListOpen?:boolean}
+export interface SubtitleBridgeConfig {isEnable?:string;hideTranslation?:string;styleConfig?:{displayOrder:string};subtitleStyle?:Partial<Settings['subtitleStyle']>;subtitleListOpen?:boolean;translationEnabled?:boolean}
 export interface SubtitleBridge {
  getSessions:()=>Iterable<SubtitleSession>;getState:(id:string)=>SubtitleState|undefined;
  getConfig?:()=>SubtitleBridgeConfig;getLanguage?:()=>string|undefined;isEnabled?:(session:SubtitleSession)=>boolean;

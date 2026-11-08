@@ -14,6 +14,8 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
   const state:SubtitleState={videoId:id,subtitlesList:[],currentCaption:null,loopingCaption:null,selectionCaptionSnapshot:null,isSubtitleSelectionHeld:false,translateVersion:0,isLiveDomCaptions:false,timelineFailed:false,errorMessage:''};
   const available=()=>!destroyed&&enabled&&config.subtitlesEnabled&&video.isConnected&&!video.closest?.('.ad-showing, .ad-interrupting');
   const notify=()=>onChange(session);
+  // With translation off the session still segments and shows source captions.
+  const translating=()=>config.subtitleTranslationEnabled!==false;
   const providerId=()=>config.subtitleProviderId==='follow_page'?config.activeProviderId:config.subtitleProviderId;
   const targetLanguage=()=>config.subtitleTargetLanguage&&config.subtitleTargetLanguage!=='follow_page'?config.subtitleTargetLanguage:config.targetLanguage;
   function invalidate() {
@@ -61,7 +63,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
       status:active.find(item=>item.status==='translating')?.status||active.find(item=>item.status==='error')?.status||active[0].status,
       errorMessage:active.map(item=>item.errorMessage||'').find(Boolean)||''}:null;
     if(JSON.stringify(next)!==JSON.stringify(state.currentCaption)){state.currentCaption=next;notify();}
-    if(!running && !video.seeking && !liveWaiting()) {
+    if(!running && !video.seeking && translating() && !liveWaiting()) {
       const pending=[];
       for(let index=first;index<state.subtitlesList.length;index++){
         const item=state.subtitlesList[index];if(item.start>time+15)break;
@@ -72,7 +74,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     }
   }
   function translateCues(candidates:CaptionCue[]):false|Promise<void> {
-    if(!available()||state.isSubtitleSelectionHeld||running||!Array.isArray(candidates))return false;
+    if(!available()||!translating()||state.isSubtitleSelectionHeld||running||!Array.isArray(candidates))return false;
     const membership=new Set(state.subtitlesList),cues:CaptionCue[]=[];let size=0,rejected=false;
     for(const cue of new Set(candidates)) {
       if(!membership.has(cue)||!cue.text||cue.status!=='pending')continue;
@@ -132,8 +134,10 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     notify();
   }
   function updateSettings(next:Settings) {
-    const before=[providerId(),config.sourceLanguage,targetLanguage(),config.providerRevision,JSON.stringify(config.providers)];
+    const before=[providerId(),config.sourceLanguage,targetLanguage(),config.providerRevision,JSON.stringify(config.providers)],wasTranslating=translating();
     config=next;
+    // Turning translation off stops requests but keeps finished translations for later.
+    if(wasTranslating&&!translating())invalidate();
     const after=[providerId(),config.sourceLanguage,targetLanguage(),config.providerRevision,JSON.stringify(config.providers)];
     if(before.some((value,index)=>value!==after[index])) {
       invalidate();for(const cue of state.subtitlesList){cue.translation='';cue.status='pending';cue.errorMessage='';}

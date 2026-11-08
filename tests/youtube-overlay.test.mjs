@@ -230,14 +230,35 @@ async function metadata(h,values=trackOptions,selectedLanguage='en'){
 }
 async function choose(h,value){selected(h).value=value;h.emit(selected(h),'change');await h.flush();}
 
-test('toolbar off and on survive fresh controllers and agree with the settings checkbox',async t=>{
+test('the 译 button switches only translation, survives fresh controllers and agrees with the settings checkboxes',async t=>{
   const store=storeFixture(t),first=await store.open();
   first.emit(first.mainButton(),'click');await first.flush();
-  assert.equal(store.saved.subtitlesEnabled,false);assert.equal(first.session().isEnabled(),false);
-  assert.equal(first.settingsPanel().shadowRoot.querySelector('.subtitles-enabled').checked,false);first.manager.stop();
-  const second=await store.open();assert.equal(second.session().isEnabled(),false);assert.equal(second.mainButton().getAttribute('aria-pressed'),'false');
-  second.emit(second.mainButton(),'click');await second.flush();assert.equal(store.saved.subtitlesEnabled,true);assert.equal(second.session().isEnabled(),true);second.manager.stop();
-  const third=await store.open();assert.equal(third.session().isEnabled(),true);assert.deepEqual(store.writes,[{subtitlesEnabled:false},{subtitlesEnabled:true}]);
+  assert.equal(store.saved.subtitleTranslationEnabled,false);assert.equal(store.saved.subtitlesEnabled,true);
+  assert.equal(first.session().isEnabled(),true,'Kuai captions stay on without translation');assert.equal(first.mainButton().getAttribute('aria-pressed'),'false');
+  const shadow=first.settingsPanel().shadowRoot;
+  assert.equal(shadow.querySelector('.subtitle-translate').checked,false);assert.equal(shadow.querySelector('.subtitles-enabled').checked,true);
+  assert.equal(shadow.querySelector('.subtitle-provider').disabled,true,'translation choices rest while translation is off');first.manager.stop();
+  const second=await store.open();assert.equal(second.mainButton().getAttribute('aria-pressed'),'false');
+  second.emit(second.mainButton(),'click');await second.flush();assert.equal(store.saved.subtitleTranslationEnabled,true);second.manager.stop();
+  assert.deepEqual(store.writes,[{subtitleTranslationEnabled:false},{subtitleTranslationEnabled:true}]);
+  store.patch({subtitlesEnabled:false});const third=await store.open();assert.equal(third.session().isEnabled(),false);
+  third.emit(third.mainButton(),'click');await third.flush();
+  assert.deepEqual(store.writes.at(-1),{subtitlesEnabled:true,subtitleTranslationEnabled:true},'from captions off, 译 turns everything on');
+  assert.equal(third.session().isEnabled(),true);assert.equal(third.mainButton().getAttribute('aria-pressed'),'true');
+});
+test('with translation off, captions keep Kuai segmentation and style, request nothing, and the list stays as a transcript',async t=>{
+  const h=studyFixture({settings:{subtitleTranslationEnabled:false,subtitleListOpen:true}});t.after(()=>h.manager.stop());await h.load();
+  const host=h.captionHost().shadowRoot;
+  assert.equal(h.translations.length,0,'no translation service requests');
+  assert.equal(h.captionHost().hidden,false);assert.equal(host.querySelector('.original-text').textContent,'First');
+  assert.equal(host.querySelector('.translation-text').hidden,true);assert.equal(host.querySelector('.busy').hidden,true);
+  assert.equal(h.panel().hidden,false);const list=h.panel().shadowRoot;
+  assert.deepEqual(list.querySelectorAll('.original-text').map(node=>node.textContent),['First','Second','Third']);
+  assert.equal(list.querySelectorAll('.translation-text').every(node=>node.hidden),true);
+  assert.equal(list.querySelector('.views').hidden,true);assert.equal(list.querySelector('.cue-status').hidden,true);
+  h.manager.updateSettings({...h.config,subtitleTranslationEnabled:true});await h.flush();
+  assert.ok(h.translations.length>0,'turning translation back on translates again');
+  assert.equal(host.querySelector('.translation-text').textContent,'译:First');assert.equal(list.querySelector('.views').hidden,false);
 });
 test('remembered source language and same-language automatic kind restore on fresh controllers',async t=>{
   const store=storeFixture(t),h=await store.open();await metadata(h);await choose(h,'es:');
@@ -288,7 +309,7 @@ test('translation-only captions show the source until the translation arrives',t
 
 test('an English interface localizes the toolbar, captions, settings panel and runtime errors, and follows language changes',async t=>{
   const h=studyFixture({settings:{interfaceLanguage:'en'}});t.after(()=>h.manager.stop());await h.flush();
-  assert.equal(h.mainButton().title,'Turn Kuai Translate subtitles on or off');
+  assert.equal(h.mainButton().title,'Turn subtitle translation on or off (Kuai captions and the list stay)');
   assert.equal(h.settingsButton().getAttribute('aria-label'),'Subtitle settings');
   h.emit(h.settingsButton(),'click');const shadow=h.settingsPanel().shadowRoot;
   assert.equal(shadow.querySelector('h2').textContent,'Subtitle settings');
@@ -302,13 +323,13 @@ test('an English interface localizes the toolbar, captions, settings panel and r
   assert.equal(h.captionHost().shadowRoot.querySelector('.retry').textContent,'Retry');
   assert.match(h.document.querySelector('[data-kuai-subtitle-next]').title,/^Next subtitle · /);
   h.manager.updateSettings({...h.config,interfaceLanguage:'zh-CN'});await h.flush();
-  assert.equal(h.mainButton().title,'开启或关闭 Kuai translate 字幕翻译');
+  assert.equal(h.mainButton().title,'开启或关闭字幕翻译（关闭后仍保留 Kuai 字幕和列表）');
   assert.equal(shadow.querySelector('h2').textContent,'字幕设置');assert.equal(shadow.querySelector('.subtitle-mode').children[1].textContent,'只显示译文');
   assert.equal(h.captionHost().shadowRoot.querySelector('.retry').textContent,'重试');
 });
-test('navigation explains whether subtitle translation or video captions are off',async t=>{
+test('navigation explains whether Kuai captions or video captions are off',async t=>{
   const off=studyFixture({settings:{subtitlesEnabled:false}});t.after(()=>off.manager.stop());await off.flush();
-  assert.match(off.document.querySelector('[data-kuai-subtitle-next]').title,/请先开启字幕翻译/);
+  assert.match(off.document.querySelector('[data-kuai-subtitle-next]').title,/请先开启 Kuai 字幕/);
   const cc=studyFixture({cc:false});t.after(()=>cc.manager.stop());await cc.flush();
   assert.match(cc.document.querySelector('[data-kuai-subtitle-next]').title,/请开启视频字幕后继续/);
 });

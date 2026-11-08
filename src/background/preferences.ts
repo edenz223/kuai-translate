@@ -5,7 +5,7 @@ import { normalizeSubtitleStyle, SUBTITLE_STYLE_DEFAULTS } from '../shared/prese
 import { failure } from '../providers/errors.js';
 
 const plain=(value:unknown):value is PreferenceRecord=>value!==null && typeof value==='object' && !Array.isArray(value);
-const allowed=new Set(['subtitlesEnabled','subtitleProviderId','subtitleTargetLanguage','subtitleStyle','subtitleTrackPreference','subtitleListOpen','subtitleShortcuts']);
+const allowed=new Set(['subtitlesEnabled','subtitleTranslationEnabled','subtitleProviderId','subtitleTargetLanguage','subtitleStyle','subtitleTrackPreference','subtitleListOpen','subtitleShortcuts']);
 const invalid:()=>never=()=>{throw failure('INVALID_PREFERENCES','字幕偏好无效，请检查所选服务、语言或样式。');};
 
 /** A content page can change these public caption preferences, never provider credentials. */
@@ -15,6 +15,10 @@ export function applyPreferencePatch(current:Settings,patch:unknown):Settings {
   if (Object.hasOwn(patch,'subtitlesEnabled')) {
     if (typeof patch.subtitlesEnabled!=='boolean') invalid();
     next.subtitlesEnabled=patch.subtitlesEnabled;
+  }
+  if (Object.hasOwn(patch,'subtitleTranslationEnabled')) {
+    if (typeof patch.subtitleTranslationEnabled!=='boolean') invalid();
+    next.subtitleTranslationEnabled=patch.subtitleTranslationEnabled;
   }
   if (Object.hasOwn(patch,'subtitleListOpen')) {
     if (typeof patch.subtitleListOpen!=='boolean') invalid();

@@ -12,7 +12,7 @@ export interface TranslationOptions {
 export interface TranslationResult { translations: string[]; providerId: string }
 export type Translate = (texts: string[], options?: TranslationOptions) => Promise<TranslationResult>;
 export type PreferencePatch = Partial<Pick<Settings,
-  'subtitlesEnabled' | 'subtitleProviderId' | 'subtitleTargetLanguage' | 'subtitleTrackPreference' | 'subtitleListOpen' | 'subtitleShortcuts'>> &
+  'subtitlesEnabled' | 'subtitleTranslationEnabled' | 'subtitleProviderId' | 'subtitleTargetLanguage' | 'subtitleTrackPreference' | 'subtitleListOpen' | 'subtitleShortcuts'>> &
   {subtitleStyle?: Partial<Settings['subtitleStyle']>};
 export interface RequestPayloadMap {
   KUAI_GET_SETTINGS: {includeSecrets?: boolean};

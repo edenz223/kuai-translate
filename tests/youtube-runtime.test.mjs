@@ -312,3 +312,18 @@ test('subtitle shortcut schemes are normalized and accepted as player preference
   assert.throws(()=>applyPreferencePatch(defaultSettings(),{subtitleShortcuts:'vim'}));
   assert.equal(applyPreferencePatch(defaultSettings(),{subtitleStyle:{horizontalOffset:-10}}).subtitleStyle.horizontalOffset,-10);
 });
+
+test('a session with translation off shows source captions and keeps earlier translations for later',async t=>{
+  let calls=0;const {session,state}=fixture(async texts=>{calls++;return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.update();await settle();assert.equal(state.currentCaption.translation,'译:Hello');assert.equal(calls,1);
+  session.updateSettings({...defaultSettings(),subtitleTranslationEnabled:false});session.setCues([{start:0,end:3,text:'Hello'},{start:5,end:8,text:'Later'}]);session.update();await settle();
+  assert.equal(calls,1);assert.equal(state.currentCaption.original,'Hello');assert.equal(session.translateCues(state.subtitlesList),false);
+  session.updateSettings({...defaultSettings(),subtitleTranslationEnabled:true});await settle();assert.equal(calls,2);
+});
+test('the translation switch is a normalized, patchable player preference',async()=>{
+  const {normalizeSettings}=await import('../dist/src/shared/settings.js');
+  const {applyPreferencePatch}=await import('../dist/src/background/preferences.js');
+  assert.equal(defaultSettings().subtitleTranslationEnabled,true);assert.equal(normalizeSettings({subtitleTranslationEnabled:false}).subtitleTranslationEnabled,false);
+  assert.equal(applyPreferencePatch(defaultSettings(),{subtitleTranslationEnabled:false}).subtitleTranslationEnabled,false);
+  assert.throws(()=>applyPreferencePatch(defaultSettings(),{subtitleTranslationEnabled:'no'}));
+});
