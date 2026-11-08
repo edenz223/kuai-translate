@@ -11,13 +11,14 @@ import {subtitleStyle} from './presentation.js';
 import {subtitleWords,type SubtitleWords} from './i18n.js';
 
 // Language names are shown in their own language; only the follow choice is translated.
+const PANEL_WIDTH=340;
 const languages:[string,string][]=[['zh-Hans','简体中文'],['zh-Hant','繁體中文'],['en','English'],['ja','日本語'],['ko','한국어'],['fr','Français'],['de','Deutsch'],['es','Español'],['pt','Português'],['ru','Русский'],['ar','العربية']];
 
 /** Always-mounted preferences, independent of whether a caption or translation exists. */
 export function createSubtitlePreferences({env,player,id,trigger,onChange,onTrackChange,onOpenOptions,cancelSelection=()=>{},getLanguage=()=>env.navigator?.language,onLoop,isLooping=()=>false}:SubtitlePreferencesOptions) {
   const words=()=>subtitleWords(getLanguage()),doc=env.document,element=<K extends keyof HTMLElementTagNameMap>(tag:K,className?:string,text?:string):HTMLElementTagNameMap[K]=>{const node=doc.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
   const host=element('section');host.dataset.kuaiSubtitleSettings=id;host.dataset.kuaiCaptionUi='true';host.id='kuai-subtitle-settings-'+id;host.hidden=true;
-  host.style.cssText='position:absolute;right:12px;bottom:64px;width:min(340px,calc(100% - 24px));max-height:calc(100% - 80px);z-index:2600;pointer-events:auto;';
+  host.style.cssText='position:absolute;right:12px;bottom:64px;width:min('+PANEL_WIDTH+'px,calc(100% - 24px));max-height:calc(100% - 80px);z-index:2600;pointer-events:auto;';
   const shadow=host.attachShadow({mode:'open'}),style=element('style');
   style.textContent=':host{font:14px/1.5 system-ui,sans-serif;color:#f8fafc;text-align:left}:host([hidden]){display:none!important}*{box-sizing:border-box}.panel{max-height:60vh;overflow:auto;padding:14px;border:1px solid #ffffff38;border-radius:12px;background:#111827f5;box-shadow:0 8px 30px #0007}.header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}.header h2{font:600 15px system-ui;margin:0}.row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:11px 0}.row span{flex:0 0 auto}select,button,input{font:inherit}select{min-width:0;max-width:190px;padding:5px;border:1px solid #64748b;border-radius:5px;color:#f8fafc;background:#1e293b}input{accent-color:#60a5fa}button{padding:6px 9px;border:1px solid #64748b;border-radius:6px;color:#f8fafc;background:#1e293b;cursor:pointer}button:hover{background:#334155}button:focus-visible,select:focus-visible{outline:2px solid #93c5fd}.close-settings{font-size:20px;line-height:20px;padding:2px 7px}.settings-status{font-size:12px;color:#fbbf24;white-space:pre-wrap}.settings-status:empty{display:none}.all-subtitle-settings{width:100%;margin-top:8px}';
   const panel=element('div','panel'),header=element('div','header'),title=element('h2'),close=element('button','close-settings','×');close.type='button';header.append(title,close);panel.append(header);
@@ -81,10 +82,13 @@ export function createSubtitlePreferences({env,player,id,trigger,onChange,onTrac
     void perform(()=>{if(!onTrackChange)throw new Error(words().trackUnavailable);return onTrackChange(selected);},'track');
   });
   loop.addEventListener('change',()=>{const on=loop.checked;Promise.resolve(onLoop?.(on)).finally(()=>{if(!destroyed)loop.checked=isLooping();});});
-  // Stay clear of a subtitle list drawer open on the right of the same player.
+  // Sit just left of an open subtitle list drawer, near the toolbar button; only a
+  // player too narrow for both moves the panel to its left edge.
   function place(){
-    const drawer=Array.from(player.querySelectorAll<HTMLElement>('section')).some(node=>node.dataset.placement==='drawer'&&!node.hidden&&node!==host);
-    host.style.right=drawer?'auto':'12px';host.style.left=drawer?'12px':'auto';
+    const drawer=Array.from(player.querySelectorAll<HTMLElement>('section')).find(node=>node.dataset.placement==='drawer'&&!node.hidden&&node!==host);
+    const width=drawer?.getBoundingClientRect().width||0,fits=player.getBoundingClientRect().width-width-36>=PANEL_WIDTH;
+    const right=!drawer?12:fits?Math.round(width)+24:null;
+    host.style.right=right===null?'auto':right+'px';host.style.left=right===null?'12px':'auto';
   }
   function toggle(force?:boolean){if(destroyed)return false;const open=force??host.hidden;if(open){cancelSelection(id,'settings-open');place();loop.checked=isLooping();}host.hidden=!open;trigger.setAttribute('aria-expanded',String(open));return open;}
   // A press anywhere outside the panel and its toolbar button closes it.

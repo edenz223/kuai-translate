@@ -346,12 +346,15 @@ test('the settings panel saves the shortcut scheme, toggles the sentence loop an
   h.emit(shadow.querySelector('.subtitle-mode'),'pointerdown');assert.equal(panel.hidden,false,'presses inside keep it open');
   h.emit(h.video,'pointerdown');assert.equal(panel.hidden,true);
 });
-test('the settings panel moves left of an open subtitle list drawer',async t=>{
+test('the settings panel sits just left of an open subtitle list drawer',async t=>{
   const h=studyFixture();t.after(()=>h.manager.stop());await h.flush();
-  const drawer=h.document.createElement('section');drawer.dataset.placement='drawer';h.player.append(drawer);
+  const drawer=h.document.createElement('section');drawer.dataset.placement='drawer';drawer._rect={left:578,top:112,right:948,bottom:576,width:370,height:464};h.player.append(drawer);
+  const reopen=()=>{h.emit(h.settingsButton(),'click');h.emit(h.settingsButton(),'click');};
   h.emit(h.settingsButton(),'click');const panel=h.settingsPanel();
-  assert.equal(panel.style.left,'12px');assert.equal(panel.style.right,'auto');
-  drawer.hidden=true;h.emit(h.settingsButton(),'click');h.emit(h.settingsButton(),'click');assert.equal(panel.style.right,'12px');
+  assert.equal(panel.style.right,'394px');assert.equal(panel.style.left,'auto');
+  h.player._rect={left:0,top:100,right:600,bottom:640,width:600,height:540};reopen();
+  assert.equal(panel.style.left,'12px','a player too narrow for both uses its left edge');assert.equal(panel.style.right,'auto');
+  drawer.hidden=true;reopen();assert.equal(panel.style.right,'12px');assert.equal(panel.style.left,'auto');
 });
 test('a narrow player keeps only the main toolbar buttons and a pending caption shows a quiet indicator',t=>{
   const {view,player,session}=setup();t.after(()=>view.destroy());
