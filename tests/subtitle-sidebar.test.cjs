@@ -12,11 +12,11 @@ test('the control opens a bilingual list beside YouTube without requesting capti
   const f = fixture({ translated: false });
   await f.flush();
   assert.equal(f.requests.length, 0);
-  assert.equal(f.toggleButton().getAttribute('aria-expanded'), 'false');assert.equal(f.toggleButton().style.opacity,'.55');assert.equal(f.toggleButton().style.background,'transparent');
+  assert.equal(f.toggleButton().getAttribute('aria-expanded'), 'false');assert.equal(f.toggleButton().querySelector('[data-kuai-active-mark]').style.display,'none');assert.equal(f.toggleButton().querySelector('svg').getAttribute('data-icon'),'list');assert.equal(f.toggleButton().style.background,'transparent');
   assert.ok(!f.panel() || f.panel().hidden);
   f.emit(f.toggleButton(), 'click');
   await f.flush();
-  assert.equal(f.toggleButton().getAttribute('aria-expanded'), 'true');assert.equal(f.toggleButton().style.opacity,'1');assert.equal(f.toggleButton().style.background,'transparent');
+  assert.equal(f.toggleButton().getAttribute('aria-expanded'), 'true');assert.equal(f.toggleButton().querySelector('[data-kuai-active-mark]').style.display,'block');assert.equal(f.toggleButton().style.background,'transparent');
   assert.equal(f.panel().parentElement, f.right);
   assert.equal(f.panel().shadowRoot.querySelector('.timestamp').textContent, '0:00');
   assert.equal(f.panel().shadowRoot.querySelector('.original-text').textContent, 'Original 1');

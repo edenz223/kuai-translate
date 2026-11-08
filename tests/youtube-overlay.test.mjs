@@ -412,3 +412,14 @@ test('an offset saved in a taller fullscreen player keeps the caption inside a s
   view.render({subtitleStyle:{offset:1010}});assert.equal(view.host.style.bottom,'470px','540px player minus the 70px caption');
   player._rect.height=1080;player._rect.bottom=1080;view.render({subtitleStyle:{offset:1010}});assert.equal(view.host.style.bottom,'1010px');
 });
+test('toolbar buttons use player-style icons, the Kuai logo for settings and a red mark for active translation',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.load();
+  const icon=node=>[...node.children].filter(child=>child.tagName==='SVG'&&child.style.display!=='none').map(child=>child.getAttribute('data-icon'));
+  const previous=h.document.querySelector('[data-kuai-subtitle-previous]'),mark=h.mainButton().querySelector('[data-kuai-active-mark]');
+  assert.deepEqual(icon(h.mainButton()),['translate']);assert.deepEqual(icon(h.settingsButton()),['kuai']);
+  assert.deepEqual(icon(h.document.querySelector('[data-kuai-subtitle-next]')),['next']);assert.deepEqual(icon(previous),['previous']);
+  assert.equal(h.mainButton().textContent.includes('⚙'),false);assert.equal(mark.style.display,'block');
+  h.video.currentTime=2;h.manager.sync();await h.flush();assert.deepEqual(icon(previous),['replay'],'previous shows replay while it would restart the sentence');
+  h.ccButton.setAttribute('aria-pressed','false');h.manager.sync();await h.flush();
+  assert.equal(h.mainButton().getAttribute('aria-pressed'),'false');assert.equal(mark.style.display,'none');
+});

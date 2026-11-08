@@ -4,7 +4,7 @@ interface SidebarEntry {
  session:SubtitleSession;video:HTMLVideoElement;open:boolean;follow:boolean;forceFollow:boolean;programmaticTop:number|null;
  rows:Map<number,SidebarRow>;cues:CaptionCue[];offsets:number[];heights:number[];failedRequests:WeakSet<CaptionCue>;start:number;end:number;active:number;
  source?:CaptionCue[];sourceLength?:number;version?:number;seekError?:boolean;dispose?:()=>void;observer?:MutationObserver;resizeObserver?:ResizeObserver;
- toggleHost?:HTMLElement|null;anchor?:HTMLElement|null;toggleButton?:HTMLButtonElement;
+ toggleHost?:HTMLElement|null;anchor?:HTMLElement|null;toggleButton?:HTMLButtonElement;toggleMark?:HTMLElement;
  panel:HTMLElement;title:HTMLElement;closeButton:HTMLButtonElement;count:HTMLElement;followButton:HTMLButtonElement;followState:HTMLElement;status:HTMLElement;retryButton:HTMLButtonElement;search:HTMLInputElement;viewButtons:Map<SidebarView,HTMLButtonElement>;list:HTMLElement;rowsHost:HTMLElement;topSpacer:HTMLElement;bottomSpacer:HTMLElement;
 }
 type SidebarView='both'|'original'|'translation';
@@ -13,6 +13,7 @@ interface SidebarTranslationJob {entry:SidebarEntry;source:CaptionCue[]|undefine
 import {applySubtitleMask} from './presentation.js';
 import {subtitleWords,type SubtitleWords} from './i18n.js';
 import {timelineStatus} from './status.js';
+import {createToolbarIcon,createActiveMark,setActiveMark} from './icons.js';
 const root = globalThis;
 "use strict";
 
@@ -165,8 +166,9 @@ function createController(bridge:SubtitleBridge, env = root) {
     host.dataset.noCaptionDrag = "true";
     host.style.cssText = "display:inline-flex;vertical-align:middle;align-items:center;height:100%;float:left;color:inherit;visibility:inherit;";
     const shadow = host.attachShadow({ mode: "open" }), style = element("style");
-    style.textContent = ":host{color:inherit}button{box-sizing:border-box;width:36px;height:100%;min-height:28px;padding:5px;border:0;background:transparent;color:inherit;font:24px/1 sans-serif;cursor:pointer;opacity:.85}button:hover{opacity:1}button:focus-visible{outline:2px solid #7eb6ff;outline-offset:-3px}";
-    const button = element("button", "subtitle-list-toggle", "☷");
+    style.textContent = ":host{color:inherit}button{position:relative;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:40px;height:100%;min-height:28px;padding:0;border:0;background:transparent;color:inherit;cursor:pointer;opacity:.9}button:hover{opacity:1}button:focus-visible{outline:2px solid #7eb6ff;outline-offset:-3px}";
+    const button = element("button", "subtitle-list-toggle"), mark = createActiveMark(doc);
+    button.append(createToolbarIcon(doc, "list"), mark);
     button.type = "button";
     button.setAttribute("aria-controls", "kuai-subtitle-sidebar-" + entry.session.id);
     button.addEventListener("click", event => {
@@ -175,7 +177,7 @@ function createController(bridge:SubtitleBridge, env = root) {
     for (const type of ["pointerdown", "mousedown", "dblclick"]) host.addEventListener(type, event => event.stopPropagation());
     shadow.append(style, button);
     anchor.parentNode!.insertBefore(host, anchor);
-    entry.toggleHost = host; entry.toggleButton = button;
+    entry.toggleHost = host; entry.toggleButton = button; entry.toggleMark = mark;
   }
 
   function stopFollowing(entry:SidebarEntry) {
@@ -434,7 +436,9 @@ function createController(bridge:SubtitleBridge, env = root) {
       entry.toggleButton.title = text.listTitle;
       entry.toggleButton.setAttribute("aria-label", text.listTitle);
       entry.toggleButton.setAttribute("aria-expanded", String(entry.open));
-      entry.toggleButton.style.opacity=entry.open?"1":".55";entry.toggleButton.style.background="transparent";entry.toggleButton.style.color="#fff";
+      // Like the video toggle: a red underline marks the open list.
+      if (entry.toggleMark) setActiveMark(entry.toggleMark, entry.open);
+      entry.toggleButton.style.background="transparent";entry.toggleButton.style.color="#fff";
     }
     if (!entry.open) { if (entry.panel) entry.panel.hidden = true; return; }
     // Moving even a shadow host can invalidate the browser's live selection.

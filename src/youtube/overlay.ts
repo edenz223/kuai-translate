@@ -13,6 +13,7 @@ import {subtitleStyle,subtitleLayoutKey,applySubtitleMask} from './presentation.
 import {navigationState} from './navigation.js';
 import {createSubtitlePreferences} from './preferences.js';
 import {subtitleWords,shortcutLabel} from './i18n.js';
+import {createToolbarIcon,createActiveMark,setActiveMark,type ToolbarIcon} from './icons.js';
 // Below this player width the toolbar keeps only its main buttons; shortcuts still work.
 const COMPACT_WIDTH=560;
 
@@ -31,9 +32,15 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   originalLine.append(original);translationLine.append(translation);lines.append(originalLine,translationLine);box.append(lines,busy,status,retry);shadow.append(style,box);player.append(host);
 
   const toolbar=element('span');toolbar.dataset.kuaiCaptionUi='true';toolbar.setAttribute('role','group');toolbar.setAttribute('aria-label',words().toolbar);
-  function control(text:string,title:string){const node=element('button','ytp-button',text);node.type='button';node.title=title;node.setAttribute('aria-label',title);node.style.cssText='display:inline-flex!important;align-items:center;justify-content:center;flex:0 0 34px;width:34px;height:100%;color:inherit;background:transparent;border:0;padding:0;font:700 17px system-ui;cursor:pointer;';toolbar.append(node);return node;}
-  const button=control('译',words().toggle);button.id='kuai-subtitle-button-'+session.id;
-  const previous=control('‹',words().previous+' · Ctrl+Alt+←'),next=control('›',words().next+' · Ctrl+Alt+→'),settingsButton=control('⚙',words().settings);
+  function control(icon:ToolbarIcon,title:string){
+    const node=element('button','ytp-button');node.type='button';node.title=title;node.setAttribute('aria-label',title);
+    node.style.cssText='position:relative;display:inline-flex!important;align-items:center;justify-content:center;flex:0 0 40px;width:40px;height:100%;color:inherit;background:transparent;border:0;padding:0;cursor:pointer;';
+    node.append(createToolbarIcon(doc,icon));toolbar.append(node);return node;
+  }
+  const button=control('translate',words().toggle),activeMark=createActiveMark(doc);button.id='kuai-subtitle-button-'+session.id;button.append(activeMark);
+  const previous=control('previous',words().previous+' · Ctrl+Alt+←'),next=control('next',words().next+' · Ctrl+Alt+→'),settingsButton=control('kuai',words().settings);
+  // "Previous" shows a replay arrow while it would restart the current sentence.
+  const previousIcon=previous.firstChild as SVGSVGElement,replayIcon=createToolbarIcon(doc,'replay');replayIcon.style.setProperty('display','none','important');previous.append(replayIcon);
   previous.dataset.kuaiSubtitlePrevious=session.id;next.dataset.kuaiSubtitleNext=session.id;settingsButton.dataset.kuaiSubtitleSettingsToggle=session.id;
   const preferences=createSubtitlePreferences({env,player,id:session.id,trigger:settingsButton,onChange:onPreferences,onTrackChange,onOpenOptions,cancelSelection,getLanguage,
     onLoop:enabled=>perform(onLoop,enabled),isLooping:()=>!!session.state.loopingCaption});
@@ -164,9 +171,10 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     mount();preferences.render(settings);
     const text=words(),label=(node:HTMLElement,value:string)=>{if(node.title!==value){node.title=value;node.setAttribute('aria-label',value);}};
     toolbar.setAttribute('aria-label',text.toolbar);label(button,text.toggle);label(settingsButton,text.settings);if(retry.textContent!==text.retry)retry.textContent=text.retry;
-    const pressed=String(session.isEnabled());if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);button.style.opacity=session.isEnabled()?'1':'.55';
+    const pressed=String(session.isEnabled());if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);setActiveMark(activeMark,session.isEnabled());
     const navigation=navigationState(session,{words:text,subtitlesEnabled:settings.subtitlesEnabled!==false});
     const compact=(player.getBoundingClientRect().width||1200)<COMPACT_WIDTH;
+    previousIcon.style.setProperty('display',navigation.replay?'none':'block','important');replayIcon.style.setProperty('display',navigation.replay?'block':'none','important');
     for(const [node,target,name,action]of [[previous,navigation.previous,navigation.replay?text.replay:text.previous,'previous'],[next,navigation.next,text.next,'next']] as const){
       node.disabled=target===null;node.style.opacity=node.disabled?'.4':'1';node.hidden=compact;node.style.setProperty('display',compact?'none':'inline-flex','important');
       const hint=navigation.reason||(target===null?text.boundary:shortcutLabel(settings.subtitleShortcuts,action));label(node,name+(hint?' · '+hint:''));
