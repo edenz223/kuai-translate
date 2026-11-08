@@ -264,3 +264,23 @@ test('existing quick preferences survive fresh controller construction together'
   assert.equal(controls.querySelector('.subtitle-provider').value,'google');assert.equal(controls.querySelector('.subtitle-target').value,'ja');
   assert.equal(controls.querySelector('.subtitle-mode').value,'translation_only');assert.equal(controls.querySelector('.subtitle-order').value,'translation_on_top');assert.equal(controls.querySelector('.subtitle-mask').checked,true);
 });
+
+test('a caption change during a drag keeps the gesture and refreshes text after release',t=>{
+  const {h,view,box,session,patches}=setup();t.after(()=>view.destroy());view.render({});
+  h.emit(box,'pointerdown',{pointerId:3,clientY:200});h.emit(h.env,'pointermove',{pointerId:3,clientY:160});
+  session.state.currentCaption={original:'Next line',translation:'下一句',status:'success'};view.render({});
+  session.state.currentCaption=null;view.render({});
+  assert.equal(view.host.hidden,false,'the dragged box stays under the pointer between captions');
+  assert.equal(view.getRoots()[0].textContent,'Hello');
+  h.emit(h.env,'pointermove',{pointerId:3,clientY:150});assert.equal(view.host.style.bottom,'120px');
+  h.emit(h.env,'pointerup',{pointerId:3,clientY:150});
+  assert.deepEqual(patches,[{subtitleStyle:{offset:120}}]);assert.equal(view.host.hidden,true);
+});
+test('translation-only captions show the source until the translation arrives',t=>{
+  const {view,session,native}=setup();t.after(()=>view.destroy());const settings={subtitleStyle:{displayMode:'translation_only'}};
+  const original=view.host.shadowRoot.querySelector('.original-text');
+  session.state.currentCaption={original:'Hello',translation:'',status:'translating'};view.render(settings);
+  assert.equal(original.hidden,false);assert.equal(original.textContent,'Hello');assert.equal(native.style.visibility,'hidden');
+  session.state.currentCaption={original:'Hello',translation:'你好',status:'success'};view.render(settings);
+  assert.equal(original.hidden,true);
+});

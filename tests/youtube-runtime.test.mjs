@@ -213,3 +213,60 @@ test('a separate subtitle target survives unrelated page-language and presentati
   assert.equal(requests.length,1);assert.equal(requests[0].signal.aborted,false);assert.equal(state.translateVersion,version);
   assert.ok(state.subtitlesList===cues);assert.equal(state.currentCaption.translation,'日本語');
 });
+
+test('overlapping cues are shown and translated together',async t=>{
+  const {session,state,video}=fixture();t.after(()=>session.destroy());
+  session.setCues([{start:0,end:10,text:'Lyrics line'},{start:2,end:5,text:'Speaker line'}]);video.currentTime=3;session.update();await settle();
+  assert.equal(state.currentCaption.original,'Lyrics line\nSpeaker line');
+  assert.equal(state.currentCaption.translation,'译:Lyrics line\n译:Speaker line');
+  video.currentTime=6;session.update();assert.equal(state.currentCaption.original,'Lyrics line');
+});
+
+function liveSession(translate){
+  const video=new EventTarget();Object.assign(video,{isConnected:true,currentTime:1,duration:Infinity,paused:true,ended:false,seekable:{length:0},closest:()=>null});
+  const session=sessionApi.createSubtitleSession({id:'live',video,settings:defaultSettings(),translate});
+  const live=text=>{session.setCues([{start:0,end:7,text}],{live:true});session.update();};
+  return{session,state:session.state,live};
+}
+test('rolling live DOM captions translate after the text settles instead of once per change',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  const calls=[],{session,state,live}=liveSession(async texts=>{calls.push(texts);return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  live('We');await settle();t.mock.timers.tick(200);live('We are');await settle();t.mock.timers.tick(200);live('We are live');await settle();
+  assert.equal(calls.length,0,'words that are still arriving must not each become a request');
+  t.mock.timers.tick(700);await settle();
+  assert.deepEqual(calls,[['We are live']]);assert.equal(state.currentCaption.translation,'译:We are live');
+  live('We are live today');await settle();
+  assert.equal(state.currentCaption.translation,'译:We are live','the previous translation stays while the continued line waits');assert.equal(calls.length,1);
+  for(let index=1;index<=20;index++){t.mock.timers.tick(200);live('We are live today'+' and more'.repeat(index));await settle();}
+  assert.equal(calls.length,2,'continuous speech is still translated once per maximum wait');
+});
+test('a rolling live line keeps its in-flight translation and shows it on the continued text',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  const signals=[],resolvers=[];
+  const {session,state,live}=liveSession((texts,{signal})=>{signals.push(signal);return new Promise(done=>resolvers.push(()=>done({translations:texts.map(text=>'译:'+text)})));});t.after(()=>session.destroy());
+  live('Hello there');t.mock.timers.tick(700);await settle();assert.equal(signals.length,1);
+  live('Hello there friends');await settle();assert.equal(signals[0].aborted,false);
+  resolvers[0]();await settle();
+  assert.equal(state.currentCaption.original,'Hello there friends');assert.equal(state.currentCaption.translation,'译:Hello there');
+  t.mock.timers.tick(700);await settle();assert.equal(signals.length,2);
+  resolvers[1]();await settle();assert.equal(state.currentCaption.translation,'译:Hello there friends');
+});
+
+test('a caption captured before track metadata is kept when that metadata names the same track',async t=>{
+  const h=setup();t.after(()=>h.manager.stop());
+  h.message({kind:'captions',videoId:'abcdef12345',languageCode:'en',trackUrl:track('en').baseUrl+'&pot=token',body:fragmented});await settle();
+  const state=h.bridge.getSessions()[0].state,timeline=state.subtitlesList;
+  assert.equal(state.currentCaption.translation,'译:We are learning.');
+  tracks(h,'en');await settle();
+  assert.equal(requests(h).length,0,'the captured timeline must not be cleared and refetched');
+  assert.strictEqual(state.subtitlesList,timeline);assert.equal(state.currentCaption.translation,'译:We are learning.');
+  tracks(h,'es');assert.equal(requests(h).length,1,'a different track still replaces the captured one');
+});
+test('a requested track that comes back empty is reported to the list and can be retried there',async t=>{
+  const h=setup();t.after(()=>h.manager.stop());tracks(h,'en');const first=requests(h).at(-1),session=h.bridge.getSessions()[0];
+  h.message({kind:'captions',videoId:'abcdef12345',requestId:first.requestId,body:''});await settle();
+  assert.equal(session.state.timelineFailed,true);assert.equal(session.state.errorMessage,'','the video overlay stays quiet');
+  h.bridge.retryTimeline(session.id);const second=requests(h).at(-1);
+  assert.notEqual(second.requestId,first.requestId);assert.equal(session.state.timelineFailed,false);
+  caption(h,second.requestId,'Recovered');await settle();assert.equal(session.state.currentCaption.original,'Recovered');assert.equal(session.state.timelineFailed,false);
+});
