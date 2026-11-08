@@ -95,6 +95,41 @@ test('the settings page shows only the controls that apply to each selected trig
   await h.edit('input-option-enabled',false);assert.equal(h.node('input-options-panel').hidden,true);
 });
 
+test('the settings page shows one section per address and marks disabled features and unsaved drafts in the sidebar',async t=>{
+  const h=options(t),listeners={};
+  h.document.defaultView={location:{hash:'#hover'},addEventListener(type,listener){listeners[type]=listener;},scrollTo(){}};
+  await h.start();
+  assert.equal(h.node('hover').hidden,false);assert.equal(h.node('webpage').hidden,true);
+  assert.equal(h.node('nav-hover')['aria-current'],'page');assert.equal(h.node('nav-webpage')['aria-current'],undefined);
+  h.document.defaultView.location.hash='#providers';listeners.hashchange();
+  assert.equal(h.node('providers').hidden,false);assert.equal(h.node('hover').hidden,true);
+  h.document.defaultView.location.hash='#missing';listeners.hashchange();
+  assert.equal(h.node('webpage').hidden,false,'an unknown address opens the first section');
+  assert.equal(h.node('nav-selection').classList.contains('off'),true);assert.equal(h.node('nav-hover').classList.contains('off'),false);
+  assert.equal(h.node('subtitle-options-panel').hidden,false);
+  await h.edit('subtitles-enabled',false);
+  assert.equal(h.node('subtitle-options-panel').hidden,true);assert.equal(h.node('nav-subtitles').classList.contains('off'),true);
+  await h.edit('input-option-shortcut','Ctrl+','input');
+  assert.equal(h.node('nav-input').classList.contains('invalid'),true,'a draft left on another section stays findable');
+  assert.equal(h.node('nav-webpage').classList.contains('invalid'),false);
+  await h.edit('input-option-shortcut','Alt+K','input');
+  assert.equal(h.node('nav-input').classList.contains('invalid'),false);
+});
+
+test('language pairs swap the languages each feature resolves to and stay disabled for automatic detection',async t=>{
+  const h=options(t);await h.start();
+  assert.equal(h.node('page-swap-languages').disabled,true);assert.equal(h.node('page-swap-help').hidden,false);
+  assert.equal(h.node('selection-swap-languages').disabled,true,'selection follows the automatic page source');
+  await h.edit('source-language','en');
+  assert.equal(h.node('page-swap-languages').disabled,false);assert.equal(h.node('page-swap-help').hidden,true);
+  await h.node('page-swap-languages').fire('click');await setImmediate();
+  assert.equal(h.stored.sourceLanguage,'zh-Hans');assert.equal(h.stored.targetLanguage,'en');
+  assert.equal(h.node('selection-option-targetLanguage').children[0].textContent,'跟随网页（English）');
+  await h.node('selection-swap-languages').fire('click');await setImmediate();
+  assert.equal(h.stored.selectionOptions.sourceLanguage,'en');assert.equal(h.stored.selectionOptions.targetLanguage,'zh-Hans');
+  assert.equal(h.stored.sourceLanguage,'zh-Hans','swapping a feature leaves the page languages alone');
+});
+
 test('invalid or same-context conflicting shortcuts stay visible and never overwrite a saved shortcut',async t=>{
   const h=options(t,settings=>{settings.inputOptions.restoreShortcut='Control+Shift+Z';});await h.start();
   await h.edit('page-option-shortcut','Alt+P','input');

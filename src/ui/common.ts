@@ -96,7 +96,7 @@ export function fillSelect(document: Document, select: SelectControl, entries: S
 export function fillProviders(document: Document, select: SelectControl, settings: Settings, selected: string, follow = false): void {
   const entries = settings.providers.filter(provider=>provider.enabled).map((provider): SelectEntry=>[provider.id,provider.name || TYPE_NAMES[provider.type] || provider.type]);
   const current = entries.find(([id])=>id===settings.activeProviderId)?.[1];
-  fillSelect(document,select,follow ? [['follow_page',current ? `跟随网页翻译（当前：${current}）` : '跟随网页翻译'],...entries] : entries,selected);
+  fillSelect(document,select,follow ? [['follow_page',current ? `跟随网页（${current}）` : '跟随网页'],...entries] : entries,selected);
 }
 export function downloadText(document: Document, fileName: string, text: string, type = 'text/plain;charset=utf-8') {
   const url = URL.createObjectURL(new Blob([text],{type})), anchor = document.createElement('a');
