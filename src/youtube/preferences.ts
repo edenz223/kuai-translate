@@ -95,6 +95,8 @@ export function createSubtitlePreferences({env,player,id,trigger,onChange,onTrac
   host.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();toggle(false);trigger.focus?.();}event.stopPropagation();});
   for(const type of ['pointerdown','mousedown'])host.addEventListener(type,event=>{if((event as MouseEvent).button===0)cancelSelection(id,'settings-intent');event.stopPropagation();});
   for(const type of ['click','dblclick','change'])host.addEventListener(type,event=>event.stopPropagation());
+  // Wheel inside the panel must not scroll YouTube's fullscreen recommendation grid.
+  for(const type of ['wheel','touchmove'])host.addEventListener(type,event=>event.stopPropagation(),{passive:true});
   applyLabels(words());renderTracks();
   return{host,render,toggle,error,setTracks,mount(){if(!destroyed&&host.parentNode!==player)player.append(host);},destroy(){destroyed=true;doc.removeEventListener('pointerdown',outside,true);host.remove();}};
 }

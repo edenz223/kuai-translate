@@ -362,3 +362,16 @@ test('a narrow player keeps only the main toolbar buttons and a pending caption 
   session.state.currentCaption.translation='你好';player._rect.width=960;view.render({});
   assert.equal(previous.hidden,false);assert.equal(shadow.querySelector('.busy').hidden,true);
 });
+test('next and previous keep a sentence loop on the sentence they move to',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.load();
+  h.emit(h.document,'keydown',{key:'ArrowUp',ctrlKey:true,altKey:true});await h.flush();
+  assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});
+  h.emit(h.document.querySelector('[data-kuai-subtitle-next]'),'click');await h.flush();
+  assert.equal(h.video.currentTime,5);assert.deepEqual(h.session().state.loopingCaption,{start:5,end:8});
+  h.video.currentTime=7.99;h.manager.sync();await h.flush();assert.equal(h.video.currentTime,5);
+  const previous=h.document.querySelector('[data-kuai-subtitle-previous]');
+  h.video.currentTime=6.5;h.manager.sync();await h.flush();h.emit(previous,'click');await h.flush();
+  assert.equal(h.video.currentTime,5,'previous replays the looped sentence after it has played');assert.deepEqual(h.session().state.loopingCaption,{start:5,end:8});
+  h.emit(previous,'click');await h.flush();
+  assert.equal(h.video.currentTime,0);assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});
+});

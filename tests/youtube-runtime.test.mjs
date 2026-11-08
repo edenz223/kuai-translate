@@ -291,11 +291,15 @@ test('session translation errors follow the interface language',async t=>{
   assert.equal(session.state.currentCaption.errorMessage,'The translation came back empty or incomplete. Please retry.');
 });
 
-test('a sentence loop restarts its cue at the end and ends when playback leaves it',async t=>{
-  const {session,state,video}=fixture();t.after(()=>session.destroy());session.update();
+test('a sentence loop restarts its cue at the end, follows seeks to another sentence and ends in a gap',async t=>{
+  const {session,state,video}=fixture();t.after(()=>session.destroy());session.start();
   assert.equal(session.setLoop(true),true);assert.deepEqual(state.loopingCaption,{start:0,end:3});
   video.currentTime=2.98;session.update();assert.equal(video.currentTime,0);
-  video.currentTime=10.5;session.update();assert.equal(state.loopingCaption,null,'a seek elsewhere ends the loop');
+  assert.equal(session.seek(10),true);assert.equal(video.currentTime,10,'next sentence is not pulled back into the old loop');
+  assert.deepEqual(state.loopingCaption,{start:10,end:14});
+  video.currentTime=13.98;session.update();assert.equal(video.currentTime,10);
+  video.currentTime=1;video.dispatchEvent(new Event('seeking'));assert.deepEqual(state.loopingCaption,{start:0,end:3},'a native progress-bar seek also moves the loop');
+  video.currentTime=6;video.dispatchEvent(new Event('seeking'));assert.equal(state.loopingCaption,null,'a seek into a gap ends the loop');
   video.currentTime=20;session.update();assert.equal(session.setLoop(true),false,'nothing to loop between captions');
 });
 test('subtitle shortcut schemes are normalized and accepted as player preferences',async()=>{

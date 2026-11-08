@@ -260,6 +260,9 @@ function createController(bridge:SubtitleBridge, env = root) {
       });
       // Preserve selection defaults and mouseup propagation to selection translation.
       for (const type of ["pointerdown", "mousedown", "click", "dblclick"]) host.addEventListener(type, event => event.stopPropagation());
+      // In fullscreen, YouTube's player scrolls its recommendation grid on any wheel
+      // that reaches it; its own menus stop wheel propagation the same way.
+      for (const type of ["wheel", "touchmove"]) host.addEventListener(type, event => event.stopPropagation(), { passive: true });
       panel.append(header, tools, filters, status, retry, list); shadow.append(style, panel);
       Object.assign(entry, { panel: host, title, closeButton: close, count, followButton: follow, followState, status, retryButton: retry, search, viewButtons, list, rowsHost: rows, topSpacer: top, bottomSpacer: bottom });
       if (env.ResizeObserver) {

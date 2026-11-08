@@ -290,3 +290,16 @@ test('the list view shows both languages, only the source, or only translations 
   assert.equal(rows()[0].querySelector('.translation-text').hidden, false);
   f.controller.stop();
 });
+
+test('wheel and touch scrolling in the list never reach the player or its fullscreen grid', async () => {
+  const f = fixture({ count: 30 });
+  f.document.fullscreenElement = f.player;
+  f.controller.toggle(f.session.id, true); await f.flush();
+  assert.equal(f.panel().parentElement, f.player); assert.equal(f.panel().dataset.placement, 'drawer');
+  let reached = 0; f.player.addEventListener('wheel', () => reached++); f.player.addEventListener('touchmove', () => reached++);
+  const list = f.panel().shadowRoot.querySelector('.subtitle-list');
+  f.emit(list, 'wheel', { deltaY: 120 }); f.emit(list, 'touchmove');
+  f.emit(f.panel().shadowRoot.querySelector('.panel-title'), 'wheel', { deltaY: 120 });
+  assert.equal(reached, 0);
+  f.controller.stop();
+});
