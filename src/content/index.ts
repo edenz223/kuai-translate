@@ -153,7 +153,7 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
     phase='initializing';
     startPromise=(async()=>{
       env.chrome.runtime.onMessage.addListener(messageListener);
-      disposers.push(()=>env.chrome.runtime.onMessage.removeListener(messageListener));
+      disposers.push(()=>env.chrome?.runtime?.onMessage?.removeListener(messageListener));
       listen(env,'pagehide',pagehide);
       await ready();if(stopped)return api;
       settings=await client.getSettings(false);if(stopped)return api;

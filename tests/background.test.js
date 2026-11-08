@@ -4,7 +4,7 @@ import {createBackground} from '../dist/src/background/controller.js';
 import {defaultSettings,SETTINGS_KEY} from '../dist/src/shared/settings.js';
 import {createSettingsEditor} from '../dist/src/ui/state.js';
 import {setImmediate as immediate} from 'node:timers/promises';
-import {request,translate} from '../dist/src/shared/client.js';
+import {request,translate,onSettingsChanged} from '../dist/src/shared/client.js';
 
 const extensionId='kuai-extension';
 const page={id:extensionId,url:'https://example.com/article',tab:{id:4},frameId:0,documentId:'document-a'};
@@ -271,4 +271,11 @@ test('local cancellation settles even when the worker translation response never
     assert.equal(result,'AbortError');
     assert.equal(messages.find(message=>message.type==='KUAI_CANCEL').requestId,'test-cancel');
   }finally{globalThis.chrome=old;}
+});
+test('settings unsubscribe does not throw after the extension context is invalidated',()=>{
+  const listeners=new Set(),chromeApi={runtime:{onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)}}};
+  const unsubscribe=onSettingsChanged(()=>{},chromeApi);
+  assert.equal(listeners.size,1);
+  delete chromeApi.runtime;
+  assert.doesNotThrow(unsubscribe);
 });
