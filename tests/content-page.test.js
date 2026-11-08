@@ -19,6 +19,12 @@ test('bilingual output preserves original inline nodes/listeners and restore rem
  const siteAddition=h.doc.createElement('em');siteAddition.textContent=' updated';p.append(siteAddition);controller.restore();assert.equal(output(p),null);assert.strictEqual(p.children[1],siteAddition);assert.equal(p.textContent,'Hello world updated');
 });
 
+test('translated rows share one page stylesheet that is removed with the last row', async()=>{
+ const h=fixture(),first=h.paragraph('First'),second=h.paragraph('Second');const controller=createPageTranslator(h.dependencies);await controller.translatePage();
+ assert.ok(output(first)&&output(second));assert.equal(h.doc.querySelectorAll('[data-kuai-page-style]').length,1);assert.match(sheet(h),/kuai-translator\[data-state=success\]>\.kuai-translator-inner\{/);
+ controller.restore();assert.equal(h.doc.querySelectorAll('[data-kuai-page-style]').length,0);
+});
+
 test('page translation sends only viewport paragraphs and excludes controls/code/hidden blocks', async()=>{
  const h=fixture();h.paragraph('First');const below=h.paragraph('Below viewport');below._rect={top:5000,left:0,right:400,bottom:5030,width:400,height:30};
  const hidden=h.paragraph('Hidden');hidden.hidden=true;h.paragraph('Secret input','textarea');h.paragraph('Code','pre');const editable=h.paragraph('Draft');editable.setAttribute('contenteditable','true');

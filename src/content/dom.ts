@@ -6,7 +6,8 @@ export type CodedError = Error & {code?: string};
 export interface PageBlock {element: HTMLElement; text: string}
 
 /** Browser-facing helpers shared by the native page and selection controllers. */
-export const BLOCK_SELECTOR = 'p,div,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dt,dd,article,section,[slot="title"],[role="heading"]';
+// Docs renderers such as Mintlify emit paragraphs as `<span data-as="p">`; without it, a whole article reads as one block.
+export const BLOCK_SELECTOR = 'p,div,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dt,dd,article,section,[slot="title"],[role="heading"],[data-as="p"]';
 const EXCLUDED_TAGS = new Set(['SCRIPT','STYLE','NOSCRIPT','PRE','CODE','TEXTAREA','INPUT','SELECT','OPTION','BUTTON','SVG','MATH','VIDEO','AUDIO','CANVAS']);
 
 export function parentElement(node: unknown): HTMLElement | null {
@@ -19,16 +20,48 @@ export function ancestors(node: unknown): HTMLElement[] {
   return result;
 }
 
+function editableElement(element: HTMLElement): boolean {
+  const editable = element.getAttribute?.('contenteditable');
+  return element.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(element.tagName) ||
+    (editable !== null && editable !== undefined && editable !== 'false') || element.getAttribute?.('role') === 'textbox';
+}
+
 export function isEditable(node: unknown): boolean {
-  return ancestors(node).some(element => {
-    const editable = element.getAttribute?.('contenteditable');
-    return element.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(element.tagName) ||
-      (editable !== null && editable !== undefined && editable !== 'false') || element.getAttribute?.('role') === 'textbox';
-  });
+  return ancestors(node).some(editableElement);
 }
 
 export function isOwnedUI(node: unknown): boolean {
   return ancestors(node).some(element => element.hasAttribute?.('data-kuai-ui'));
+}
+
+type StyleSnapshot = Partial<Pick<CSSStyleDeclaration,'display'|'visibility'|'position'|'clip'|'clipPath'|'color'|'textDecorationLine'>>;
+interface LayoutCache {styles:WeakMap<Element,StyleSnapshot|undefined>;rendered:WeakMap<Element,boolean>}
+let layoutCache: LayoutCache | null = null;
+
+/**
+ * Reuse style and box reads for the rest of one synchronous pass. Rendering a row
+ * inserts nodes; on CSS-heavy pages each later read would otherwise restyle the
+ * whole document. Our rows never change a page element's visibility or link style.
+ */
+export function withLayoutCache<T>(run: () => T): T {
+  if (layoutCache) return run();
+  layoutCache = {styles:new WeakMap(),rendered:new WeakMap()};
+  try { return run(); } finally { layoutCache = null; }
+}
+
+export function computedStyle(element: Element, env: BrowserEnvironment): StyleSnapshot | undefined {
+  if (!layoutCache) return env.getComputedStyle?.(element);
+  if (layoutCache.styles.has(element)) return layoutCache.styles.get(element);
+  const style = env.getComputedStyle?.(element);
+  const snapshot = style && {display:style.display,visibility:style.visibility,position:style.position,clip:style.clip,clipPath:style.clipPath,color:style.color,textDecorationLine:style.textDecorationLine};
+  layoutCache.styles.set(element,snapshot);return snapshot;
+}
+
+function rendered(element: HTMLElement): boolean {
+  if (!element.getClientRects) return true;
+  if (layoutCache?.rendered.has(element)) return layoutCache.rendered.get(element)!;
+  const value = element.getClientRects().length > 0;
+  layoutCache?.rendered.set(element,value);return value;
 }
 
 export function isReadable(element: HTMLElement | null | undefined, env: BrowserEnvironment, {allowOriginal=false}: {allowOriginal?:boolean}={}): boolean {
@@ -38,14 +71,14 @@ export function isReadable(element: HTMLElement | null | undefined, env: Browser
     if(allowOriginal&&ancestor.hasAttribute?.('data-kuai-original')){hiddenByTranslation=true;continue;}
     if (EXCLUDED_TAGS.has(ancestor.tagName) || ancestor.hasAttribute?.('data-kuai-owned') ||
         ancestor.getAttribute?.('translate') === 'no' || ancestor.getAttribute?.('aria-hidden') === 'true' ||
-        ancestor.className?.split?.(/\s+/).includes('html5-video-player') || isEditable(ancestor)) return false;
-    const style = env.getComputedStyle?.(ancestor);
+        ancestor.className?.split?.(/\s+/).includes('html5-video-player') || editableElement(ancestor)) return false;
+    const style = computedStyle(ancestor,env);
     // Accessibility-only copies can have a layout box while all their pixels are clipped.
     const clip=style?.clip?.match(/^rect\(([^)]+)\)$/)?.[1].split(/[\s,]+/).filter(Boolean).map(value=>parseFloat(value));
     if(clip?.length===4&&['absolute','fixed'].includes(style?.position||'')&&(clip[1]<=clip[3]||clip[2]<=clip[0])||/^inset\(50%(?:\s+50%){0,3}\)$/.test(style?.clipPath||''))return false;
     if (ancestor.hidden || style?.display === 'none' || ['hidden','collapse'].includes(style?.visibility as string)) return false;
   }
-  return hiddenByTranslation || !element.getClientRects || element.getClientRects().length > 0;
+  return hiddenByTranslation || rendered(element);
 }
 
 /** Read a block without including nested blocks or our appended translation. */
