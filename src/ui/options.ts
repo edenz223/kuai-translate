@@ -232,6 +232,8 @@ export async function startOptions(document: Document = globalThis.document): Pr
     finally{if(generation===modelGeneration){modelRequestId=undefined;modelButton.disabled=false;}}
   });
   document.defaultView?.addEventListener('pagehide',()=>{tester.invalidate();invalidateModels();},{once:true});
+  // Browser-level commands live on Chrome's own page; extension pages cannot link there directly.
+  byId(document,'browser-shortcuts').addEventListener('click',()=>globalThis.chrome.tabs.create({url:'chrome://extensions/shortcuts'}));
   byId(document,'export-settings').addEventListener('click',()=>{
     try {const value=exportSettings(editor.get(),{includeSecrets:byId<HTMLInputElement>(document,'include-secrets').checked});downloadText(document,'kuai-translate-settings.json',typeof value==='string'?value:JSON.stringify(value,null,2),'application/json');}
     catch(error){fail(error);}
