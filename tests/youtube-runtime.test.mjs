@@ -290,3 +290,20 @@ test('session translation errors follow the interface language',async t=>{
   session.setCues([{start:0,end:3,text:'Hello'}]);session.update();await settle();
   assert.equal(session.state.currentCaption.errorMessage,'The translation came back empty or incomplete. Please retry.');
 });
+
+test('a sentence loop restarts its cue at the end and ends when playback leaves it',async t=>{
+  const {session,state,video}=fixture();t.after(()=>session.destroy());session.update();
+  assert.equal(session.setLoop(true),true);assert.deepEqual(state.loopingCaption,{start:0,end:3});
+  video.currentTime=2.98;session.update();assert.equal(video.currentTime,0);
+  video.currentTime=10.5;session.update();assert.equal(state.loopingCaption,null,'a seek elsewhere ends the loop');
+  video.currentTime=20;session.update();assert.equal(session.setLoop(true),false,'nothing to loop between captions');
+});
+test('subtitle shortcut schemes are normalized and accepted as player preferences',async()=>{
+  const {normalizeSettings}=await import('../dist/src/shared/settings.js');
+  const {applyPreferencePatch}=await import('../dist/src/background/preferences.js');
+  assert.equal(defaultSettings().subtitleShortcuts,'ctrl-alt');
+  assert.equal(normalizeSettings({subtitleShortcuts:'letters'}).subtitleShortcuts,'letters');
+  assert.equal(normalizeSettings({subtitleShortcuts:'vim'}).subtitleShortcuts,'ctrl-alt');
+  assert.equal(applyPreferencePatch(defaultSettings(),{subtitleShortcuts:'off'}).subtitleShortcuts,'off');
+  assert.throws(()=>applyPreferencePatch(defaultSettings(),{subtitleShortcuts:'vim'}));
+});

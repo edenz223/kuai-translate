@@ -147,10 +147,15 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     preferenceQueue=operation;return operation;
   }
   function navigate(record:YouTubeRecord,direction:number){
-    const state=navigationState(record.session),time=direction===-1?state.previous:state.next;
+    const state=navigationState(record.session),time=direction===-1?state.previous:direction===0?state.current:state.next;
     if(time===null)return false;
     if(!bridge.seek(record.session.id,time))throw new Error(words().seekError);
     changed();return true;
+  }
+  function toggleLoop(record:YouTubeRecord,force?:boolean){
+    const on=force??!record.session.state.loopingCaption;
+    if(on&&!record.session.state.currentCaption)return false;
+    selection?.cancel(record.session.id,'loop');record.session.setLoop(on);changed();return true;
   }
   function create(video:HTMLVideoElement,id:string) {
     const session=createSubtitleSession({id:'video-'+id+'-'+(++sequence),video,settings:config,translate,onChange:changed,getLanguage:language});
@@ -183,7 +188,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
           const cc=video.closest?.('.html5-video-player')?.querySelector<HTMLElement>('.ytp-subtitles-button');if(cc?.getAttribute('aria-pressed')==='false')cc.click();sync();
         }
         return next;
-      },onOpenOptions:openOptions,onNavigate:direction=>navigate(record,direction),
+      },onOpenOptions:openOptions,onNavigate:direction=>navigate(record,direction),onLoop:on=>toggleLoop(record,on),
     });
     session.setEnabled(captionsOn(video));session.start();changed();return record;
   }
@@ -250,11 +255,21 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
       for(const record of records.values())selection?.cancel(record.session.id,'subtitle-layout');
     settingsEpoch++;config=next;for(const record of records.values()){record.session.updateSettings(next);record.view.render(config);}sync();changed();
   }
+  function shortcut(event:KeyboardEvent):'previous'|'replay'|'next'|'loop'|undefined{
+    if(event.metaKey||event.isComposing||event.keyCode===229||doc.visibilityState==='hidden')return;
+    if(config.subtitleShortcuts==='ctrl-alt'&&event.ctrlKey&&event.altKey&&!event.shiftKey)
+      return ({ArrowLeft:'previous',ArrowDown:'replay',ArrowRight:'next',ArrowUp:'loop'} as const)[event.key as 'ArrowLeft'];
+    if(config.subtitleShortcuts==='letters'&&!event.ctrlKey&&!event.altKey&&!event.shiftKey)
+      return ({a:'previous',s:'replay',d:'next',r:'loop'} as const)[event.key?.toLowerCase() as 'a'];
+  }
   function keydown(event:KeyboardEvent){
-    if(!event.ctrlKey||!event.altKey||event.metaKey||event.shiftKey||event.isComposing||event.keyCode===229||!['ArrowLeft','ArrowRight'].includes(event.key)||doc.visibilityState==='hidden')return;
+    const action=shortcut(event);if(!action)return;
     if((event.composedPath?.()||[event.target]).some(node=>(node as HTMLElement)?.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test((node as HTMLElement)?.tagName)||(node as HTMLElement)?.getAttribute?.('role')==='textbox'))return;
     const record=currentRecord();if(!record)return;
-    try{if(navigate(record,event.key==='ArrowLeft'?-1:1)){event.preventDefault();event.stopPropagation();}}catch(error){record.view.reportError?.(error);}
+    try{
+      const handled=action==='loop'?toggleLoop(record):navigate(record,action==='previous'?-1:action==='replay'?0:1);
+      if(handled){event.preventDefault();event.stopPropagation();}
+    }catch(error){record.view.reportError?.(error);}
   }
   function openSidebar(){sync();const record=currentRecord();if(!record||!sidebar)return false;sidebar.sync();return sidebar.toggle(record.session.id,true);}
   function listen(target:EventTarget,type:string,fn:BrowserEventCallback,capture=false){target.addEventListener(type,fn,capture);listeners.push(()=>target.removeEventListener(type,fn,capture));}

@@ -7,6 +7,9 @@ export interface Provider {
   systemPrompt?: string; userPrompt?: string;
 }
 export interface SubtitleTrackPreference {languageCode:string;kind:string;name:string}
+/** Player keys for previous / replay / next subtitle and sentence loop. */
+export const SUBTITLE_SHORTCUT_SCHEMES=Object.freeze(['ctrl-alt','letters','off'] as const);
+export type SubtitleShortcutScheme=typeof SUBTITLE_SHORTCUT_SCHEMES[number];
 export type Settings = ReturnType<typeof defaultSettings>;
 export type PublicSettings = Settings;
 type LegacyRecord = Record<string, any>;
@@ -44,7 +47,7 @@ export function defaultSettings() {
     subtitlesEnabled:true, selectionEnabled:false, hoverEnabled:true, showOriginal:true,
     pageDisplayMode:'bilingual',pageStyle:normalizePageStyle(),
     subtitleTargetLanguage:'follow_page',subtitleStyle:normalizeSubtitleStyle(),
-    subtitleTrackPreference:normalizeSubtitleTrackPreference(),subtitleListOpen:false,
+    subtitleTrackPreference:normalizeSubtitleTrackPreference(),subtitleListOpen:false,subtitleShortcuts:'ctrl-alt' as SubtitleShortcutScheme,
     ...normalizeInteractionOptions({},FREE_PROVIDERS),
   };
 }
@@ -129,6 +132,7 @@ export function normalizeSettings(input:unknown):Settings {
     pageDisplayMode:input.pageDisplayMode==='translation_only' ? 'translation_only' : 'bilingual',
     pageStyle:normalizePageStyle(input.pageStyle),subtitleStyle,
     subtitleTrackPreference:normalizeSubtitleTrackPreference(input.subtitleTrackPreference),subtitleListOpen:flag(input.subtitleListOpen,false),
+    subtitleShortcuts:SUBTITLE_SHORTCUT_SCHEMES.includes(input.subtitleShortcuts)?input.subtitleShortcuts as SubtitleShortcutScheme:'ctrl-alt',
     subtitleTargetLanguage:input.subtitleTargetLanguage==null || input.subtitleTargetLanguage==='follow_page' ? 'follow_page' : language(input.subtitleTargetLanguage,'zh-Hans'),
     ...normalizeInteractionOptions(interactionInput,providers),
   };

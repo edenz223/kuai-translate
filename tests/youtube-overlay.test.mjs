@@ -311,3 +311,54 @@ test('navigation explains whether subtitle translation or video captions are off
   const cc=studyFixture({cc:false});t.after(()=>cc.manager.stop());await cc.flush();
   assert.match(cc.document.querySelector('[data-kuai-subtitle-next]').title,/请开启视频字幕后继续/);
 });
+
+test('previous restarts a sentence that has played for a moment and otherwise goes back one',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.load();
+  const previous=h.document.querySelector('[data-kuai-subtitle-previous]');
+  h.video.currentTime=2;h.manager.sync();await h.flush();
+  assert.equal(previous.disabled,false);assert.match(previous.title,/^重播本句 · Ctrl\+Alt\+←/);
+  h.emit(previous,'click');await h.flush();assert.equal(h.video.currentTime,0);
+  h.video.currentTime=5.5;h.manager.sync();await h.flush();assert.match(previous.title,/^上一句字幕/);
+  h.emit(previous,'click');await h.flush();assert.equal(h.video.currentTime,0);assert.equal(h.video.playCount,0);
+});
+test('letter shortcuts navigate, replay and loop only when chosen, and never from editors',async t=>{
+  const h=studyFixture({settings:{subtitleShortcuts:'letters'}});t.after(()=>h.manager.stop());await h.load();
+  const key=(key,init={})=>h.emit(h.document,'keydown',{key,...init});
+  key('ArrowRight',{ctrlKey:true,altKey:true});assert.equal(h.video.currentTime,0,'the other scheme is inactive');
+  assert.equal(key('d').defaultPrevented,true);await h.flush();assert.equal(h.video.currentTime,5);
+  h.video.currentTime=7;key('s');await h.flush();assert.equal(h.video.currentTime,5);
+  key('a');await h.flush();assert.equal(h.video.currentTime,0);
+  const editor=h.document.createElement('input');h.player.append(editor);h.emit(editor,'keydown',{key:'d'});assert.equal(h.video.currentTime,0);
+  key('r');await h.flush();assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});
+  assert.match(h.captionHost().shadowRoot.querySelector('.status').textContent,/单句循环中/);
+  h.emit(h.settingsButton(),'click');assert.equal(h.settingsPanel().shadowRoot.querySelector('.subtitle-loop').checked,true);
+  key('r');await h.flush();assert.equal(h.session().state.loopingCaption,null);
+  h.manager.updateSettings({...h.config,subtitleShortcuts:'off'});await h.flush();
+  assert.equal(key('d').defaultPrevented,false);assert.equal(h.video.currentTime,0);
+});
+test('the settings panel saves the shortcut scheme, toggles the sentence loop and closes on an outside press',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.load();
+  h.emit(h.settingsButton(),'click');const panel=h.settingsPanel(),shadow=panel.shadowRoot;
+  const shortcuts=shadow.querySelector('.subtitle-shortcuts');assert.equal(shortcuts.value,'ctrl-alt');
+  shortcuts.value='letters';h.emit(shortcuts,'change');await h.flush();assert.deepEqual(h.patches.at(-1),{subtitleShortcuts:'letters'});
+  const loop=shadow.querySelector('.subtitle-loop');loop.checked=true;h.emit(loop,'change');await h.flush();
+  assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});assert.equal(loop.checked,true);
+  h.emit(shadow.querySelector('.subtitle-mode'),'pointerdown');assert.equal(panel.hidden,false,'presses inside keep it open');
+  h.emit(h.video,'pointerdown');assert.equal(panel.hidden,true);
+});
+test('the settings panel moves left of an open subtitle list drawer',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.flush();
+  const drawer=h.document.createElement('section');drawer.dataset.placement='drawer';h.player.append(drawer);
+  h.emit(h.settingsButton(),'click');const panel=h.settingsPanel();
+  assert.equal(panel.style.left,'12px');assert.equal(panel.style.right,'auto');
+  drawer.hidden=true;h.emit(h.settingsButton(),'click');h.emit(h.settingsButton(),'click');assert.equal(panel.style.right,'12px');
+});
+test('a narrow player keeps only the main toolbar buttons and a pending caption shows a quiet indicator',t=>{
+  const {view,player,session}=setup();t.after(()=>view.destroy());
+  session.state.currentCaption={original:'Hello',translation:'',status:'pending'};player._rect.width=400;view.render({});
+  const previous=view.toolbar.querySelector('[data-kuai-subtitle-previous]'),shadow=view.host.shadowRoot;
+  assert.equal(previous.hidden,true);assert.equal(previous.style.display,'none');
+  assert.equal(shadow.querySelector('.busy').hidden,false);assert.equal(shadow.querySelector('.status').hidden,true,'no per-caption waiting text');
+  session.state.currentCaption.translation='你好';player._rect.width=960;view.render({});
+  assert.equal(previous.hidden,false);assert.equal(shadow.querySelector('.busy').hidden,true);
+});

@@ -252,3 +252,41 @@ test('a failed timeline explains itself and can be retried from the list', async
   assert.deepEqual(retries, ['video-one']); assert.equal(retry.hidden, true); assert.match(status.textContent, /Loading/);
   f.controller.stop();
 });
+
+test('searching filters the reading list by source or translation and Escape clears it', async () => {
+  const f = fixture({ count: 30 });
+  f.controller.toggle(f.session.id, true); await f.flush();
+  const root = f.panel().shadowRoot, search = root.querySelector('.search');
+  assert.equal(search.getAttribute('aria-label'), 'Search subtitles');
+  search.value = 'Translation 2'; f.emit(search, 'input'); await f.flush();
+  const texts = () => root.querySelectorAll('.original-text').map(node => node.textContent);
+  assert.deepEqual(texts().slice(0, 3), ['Original 2', 'Original 20', 'Original 21']);
+  assert.equal(root.querySelector('.cue-count').textContent, '11 matches');
+  const typing = f.emit(search, 'keydown', { key: 'k' }); assert.equal(typing.propagationStopped, true, 'page shortcuts never see typing');
+  search.value = 'nothing'; f.emit(search, 'input'); await f.flush();
+  assert.equal(root.querySelector('.panel-status').textContent, 'No matching subtitles');
+  f.emit(search, 'keydown', { key: 'Escape' }); await f.flush();
+  assert.equal(search.value, ''); assert.equal(root.querySelector('.cue-count').textContent, '30 captions');
+  f.controller.stop();
+});
+
+test('the list view shows both languages, only the source, or only translations without changing text nodes', async () => {
+  const f = fixture({ translated: false });
+  f.cues[0].translation = 'Translation 1'; f.cues[0].status = 'success';
+  f.controller.toggle(f.session.id, true); await f.flush();
+  const root = f.panel().shadowRoot, button = value => root.querySelector(`[data-view="${value}"]`);
+  const rows = () => root.querySelectorAll('.cue');
+  const requests = f.requests.length;
+  f.emit(button('translation'), 'click'); await f.flush();
+  assert.equal(button('translation').getAttribute('aria-pressed'), 'true');
+  assert.equal(rows()[0].querySelector('.original-text').hidden, true);
+  assert.equal(rows()[0].querySelector('.translation-text').hidden, false);
+  f.emit(button('original'), 'click'); await f.flush();
+  assert.equal(rows()[0].querySelector('.original-text').hidden, false);
+  assert.equal(rows()[0].querySelector('.translation-text').hidden, true);
+  f.cues.slice(1).forEach(cue => { cue.status = 'pending'; cue.translation = ''; }); f.notify(); await f.flush();
+  assert.equal(f.requests.length, requests, 'the source-only view requests no translations');
+  f.emit(button('both'), 'click'); await f.flush();
+  assert.equal(rows()[0].querySelector('.translation-text').hidden, false);
+  f.controller.stop();
+});
