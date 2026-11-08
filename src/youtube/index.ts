@@ -18,6 +18,7 @@ import {createCaptionView} from './overlay.js';
 import {subtitleStyle,subtitleLayoutKey} from './presentation.js';
 import {navigationState} from './navigation.js';
 import {normalizeSubtitleTrackPreference} from '../shared/settings.js';
+import {subtitleWords} from './i18n.js';
 
 /** Coordinates one current YouTube player, independent of the website's UI framework. */
 export function createYouTubeController({settings,subscribeSettings,translate,updatePreferences,openOptions,env=globalThis,createSidebar=sidebarAPI.createController,createSelection=selectionAPI.createController,createView=createCaptionView}:YouTubeControllerOptions) {
@@ -27,6 +28,8 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   const origin=()=>new URL(env.location.href).origin;
   const post=(data:Record<string,unknown>)=>env.postMessage({source:'kuai-youtube-request',...data},origin());
   const currentRecord=()=>records.values().next().value;
+  const language=()=>config.interfaceLanguage==='auto'?env.navigator?.language:config.interfaceLanguage;
+  const words=()=>subtitleWords(language());
   // The same logical caption track, whichever URL token or metadata ID reached us.
   function sameTrack(a:CaptionTrack,b:CaptionTrack,{urlKind=false}={}){
     const left=new URL(a.baseUrl),right=new URL(b.baseUrl);
@@ -45,10 +48,10 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   const bridge:SubtitleBridge={
     getSessions:()=>Array.from(records.values(),record=>record.session),
     getState:id=>records.get(id)?.session.state,
-    getConfig:()=>{const style=subtitleStyle(config);return{isEnable:config.subtitlesEnabled?'1':'0',hideTranslation:style.hideTranslation?'1':'0',styleConfig:{displayOrder:style.displayOrder},subtitleStyle:style,subtitleListOpen:config.subtitleListOpen===true};},
+    getConfig:()=>{const style=subtitleStyle(config);return{isEnable:config.subtitlesEnabled?'1':'0',hideTranslation:style.hideTranslation?'1':'0',styleConfig:{displayOrder:style.displayOrder},subtitleStyle:style,subtitleListOpen:config.subtitleListOpen===true,translationEnabled:config.subtitleTranslationEnabled!==false};},
     saveSidebarOpen:open=>preferences({subtitleListOpen:open}),
     reportPreferenceError:error=>currentRecord()?.view.reportError?.(error),
-    getLanguage:()=>config.interfaceLanguage==='auto'?env.navigator?.language:config.interfaceLanguage,
+    getLanguage:language,
     isEnabled:session=>records.get(session.id)?.session===session&&session.isEnabled(),
     isSelectionHeld:id=>!!records.get(id)?.session.state.isSubtitleSelectionHeld,
     getMediaKey:session=>videoIdFromUrl(env.location.href)+'|'+(session.video.currentSrc||''),
@@ -101,7 +104,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     const requestId='kuai-caption-'+(++requestSequence),id=record.videoId;
     const timer=env.setTimeout(()=>{
       if(record.pending?.id!==requestId)return;
-      clearPending(record);failTimeline(record,track.id,'字幕读取超时，请重试。');
+      clearPending(record);failTimeline(record,track.id,words().readTimeout);
     },23000);
     record.pending={id:requestId,trackId:track.id,track:{...track},timer};record.failedTrack='';record.session.state.timelineFailed=false;
     post({kind:'fetch-track',requestId,videoId:id,url:track.baseUrl});
@@ -133,9 +136,9 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   }
   function captionsOn(video:HTMLVideoElement){const button=video.closest?.('.html5-video-player')?.querySelector<HTMLElement>('.ytp-subtitles-button');return !button||button.getAttribute('aria-pressed')!=='false';}
   function preferences(patch:SettingsPatch){
-    if(!updatePreferences)throw new Error('字幕设置暂不可用，请刷新页面后重试');
+    if(!updatePreferences)throw new Error(words().preferencesUnavailable);
     const operation=preferenceQueue.catch(()=>{}).then(async()=>{
-      if(stopped)throw new Error('页面已经离开，请在当前视频重试');
+      if(stopped)throw new Error(words().pageLeft);
       const epoch=settingsEpoch,next=await updatePreferences(patch);
       // A newer broadcast already contains this save or a later change from another window.
       if(!stopped&&epoch===settingsEpoch&&next)updateSettings(next);
@@ -144,31 +147,38 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     preferenceQueue=operation;return operation;
   }
   function navigate(record:YouTubeRecord,direction:number){
-    const state=navigationState(record.session),time=direction===-1?state.previous:state.next;
+    const state=navigationState(record.session),time=direction===-1?state.previous:direction===0?state.current:state.next;
     if(time===null)return false;
-    if(!bridge.seek(record.session.id,time))throw new Error('暂时无法跳转到这句字幕');
+    if(!bridge.seek(record.session.id,time))throw new Error(words().seekError);
     changed();return true;
   }
+  function toggleLoop(record:YouTubeRecord,force?:boolean){
+    const on=force??!record.session.state.loopingCaption;
+    if(on&&!record.session.state.currentCaption)return false;
+    selection?.cancel(record.session.id,'loop');record.session.setLoop(on);changed();return true;
+  }
   function create(video:HTMLVideoElement,id:string) {
-    const session=createSubtitleSession({id:'video-'+id+'-'+(++sequence),video,settings:config,translate,onChange:changed});
+    const session=createSubtitleSession({id:'video-'+id+'-'+(++sequence),video,settings:config,translate,onChange:changed,getLanguage:language});
     const record={session,videoId:id,togglePending:false,tracks:[],pending:null,loadedTrack:'',failedTrack:'',timelineSignature:'',domText:''} as unknown as YouTubeRecord;
     records.set(session.id,record);
-    record.view=createView(session,{env,cancelSelection:bridge.cancelSelection,
+    record.view=createView(session,{env,getLanguage:language,cancelSelection:bridge.cancelSelection,
       onToggle:async()=>{
         if(record.togglePending)return;
         record.togglePending=true;selection?.cancel(session.id,'toggle');
         try{
-          const enable=!config.subtitlesEnabled||!captionsOn(video);
-          await preferences({subtitlesEnabled:enable});
+          // 译 switches translation only; Kuai captions and the list stay. From
+          // captions off, it turns captions, CC and translation on together.
+          const showing=config.subtitlesEnabled&&captionsOn(video);
+          await preferences(showing?{subtitleTranslationEnabled:config.subtitleTranslationEnabled===false}:{subtitlesEnabled:true,subtitleTranslationEnabled:true});
           if(stopped||records.get(session.id)!==record||record.videoId!==videoIdFromUrl(env.location.href)||!video.isConnected)return;
           const cc=video.closest?.('.html5-video-player')?.querySelector<HTMLElement>('.ytp-subtitles-button');
-          if(enable&&config.subtitlesEnabled&&cc?.getAttribute('aria-pressed')==='false')cc.click();
+          if(!showing&&config.subtitlesEnabled&&cc?.getAttribute('aria-pressed')==='false')cc.click();
           record.failedTrack='';sync();
         }finally{record.togglePending=false;}
       },
       onTrackChange:async trackId=>{
         const track=record.tracks.find(item=>item.id===trackId);
-        if(trackId&&!track)throw new Error('这条字幕已不可用，请重新选择');
+        if(trackId&&!track)throw new Error(words().trackGone);
         const subtitleTrackPreference=normalizeSubtitleTrackPreference(track?{languageCode:track.languageCode,kind:track.kind,name:track.name}:undefined);
         await preferences({subtitleTrackPreference});
         if(!stopped&&records.get(session.id)===record&&record.videoId===videoIdFromUrl(env.location.href)&&video.isConnected)requestTrack(record,true);
@@ -180,7 +190,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
           const cc=video.closest?.('.html5-video-player')?.querySelector<HTMLElement>('.ytp-subtitles-button');if(cc?.getAttribute('aria-pressed')==='false')cc.click();sync();
         }
         return next;
-      },onOpenOptions:openOptions,onNavigate:direction=>navigate(record,direction),
+      },onOpenOptions:openOptions,onNavigate:direction=>navigate(record,direction),onLoop:on=>toggleLoop(record,on),
     });
     session.setEnabled(captionsOn(video));session.start();changed();return record;
   }
@@ -216,7 +226,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     if(data.requestId&&data.requestId!==record.pending?.id)return;
     if(data.kind==='caption-error'){
       const trackId=record.pending?.trackId||record.track?.id;clearPending(record,false);
-      failTimeline(record,trackId,'暂时无法读取这条字幕，请切换字幕语言或重试。');return;
+      failTimeline(record,trackId,words().readFailed);return;
     }
     if(data.kind!=='captions'||typeof data.body!=='string'||data.body.length>4_000_000)return;
     if(!data.requestId&&record.track&&data.languageCode&&data.languageCode!==record.track.languageCode)return;
@@ -247,11 +257,21 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
       for(const record of records.values())selection?.cancel(record.session.id,'subtitle-layout');
     settingsEpoch++;config=next;for(const record of records.values()){record.session.updateSettings(next);record.view.render(config);}sync();changed();
   }
+  function shortcut(event:KeyboardEvent):'previous'|'replay'|'next'|'loop'|undefined{
+    if(event.metaKey||event.isComposing||event.keyCode===229||doc.visibilityState==='hidden')return;
+    if(config.subtitleShortcuts==='ctrl-alt'&&event.ctrlKey&&event.altKey&&!event.shiftKey)
+      return ({ArrowLeft:'previous',ArrowDown:'replay',ArrowRight:'next',ArrowUp:'loop'} as const)[event.key as 'ArrowLeft'];
+    if(config.subtitleShortcuts==='letters'&&!event.ctrlKey&&!event.altKey&&!event.shiftKey)
+      return ({a:'previous',s:'replay',d:'next',r:'loop'} as const)[event.key?.toLowerCase() as 'a'];
+  }
   function keydown(event:KeyboardEvent){
-    if(!event.ctrlKey||!event.altKey||event.metaKey||event.shiftKey||event.isComposing||event.keyCode===229||!['ArrowLeft','ArrowRight'].includes(event.key)||doc.visibilityState==='hidden')return;
+    const action=shortcut(event);if(!action)return;
     if((event.composedPath?.()||[event.target]).some(node=>(node as HTMLElement)?.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test((node as HTMLElement)?.tagName)||(node as HTMLElement)?.getAttribute?.('role')==='textbox'))return;
     const record=currentRecord();if(!record)return;
-    try{if(navigate(record,event.key==='ArrowLeft'?-1:1)){event.preventDefault();event.stopPropagation();}}catch(error){record.view.reportError?.(error);}
+    try{
+      const handled=action==='loop'?toggleLoop(record):navigate(record,action==='previous'?-1:action==='replay'?0:1);
+      if(handled){event.preventDefault();event.stopPropagation();}
+    }catch(error){record.view.reportError?.(error);}
   }
   function openSidebar(){sync();const record=currentRecord();if(!record||!sidebar)return false;sidebar.sync();return sidebar.toggle(record.session.id,true);}
   function listen(target:EventTarget,type:string,fn:BrowserEventCallback,capture=false){target.addEventListener(type,fn,capture);listeners.push(()=>target.removeEventListener(type,fn,capture));}

@@ -1,5 +1,6 @@
 import type {Settings} from '../shared/settings.js';
 import type {SubtitleSession,SubtitleState,CaptionCue,TranslateSubtitles} from './types.js';
+import {subtitleWords} from './i18n.js';
 interface TranslationJob {revision:number;controller:AbortController;promise?:Promise<void>}
 // Live DOM captions change word by word. Translate once the text settles, or at
 // least once per wait while speech keeps rolling, instead of once per change.
@@ -7,12 +8,14 @@ const LIVE_SETTLE_MS=700,LIVE_MAX_WAIT_MS=3000,OVERLAP_SCAN=8;
 const lastLine=(text:string)=>text.split('\n').map(line=>line.trim()).filter(Boolean).at(-1)||'';
 const continuesText=(previous:string,next:string)=>{const line=lastLine(previous);return !!line&&(next.startsWith(previous)||next.includes(line));};
 /** Framework-independent subtitle state and translation scheduling. */
-export function createSubtitleSession({id,video,settings,translate,onChange=()=>{}}:{id:string;video:HTMLVideoElement;settings:Settings;translate:TranslateSubtitles;onChange?:(session:SubtitleSession)=>void}):SubtitleSession {
+export function createSubtitleSession({id,video,settings,translate,onChange=()=>{},getLanguage=()=>undefined}:{id:string;video:HTMLVideoElement;settings:Settings;translate:TranslateSubtitles;onChange?:(session:SubtitleSession)=>void;getLanguage?:()=>string|undefined}):SubtitleSession {
   let config=settings,enabled=true,destroyed=false,running:TranslationJob|null=null,revision=0,timer:ReturnType<typeof setInterval>|null=null,queued=false;
-  let liveChangedAt=0,livePendingSince:number|null=null,liveTimer:ReturnType<typeof setTimeout>|null=null,liveSource:{text:string;translation:string}|null=null;
-  const state:SubtitleState={videoId:id,subtitlesList:[],currentCaption:null,selectionCaptionSnapshot:null,isSubtitleSelectionHeld:false,translateVersion:0,isLiveDomCaptions:false,timelineFailed:false,errorMessage:''};
+  let loop:{start:number;end:number}|null=null,liveChangedAt=0,livePendingSince:number|null=null,liveTimer:ReturnType<typeof setTimeout>|null=null,liveSource:{text:string;translation:string}|null=null;
+  const state:SubtitleState={videoId:id,subtitlesList:[],currentCaption:null,loopingCaption:null,selectionCaptionSnapshot:null,isSubtitleSelectionHeld:false,translateVersion:0,isLiveDomCaptions:false,timelineFailed:false,errorMessage:''};
   const available=()=>!destroyed&&enabled&&config.subtitlesEnabled&&video.isConnected&&!video.closest?.('.ad-showing, .ad-interrupting');
   const notify=()=>onChange(session);
+  // With translation off the session still segments and shows source captions.
+  const translating=()=>config.subtitleTranslationEnabled!==false;
   const providerId=()=>config.subtitleProviderId==='follow_page'?config.activeProviderId:config.subtitleProviderId;
   const targetLanguage=()=>config.subtitleTargetLanguage&&config.subtitleTargetLanguage!=='follow_page'?config.subtitleTargetLanguage:config.targetLanguage;
   function invalidate() {
@@ -32,21 +35,35 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     liveTimer=setTimeout(()=>{liveTimer=null;if(!destroyed)update();},wait);
     return true;
   }
+  // Overlapping authored cues (simultaneous speakers, lyrics) are one sentence on screen.
+  function activeAt(time:number) {
+    let low=0,high=state.subtitlesList.length;
+    while(low<high){const mid=(low+high)>>>1;if(state.subtitlesList[mid].start<=time)low=mid+1;else high=mid;}
+    const active:CaptionCue[]=[];let first=Math.max(0,low-1);
+    for(let index=low-1;index>=0&&index>=low-OVERLAP_SCAN;index--){const item=state.subtitlesList[index];if(time<item.end){active.unshift(item);first=index;}}
+    return {active,first};
+  }
+  // Loop mode repeats whichever sentence playback moves to; a seek into a gap ends it.
+  function followLoop(time:number) {
+    if(!loop||time>=loop.start-0.25&&time<loop.end)return;
+    const {active}=activeAt(time),next=active.length?{start:active[0].start,end:Math.min(...active.map(item=>item.end))}:null;
+    loop=next;state.loopingCaption=next?{...next}:null;notify();
+  }
+  function seeking(){followLoop(video.currentTime);}
   function update() {
     if(destroyed||state.isSubtitleSelectionHeld)return;
     if(!available()) {if(state.currentCaption){state.currentCaption=null;notify();}return;}
-    const time=video.currentTime;
-    let low=0,high=state.subtitlesList.length;
-    while(low<high){const mid=(low+high)>>>1;if(state.subtitlesList[mid].start<=time)low=mid+1;else high=mid;}
-    // Overlapping authored cues (simultaneous speakers, lyrics) stay visible together.
-    const active:CaptionCue[]=[];let first=Math.max(0,low-1);
-    for(let index=low-1;index>=0&&index>=low-OVERLAP_SCAN;index--){const item=state.subtitlesList[index];if(time<item.end){active.unshift(item);first=index;}}
+    if(loop&&!video.seeking){
+      if(video.currentTime<loop.start-0.25||video.currentTime>loop.end+1)followLoop(video.currentTime);
+      else if(video.currentTime>=loop.end-0.05){try{video.currentTime=loop.start;}catch{}}
+    }
+    const time=video.currentTime,{active,first}=activeAt(time);
     const next=active.length?{start:active[0].start,end:Math.min(...active.map(item=>item.end)),original:active.map(item=>item.text).join('\n'),
       translation:active.map(item=>item.translation||'').filter(Boolean).join('\n'),
       status:active.find(item=>item.status==='translating')?.status||active.find(item=>item.status==='error')?.status||active[0].status,
       errorMessage:active.map(item=>item.errorMessage||'').find(Boolean)||''}:null;
     if(JSON.stringify(next)!==JSON.stringify(state.currentCaption)){state.currentCaption=next;notify();}
-    if(!running && !video.seeking && !liveWaiting()) {
+    if(!running && !video.seeking && translating() && !liveWaiting()) {
       const pending=[];
       for(let index=first;index<state.subtitlesList.length;index++){
         const item=state.subtitlesList[index];if(item.start>time+15)break;
@@ -57,12 +74,12 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     }
   }
   function translateCues(candidates:CaptionCue[]):false|Promise<void> {
-    if(!available()||state.isSubtitleSelectionHeld||running||!Array.isArray(candidates))return false;
+    if(!available()||!translating()||state.isSubtitleSelectionHeld||running||!Array.isArray(candidates))return false;
     const membership=new Set(state.subtitlesList),cues:CaptionCue[]=[];let size=0,rejected=false;
     for(const cue of new Set(candidates)) {
       if(!membership.has(cue)||!cue.text||cue.status!=='pending')continue;
       if(cue.text.length>40000){
-        cue.status='error';cue.errorMessage='这句字幕过长（超过 40000 字符），未发送翻译请求。';rejected=true;continue;
+        cue.status='error';cue.errorMessage=subtitleWords(getLanguage()).cueTooLong;rejected=true;continue;
       }
       if(cues.length>=8||size+cue.text.length>40000)break;
       cues.push(cue);size+=cue.text.length;
@@ -79,12 +96,12 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     job.promise=Promise.resolve().then(()=>translate(fragments,{providerId:providerId(),sourceLanguage:config.sourceLanguage,targetLanguage:targetLanguage(),signal:job.controller.signal})).then(result=>{
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
       const values=result?.translations;
-      if(!Array.isArray(values)||values.length!==fragments.length||values.some(value=>typeof value!=='string'||!value.trim()))throw new Error('翻译返回为空或数量不匹配，请重试');
+      if(!Array.isArray(values)||values.length!==fragments.length||values.some(value=>typeof value!=='string'||!value.trim()))throw new Error(subtitleWords(getLanguage()).emptyTranslation);
       cues.forEach((cue,index)=>{cue.translation=values.slice(...mapping[index]).join('');cue.status='success';});
       if(state.isLiveDomCaptions){const latest=cues.at(-1)!;liveSource={text:latest.text,translation:latest.translation!};carryLive(state.subtitlesList);}
     }).catch(error=>{
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
-      cues.forEach(cue=>{cue.status='error';cue.errorMessage=error?.message||'字幕翻译失败，请重试';});
+      cues.forEach(cue=>{cue.status='error';cue.errorMessage=error?.message||subtitleWords(getLanguage()).translationFailed;});
     }).finally(()=>{
       if(running===job)running=null;
       if(!destroyed&&job.revision===revision){notify();scheduleUpdate();}
@@ -100,6 +117,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     }
   }
   function setCues(cues:CaptionCue[],{live=false}={}) {
+    if(!live||!state.isLiveDomCaptions)setLoop(false);
     // A changing live line must not abort the request for the words before it.
     const rolling=!!live&&state.isLiveDomCaptions;
     if(rolling){liveChangedAt=Date.now();livePendingSince??=liveChangedAt;}
@@ -116,8 +134,10 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     notify();
   }
   function updateSettings(next:Settings) {
-    const before=[providerId(),config.sourceLanguage,targetLanguage(),config.providerRevision,JSON.stringify(config.providers)];
+    const before=[providerId(),config.sourceLanguage,targetLanguage(),config.providerRevision,JSON.stringify(config.providers)],wasTranslating=translating();
     config=next;
+    // Turning translation off stops requests but keeps finished translations for later.
+    if(wasTranslating&&!translating())invalidate();
     const after=[providerId(),config.sourceLanguage,targetLanguage(),config.providerRevision,JSON.stringify(config.providers)];
     if(before.some((value,index)=>value!==after[index])) {
       invalidate();for(const cue of state.subtitlesList){cue.translation='';cue.status='pending';cue.errorMessage='';}
@@ -125,22 +145,27 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     if(!available()){hold(false);invalidate();}
     notify();scheduleUpdate();
   }
+  function setLoop(value:boolean) {
+    const caption=state.currentCaption,next=value&&caption&&!state.isLiveDomCaptions?{start:caption.start,end:caption.end}:null;
+    if(!!next===!!loop&&(!next||next.start===loop?.start))return !!loop;
+    loop=next;state.loopingCaption=next?{...next}:null;notify();return !!loop;
+  }
   function setEnabled(value:boolean) {
     if(enabled===!!value)return;
     enabled=!!value;session.synchronizer.isSyncEnabled=enabled;
-    if(!enabled){invalidate();hold(false);}notify();scheduleUpdate();
+    if(!enabled){invalidate();hold(false);setLoop(false);}notify();scheduleUpdate();
   }
   function seek(time:number) {
     if(!available()||!Number.isFinite(time)||time<0||!Number.isFinite(video.duration)||time>=video.duration)return false;
     if(video.seekable?.length){let found=false;for(let index=0;index<video.seekable.length;index++)if(time>=video.seekable.start(index)&&time<video.seekable.end(index))found=true;if(!found)return false;}
-    try{video.currentTime=time;update();return true;}catch{return false;}
+    try{followLoop(time);video.currentTime=time;update();return true;}catch{return false;}
   }
   function tick(){update();}
   function play(){clearInterval(timer!);timer=setInterval(tick,150);update();}
   function pause(){clearInterval(timer!);timer=null;update();}
-  function start(){for(const type of ['timeupdate','seeked','loadedmetadata'])video.addEventListener(type,tick);video.addEventListener('play',play);video.addEventListener('pause',pause);video.addEventListener('ended',pause);if(!video.paused)play();else update();return session;}
+  function start(){for(const type of ['timeupdate','seeked','loadedmetadata'])video.addEventListener(type,tick);video.addEventListener('play',play);video.addEventListener('pause',pause);video.addEventListener('ended',pause);video.addEventListener('seeking',seeking);if(!video.paused)play();else update();return session;}
   function retry(){for(const cue of state.subtitlesList)if(cue.status==='error'){cue.status='pending';cue.errorMessage='';}notify();update();}
-  function destroy(){destroyed=true;invalidate();clearInterval(timer!);if(liveTimer!==null)clearTimeout(liveTimer);for(const type of ['timeupdate','seeked','loadedmetadata'])video.removeEventListener(type,tick);video.removeEventListener('play',play);video.removeEventListener('pause',pause);video.removeEventListener('ended',pause);state.isSubtitleSelectionHeld=false;state.selectionCaptionSnapshot=null;}
-  const session:SubtitleSession={id,video,rule:{id:'youtube'},state,start,destroy,update,setCues,hold,updateSettings,setEnabled,seek,translateCues,retry,isEnabled:available,synchronizer:{isSyncEnabled:true,update,triggerTranslation:translateCues}};
+  function destroy(){destroyed=true;invalidate();clearInterval(timer!);if(liveTimer!==null)clearTimeout(liveTimer);for(const type of ['timeupdate','seeked','loadedmetadata'])video.removeEventListener(type,tick);video.removeEventListener('play',play);video.removeEventListener('pause',pause);video.removeEventListener('ended',pause);video.removeEventListener('seeking',seeking);state.isSubtitleSelectionHeld=false;state.selectionCaptionSnapshot=null;}
+  const session:SubtitleSession={id,video,rule:{id:'youtube'},state,start,destroy,update,setCues,hold,updateSettings,setEnabled,seek,translateCues,retry,setLoop,isEnabled:available,synchronizer:{isSyncEnabled:true,update,triggerTranslation:translateCues}};
   return session;
 }

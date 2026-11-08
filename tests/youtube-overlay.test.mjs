@@ -15,7 +15,8 @@ function setup(options={}){
   const session={id:'one',video,state:{currentCaption:{original:'Hello',translation:'<img onerror=bad()>你好',status:'success'},isSubtitleSelectionHeld:false},isEnabled:()=>true};
   const patches=[],trackChanges=[],retries=[],cancellations=[];
   const view=api.createCaptionView(session,{env:h.env,onToggle(){},onTrackChange:id=>trackChanges.push(id),onRetry:()=>retries.push(true),onPreferences:patch=>patches.push(patch),cancelSelection:(...args)=>cancellations.push(args),...options});
-  const box=view.host.shadowRoot.querySelector('.captions'),captures=[];
+  // Bottom-centered 300×70 caption 70px above the bottom of a 960×540 player.
+  const box=view.host.shadowRoot.querySelector('.captions'),captures=[];box._rect={left:330,top:400,right:630,bottom:470,width:300,height:70};
   box.setPointerCapture=id=>captures.push(['capture',id]);box.releasePointerCapture=id=>captures.push(['release',id]);
   return{h,player,native,session,view,box,patches,trackChanges,retries,cancellations,captures};
 }
@@ -81,9 +82,9 @@ test('caption background drags in the configured direction and persists only its
   }
 });
 
-test('drag movement is bounded by the player height and persisted offset range',t=>{
-  for(const [height,y,want]of [[540,1000,0],[540,-1000,300],[180,-1000,80]]){
-    const {h,player,view,box,patches}=setup();t.after(()=>view.destroy());player._rect.height=height;player._rect.bottom=height;
+test('dragging up reaches the top of the player but never leaves it',t=>{
+  for(const [height,top,y,want]of [[540,400,1000,0],[540,400,-1000,470],[1080,940,-2000,1010],[180,40,-1000,110]]){
+    const {h,player,view,box,patches}=setup();t.after(()=>view.destroy());player._rect.height=height;player._rect.bottom=height;box._rect={...box._rect,top,bottom:top+70};
     view.render({});h.emit(box,'pointerdown',{pointerId:1,clientY:100});h.emit(h.env,'pointermove',{pointerId:1,clientY:y});h.emit(h.env,'pointerup',{pointerId:1,clientY:y});
     assert.deepEqual(patches,[{subtitleStyle:{offset:want}}]);assert.equal(view.host.style.bottom,want+'px');
   }
@@ -175,7 +176,7 @@ test('subtitle navigation shortcuts ignore editors and seek without starting pau
 });
 test('dragging top-positioned captions keeps the offset across renders and saves only the position patch',async t=>{
   const h=studyFixture({settings:{subtitleStyle:{position:'top-center',offset:70}}});t.after(()=>h.manager.stop());await h.load();
-  const host=h.captionHost(),background=host.shadowRoot.querySelector('.captions');h.emit(background,'pointerdown',{clientY:100,pointerId:1});
+  const host=h.captionHost(),background=host.shadowRoot.querySelector('.captions');background._rect={left:330,top:170,right:630,bottom:240,width:300,height:70};h.emit(background,'pointerdown',{clientY:100,pointerId:1});
   h.emit(h.env,'pointermove',{clientY:140,pointerId:1});h.manager.sync();assert.equal(host.style.top,'110px');
   h.emit(h.env,'pointerup',{clientY:140,pointerId:1});await h.flush();h.manager.sync();
   assert.deepEqual(h.patches.at(-1),{subtitleStyle:{offset:110}});assert.equal(host.style.top,'110px');
@@ -229,14 +230,35 @@ async function metadata(h,values=trackOptions,selectedLanguage='en'){
 }
 async function choose(h,value){selected(h).value=value;h.emit(selected(h),'change');await h.flush();}
 
-test('toolbar off and on survive fresh controllers and agree with the settings checkbox',async t=>{
+test('the 译 button switches only translation, survives fresh controllers and agrees with the settings checkboxes',async t=>{
   const store=storeFixture(t),first=await store.open();
   first.emit(first.mainButton(),'click');await first.flush();
-  assert.equal(store.saved.subtitlesEnabled,false);assert.equal(first.session().isEnabled(),false);
-  assert.equal(first.settingsPanel().shadowRoot.querySelector('.subtitles-enabled').checked,false);first.manager.stop();
-  const second=await store.open();assert.equal(second.session().isEnabled(),false);assert.equal(second.mainButton().getAttribute('aria-pressed'),'false');
-  second.emit(second.mainButton(),'click');await second.flush();assert.equal(store.saved.subtitlesEnabled,true);assert.equal(second.session().isEnabled(),true);second.manager.stop();
-  const third=await store.open();assert.equal(third.session().isEnabled(),true);assert.deepEqual(store.writes,[{subtitlesEnabled:false},{subtitlesEnabled:true}]);
+  assert.equal(store.saved.subtitleTranslationEnabled,false);assert.equal(store.saved.subtitlesEnabled,true);
+  assert.equal(first.session().isEnabled(),true,'Kuai captions stay on without translation');assert.equal(first.mainButton().getAttribute('aria-pressed'),'false');
+  const shadow=first.settingsPanel().shadowRoot;
+  assert.equal(shadow.querySelector('.subtitle-translate').checked,false);assert.equal(shadow.querySelector('.subtitles-enabled').checked,true);
+  assert.equal(shadow.querySelector('.subtitle-provider').disabled,true,'translation choices rest while translation is off');first.manager.stop();
+  const second=await store.open();assert.equal(second.mainButton().getAttribute('aria-pressed'),'false');
+  second.emit(second.mainButton(),'click');await second.flush();assert.equal(store.saved.subtitleTranslationEnabled,true);second.manager.stop();
+  assert.deepEqual(store.writes,[{subtitleTranslationEnabled:false},{subtitleTranslationEnabled:true}]);
+  store.patch({subtitlesEnabled:false});const third=await store.open();assert.equal(third.session().isEnabled(),false);
+  third.emit(third.mainButton(),'click');await third.flush();
+  assert.deepEqual(store.writes.at(-1),{subtitlesEnabled:true,subtitleTranslationEnabled:true},'from captions off, 译 turns everything on');
+  assert.equal(third.session().isEnabled(),true);assert.equal(third.mainButton().getAttribute('aria-pressed'),'true');
+});
+test('with translation off, captions keep Kuai segmentation and style, request nothing, and the list stays as a transcript',async t=>{
+  const h=studyFixture({settings:{subtitleTranslationEnabled:false,subtitleListOpen:true}});t.after(()=>h.manager.stop());await h.load();
+  const host=h.captionHost().shadowRoot;
+  assert.equal(h.translations.length,0,'no translation service requests');
+  assert.equal(h.captionHost().hidden,false);assert.equal(host.querySelector('.original-text').textContent,'First');
+  assert.equal(host.querySelector('.translation-text').hidden,true);assert.equal(host.querySelector('.busy').hidden,true);
+  assert.equal(h.panel().hidden,false);const list=h.panel().shadowRoot;
+  assert.deepEqual(list.querySelectorAll('.original-text').map(node=>node.textContent),['First','Second','Third']);
+  assert.equal(list.querySelectorAll('.translation-text').every(node=>node.hidden),true);
+  assert.equal(list.querySelector('.views').hidden,true);assert.equal(list.querySelector('.cue-status').hidden,true);
+  h.manager.updateSettings({...h.config,subtitleTranslationEnabled:true});await h.flush();
+  assert.ok(h.translations.length>0,'turning translation back on translates again');
+  assert.equal(host.querySelector('.translation-text').textContent,'译:First');assert.equal(list.querySelector('.views').hidden,false);
 });
 test('remembered source language and same-language automatic kind restore on fresh controllers',async t=>{
   const store=storeFixture(t),h=await store.open();await metadata(h);await choose(h,'es:');
@@ -283,4 +305,142 @@ test('translation-only captions show the source until the translation arrives',t
   assert.equal(original.hidden,false);assert.equal(original.textContent,'Hello');assert.equal(native.style.visibility,'hidden');
   session.state.currentCaption={original:'Hello',translation:'你好',status:'success'};view.render(settings);
   assert.equal(original.hidden,true);
+});
+
+test('an English interface localizes the toolbar, captions, settings panel and runtime errors, and follows language changes',async t=>{
+  const h=studyFixture({settings:{interfaceLanguage:'en'}});t.after(()=>h.manager.stop());await h.flush();
+  assert.equal(h.mainButton().title,'Turn subtitle translation on or off (Kuai captions and the list stay)');
+  assert.equal(h.settingsButton().getAttribute('aria-label'),'Subtitle settings');
+  h.emit(h.settingsButton(),'click');const shadow=h.settingsPanel().shadowRoot;
+  assert.equal(shadow.querySelector('h2').textContent,'Subtitle settings');
+  assert.equal(shadow.querySelector('.subtitle-mode').getAttribute('aria-label'),'Display');
+  assert.equal(shadow.querySelector('.subtitle-mode').children[1].textContent,'Translation only');
+  assert.equal(shadow.querySelector('.subtitle-target').children[0].textContent,'Same as page target language');
+  assert.equal(shadow.querySelector('.subtitle-track').children[0].textContent,'Auto (no captions found yet)');
+  h.tracks();const request=h.outbound.filter(item=>item.kind==='fetch-track').at(-1);
+  h.message({kind:'caption-error',requestId:request.requestId});await h.flush();
+  assert.equal(h.session().state.errorMessage,"Couldn't load these subtitles. Switch the subtitle language or retry.");
+  assert.equal(h.captionHost().shadowRoot.querySelector('.retry').textContent,'Retry');
+  assert.match(h.document.querySelector('[data-kuai-subtitle-next]').title,/^Next subtitle · /);
+  h.manager.updateSettings({...h.config,interfaceLanguage:'zh-CN'});await h.flush();
+  assert.equal(h.mainButton().title,'开启或关闭字幕翻译（关闭后仍保留 Kuai 字幕和列表）');
+  assert.equal(shadow.querySelector('h2').textContent,'字幕设置');assert.equal(shadow.querySelector('.subtitle-mode').children[1].textContent,'只显示译文');
+  assert.equal(h.captionHost().shadowRoot.querySelector('.retry').textContent,'重试');
+});
+test('navigation explains whether Kuai captions or video captions are off',async t=>{
+  const off=studyFixture({settings:{subtitlesEnabled:false}});t.after(()=>off.manager.stop());await off.flush();
+  assert.match(off.document.querySelector('[data-kuai-subtitle-next]').title,/请先开启 Kuai 字幕/);
+  const cc=studyFixture({cc:false});t.after(()=>cc.manager.stop());await cc.flush();
+  assert.match(cc.document.querySelector('[data-kuai-subtitle-next]').title,/请开启视频字幕后继续/);
+});
+
+test('previous restarts a sentence that has played for a moment and otherwise goes back one',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.load();
+  const previous=h.document.querySelector('[data-kuai-subtitle-previous]');
+  h.video.currentTime=2;h.manager.sync();await h.flush();
+  assert.equal(previous.disabled,false);assert.match(previous.title,/^重播本句 · Ctrl\+Alt\+←/);
+  h.emit(previous,'click');await h.flush();assert.equal(h.video.currentTime,0);
+  h.video.currentTime=5.5;h.manager.sync();await h.flush();assert.match(previous.title,/^上一句字幕/);
+  h.emit(previous,'click');await h.flush();assert.equal(h.video.currentTime,0);assert.equal(h.video.playCount,0);
+});
+test('letter shortcuts navigate, replay and loop only when chosen, and never from editors',async t=>{
+  const h=studyFixture({settings:{subtitleShortcuts:'letters'}});t.after(()=>h.manager.stop());await h.load();
+  const key=(key,init={})=>h.emit(h.document,'keydown',{key,...init});
+  key('ArrowRight',{ctrlKey:true,altKey:true});assert.equal(h.video.currentTime,0,'the other scheme is inactive');
+  assert.equal(key('d').defaultPrevented,true);await h.flush();assert.equal(h.video.currentTime,5);
+  h.video.currentTime=7;key('s');await h.flush();assert.equal(h.video.currentTime,5);
+  key('a');await h.flush();assert.equal(h.video.currentTime,0);
+  const editor=h.document.createElement('input');h.player.append(editor);h.emit(editor,'keydown',{key:'d'});assert.equal(h.video.currentTime,0);
+  key('r');await h.flush();assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});
+  assert.match(h.captionHost().shadowRoot.querySelector('.status').textContent,/单句循环中/);
+  h.emit(h.settingsButton(),'click');assert.equal(h.settingsPanel().shadowRoot.querySelector('.subtitle-loop').checked,true);
+  key('r');await h.flush();assert.equal(h.session().state.loopingCaption,null);
+  h.manager.updateSettings({...h.config,subtitleShortcuts:'off'});await h.flush();
+  assert.equal(key('d').defaultPrevented,false);assert.equal(h.video.currentTime,0);
+});
+test('the settings panel saves the shortcut scheme, toggles the sentence loop and closes on an outside press',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.load();
+  h.emit(h.settingsButton(),'click');const panel=h.settingsPanel(),shadow=panel.shadowRoot;
+  const shortcuts=shadow.querySelector('.subtitle-shortcuts');assert.equal(shortcuts.value,'ctrl-alt');
+  shortcuts.value='letters';h.emit(shortcuts,'change');await h.flush();assert.deepEqual(h.patches.at(-1),{subtitleShortcuts:'letters'});
+  const loop=shadow.querySelector('.subtitle-loop');loop.checked=true;h.emit(loop,'change');await h.flush();
+  assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});assert.equal(loop.checked,true);
+  h.emit(shadow.querySelector('.subtitle-mode'),'pointerdown');assert.equal(panel.hidden,false,'presses inside keep it open');
+  h.emit(h.video,'pointerdown');assert.equal(panel.hidden,true);
+});
+test('the settings panel sits just left of an open subtitle list drawer',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.flush();
+  const drawer=h.document.createElement('section');drawer.dataset.placement='drawer';drawer._rect={left:578,top:112,right:948,bottom:576,width:370,height:464};h.player.append(drawer);
+  const reopen=()=>{h.emit(h.settingsButton(),'click');h.emit(h.settingsButton(),'click');};
+  h.emit(h.settingsButton(),'click');const panel=h.settingsPanel();
+  assert.equal(panel.style.right,'394px');assert.equal(panel.style.left,'auto');
+  h.player._rect={left:0,top:100,right:600,bottom:640,width:600,height:540};reopen();
+  assert.equal(panel.style.left,'12px','a player too narrow for both uses its left edge');assert.equal(panel.style.right,'auto');
+  drawer.hidden=true;reopen();assert.equal(panel.style.right,'12px');assert.equal(panel.style.left,'auto');
+});
+test('a narrow player keeps only the main toolbar buttons and a pending caption shows a quiet indicator',t=>{
+  const {view,player,session}=setup();t.after(()=>view.destroy());
+  session.state.currentCaption={original:'Hello',translation:'',status:'pending'};player._rect.width=400;view.render({});
+  const previous=view.toolbar.querySelector('[data-kuai-subtitle-previous]'),shadow=view.host.shadowRoot;
+  assert.equal(previous.hidden,true);assert.equal(previous.style.display,'none');
+  assert.equal(shadow.querySelector('.busy').hidden,false);assert.equal(shadow.querySelector('.status').hidden,true,'no per-caption waiting text');
+  session.state.currentCaption.translation='你好';player._rect.width=960;view.render({});
+  assert.equal(previous.hidden,false);assert.equal(shadow.querySelector('.busy').hidden,true);
+});
+test('next and previous keep a sentence loop on the sentence they move to',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.load();
+  h.emit(h.document,'keydown',{key:'ArrowUp',ctrlKey:true,altKey:true});await h.flush();
+  assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});
+  h.emit(h.document.querySelector('[data-kuai-subtitle-next]'),'click');await h.flush();
+  assert.equal(h.video.currentTime,5);assert.deepEqual(h.session().state.loopingCaption,{start:5,end:8});
+  h.video.currentTime=7.99;h.manager.sync();await h.flush();assert.equal(h.video.currentTime,5);
+  const previous=h.document.querySelector('[data-kuai-subtitle-previous]');
+  h.video.currentTime=6.5;h.manager.sync();await h.flush();h.emit(previous,'click');await h.flush();
+  assert.equal(h.video.currentTime,5,'previous replays the looped sentence after it has played');assert.deepEqual(h.session().state.loopingCaption,{start:5,end:8});
+  h.emit(previous,'click');await h.flush();
+  assert.equal(h.video.currentTime,0);assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});
+});
+
+test('captions drag sideways inside the player, persist the horizontal offset and re-center on double-click',t=>{
+  const {h,view,box,patches}=setup();t.after(()=>view.destroy());view.render({});
+  box._rect={left:330,top:400,right:630,bottom:460,width:300,height:60};
+  h.emit(box,'pointerdown',{pointerId:4,clientX:500,clientY:300});
+  h.emit(h.env,'pointermove',{pointerId:4,clientX:404,clientY:280});
+  assert.equal(view.host.style.left,'40%','96px of a 960px player is 10%');assert.equal(view.host.style.bottom,'90px');
+  h.emit(h.env,'pointerup',{pointerId:4,clientX:404,clientY:280});
+  assert.deepEqual(patches,[{subtitleStyle:{offset:90,horizontalOffset:-10}}]);
+  view.render({subtitleStyle:{offset:90,horizontalOffset:-10}});assert.equal(view.host.style.left,'40%');
+  h.emit(box,'pointerdown',{pointerId:5,clientX:500,clientY:300});h.emit(h.env,'pointermove',{pointerId:5,clientX:5000,clientY:300});
+  assert.equal(view.host.style.left,'74.4%','the box stops at the player edge (330px right of it)');
+  h.emit(h.env,'pointercancel',{pointerId:5});assert.equal(view.host.style.left,'40%','cancel restores the start position');
+  h.emit(box,'dblclick');assert.equal(view.host.style.left,'50%');
+  assert.deepEqual(patches.at(-1),{subtitleStyle:{horizontalOffset:0}});
+});
+test('horizontal offsets apply from every anchor and stay within bounds',async()=>{
+  const {applySubtitlePositionStyle}=await import('../dist/src/shared/styles.js');
+  const {normalizeSubtitleStyle}=await import('../dist/src/shared/presentation.js');
+  const node=()=>({style:{setProperty(name,value){this[name]=value;}}});
+  for(const [position,shift,left,right]of [['bottom-center',12.5,'62.5%','auto'],['top-left',10,'13%','auto'],['bottom-right',10,'auto','-7%']]){
+    const element=node();applySubtitlePositionStyle(element,{position,horizontalOffset:shift});
+    assert.equal(element.style.left,left);assert.equal(element.style.right,right);
+  }
+  assert.equal(normalizeSubtitleStyle({horizontalOffset:80}).horizontalOffset,50);
+  assert.equal(normalizeSubtitleStyle({horizontalOffset:-12.34}).horizontalOffset,-12.3);
+  assert.equal(normalizeSubtitleStyle({}).horizontalOffset,0);
+});
+test('an offset saved in a taller fullscreen player keeps the caption inside a smaller one',t=>{
+  const {view,player}=setup();t.after(()=>view.destroy());
+  view.render({subtitleStyle:{offset:1010}});assert.equal(view.host.style.bottom,'470px','540px player minus the 70px caption');
+  player._rect.height=1080;player._rect.bottom=1080;view.render({subtitleStyle:{offset:1010}});assert.equal(view.host.style.bottom,'1010px');
+});
+test('toolbar buttons use player-style icons, the Kuai logo for settings and a red mark for active translation',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.load();
+  const icon=node=>[...node.children].filter(child=>child.tagName==='SVG'&&child.style.display!=='none').map(child=>child.getAttribute('data-icon'));
+  const previous=h.document.querySelector('[data-kuai-subtitle-previous]'),mark=h.mainButton().querySelector('[data-kuai-active-mark]');
+  assert.deepEqual(icon(h.mainButton()),['translate']);assert.deepEqual(icon(h.settingsButton()),['kuai']);
+  assert.deepEqual(icon(h.document.querySelector('[data-kuai-subtitle-next]')),['next']);assert.deepEqual(icon(previous),['previous']);
+  assert.equal(h.mainButton().textContent.includes('⚙'),false);assert.equal(mark.style.display,'block');
+  h.video.currentTime=2;h.manager.sync();await h.flush();assert.deepEqual(icon(previous),['replay'],'previous shows replay while it would restart the sentence');
+  h.ccButton.setAttribute('aria-pressed','false');h.manager.sync();await h.flush();
+  assert.equal(h.mainButton().getAttribute('aria-pressed'),'false');assert.equal(mark.style.display,'none');
 });

@@ -1,11 +1,11 @@
 import type {Settings} from '../shared/settings.js';
 type PreferenceRecord=Record<string,any>;
-import { normalizeSettings, normalizeSubtitleTrackPreference } from '../shared/settings.js';
+import { normalizeSettings, normalizeSubtitleTrackPreference, SUBTITLE_SHORTCUT_SCHEMES } from '../shared/settings.js';
 import { normalizeSubtitleStyle, SUBTITLE_STYLE_DEFAULTS } from '../shared/presentation.js';
 import { failure } from '../providers/errors.js';
 
 const plain=(value:unknown):value is PreferenceRecord=>value!==null && typeof value==='object' && !Array.isArray(value);
-const allowed=new Set(['subtitlesEnabled','subtitleProviderId','subtitleTargetLanguage','subtitleStyle','subtitleTrackPreference','subtitleListOpen']);
+const allowed=new Set(['subtitlesEnabled','subtitleTranslationEnabled','subtitleProviderId','subtitleTargetLanguage','subtitleStyle','subtitleTrackPreference','subtitleListOpen','subtitleShortcuts']);
 const invalid:()=>never=()=>{throw failure('INVALID_PREFERENCES','字幕偏好无效，请检查所选服务、语言或样式。');};
 
 /** A content page can change these public caption preferences, never provider credentials. */
@@ -16,9 +16,17 @@ export function applyPreferencePatch(current:Settings,patch:unknown):Settings {
     if (typeof patch.subtitlesEnabled!=='boolean') invalid();
     next.subtitlesEnabled=patch.subtitlesEnabled;
   }
+  if (Object.hasOwn(patch,'subtitleTranslationEnabled')) {
+    if (typeof patch.subtitleTranslationEnabled!=='boolean') invalid();
+    next.subtitleTranslationEnabled=patch.subtitleTranslationEnabled;
+  }
   if (Object.hasOwn(patch,'subtitleListOpen')) {
     if (typeof patch.subtitleListOpen!=='boolean') invalid();
     next.subtitleListOpen=patch.subtitleListOpen;
+  }
+  if (Object.hasOwn(patch,'subtitleShortcuts')) {
+    if (!SUBTITLE_SHORTCUT_SCHEMES.includes(patch.subtitleShortcuts)) invalid();
+    next.subtitleShortcuts=patch.subtitleShortcuts;
   }
   if (Object.hasOwn(patch,'subtitleTrackPreference')) {
     const preference=patch.subtitleTrackPreference,keys=['languageCode','kind','name'];

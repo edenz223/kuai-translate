@@ -104,10 +104,10 @@ export function applySubtitleBoxStyle(element:HTMLElement,input?:unknown) {
 }
 
 export function applySubtitlePositionStyle(element:HTMLElement,input?:unknown) {
-  const style=normalizeSubtitleStyle(input),[vertical,horizontal]=style.position.split('-');
+  const style=normalizeSubtitleStyle(input),[vertical,horizontal]=style.position.split('-'),shift=style.horizontalOffset;
   apply(element,{
     top:vertical==='top'?style.offset+'px':'auto',bottom:vertical==='bottom'?style.offset+'px':'auto',
-    left:horizontal==='left'?'3%':horizontal==='center'?'50%':'auto',right:horizontal==='right'?'3%':'auto',
+    left:horizontal==='left'?3+shift+'%':horizontal==='center'?50+shift+'%':'auto',right:horizontal==='right'?3-shift+'%':'auto',
     transform:horizontal==='center'?'translateX(-50%)':'none','max-width':style.maxWidth+'%',
     'text-align':horizontal==='center'?'center':horizontal,
   });

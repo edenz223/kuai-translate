@@ -127,10 +127,11 @@
   </div>
 </section>
 <section id="subtitles" class="settings-section" aria-labelledby="subtitles-heading" hidden>
-  <header class="section-header"><div><h2 id="subtitles-heading">YouTube 字幕</h2><p class="section-desc">在播放器中显示双语字幕和侧边字幕列表，视频需提供字幕并开启 CC。<span class="hint" tabindex="0"><span class="hint-text">播放器中使用“译”开关、字幕设置和列表按钮。选中字幕文字会暂停播放并固定字幕，取消选中后恢复播放。</span></span></p></div><input id="subtitles-enabled" class="switch" type="checkbox" role="switch" aria-label="启用 YouTube 字幕翻译和侧边列表"></header>
+  <header class="section-header"><div><h2 id="subtitles-heading">YouTube 字幕</h2><p class="section-desc">在播放器中显示双语字幕和侧边字幕列表，视频需提供字幕并开启 CC。<span class="hint" tabindex="0"><span class="hint-text">播放器中使用“译”开关、字幕设置和列表按钮。选中字幕文字会暂停播放并固定字幕，取消选中后恢复播放。</span></span></p></div><input id="subtitles-enabled" class="switch" type="checkbox" role="switch" aria-label="启用 Kuai YouTube 字幕（断句、样式和侧边列表）"></header>
   <p class="off-note">已关闭。打开右上方的开关即可启用并调整设置。</p>
   <div id="subtitle-options-panel">
     <div class="group">
+      <label class="row"><span>翻译字幕<span class="hint" tabindex="0"><span class="hint-text">关闭后仍使用 Kuai 的断句、字幕样式和字幕列表，只显示原文，不再请求翻译服务。播放器里的“译”按钮切换的就是这一项。</span></span></span><input id="subtitle-translation-enabled" class="switch" type="checkbox" role="switch"></label>
       <label class="row"><span>目标语言</span><select id="subtitle-target-language"></select></label>
       <label class="row"><span>翻译服务</span><select id="subtitle-provider"></select></label>
     </div>
@@ -153,10 +154,14 @@
         <label class="row"><span>背景范围</span><select id="subtitle-style-backgroundMode"></select></label>
         <div class="row"><label for="subtitle-style-backgroundOpacity">背景不透明度<small>0–100%</small></label><input id="subtitle-style-backgroundOpacity" type="number" min="0" max="100" step="5"></div>
         <label class="row"><span>字幕位置</span><select id="subtitle-style-position"></select></label>
-        <div class="row"><label for="subtitle-style-offset">距上 / 下边缘<small>0–300 px</small></label><input id="subtitle-style-offset" type="number" min="0" max="300" step="5"></div>
+        <div class="row"><label for="subtitle-style-offset">距上 / 下边缘<small>0–2000 px</small></label><input id="subtitle-style-offset" type="number" min="0" max="2000" step="5"></div>
+        <div class="row"><label for="subtitle-style-horizontalOffset">水平偏移<span class="hint" tabindex="0"><span class="hint-text">在播放器里拖动字幕背景可同时调整上下和左右位置；双击字幕背景恢复到所选位置。</span></span><small>播放器宽度的 −50–50%，负数向左</small></label><input id="subtitle-style-horizontalOffset" type="number" min="-50" max="50" step="1"></div>
         <div class="row"><label for="subtitle-style-maxWidth">最大宽度<small>播放器的 40–100%</small></label><input id="subtitle-style-maxWidth" type="number" min="40" max="100" step="1"></div>
         <div class="row-actions"><button id="reset-subtitle-style" type="button">恢复默认字幕样式</button><small>保留字幕服务和目标语言。</small></div>
       </details>
+    </div>
+    <div class="group"><h3>快捷键</h3>
+      <label class="row"><span>播放器快捷键<span class="hint" tabindex="0"><span class="hint-text">Ctrl+Alt+方向键：← 上一句 · ↓ 重播 · → 下一句 · ↑ 单句循环。字母键：A 上一句 · S 重播 · D 下一句 · R 单句循环。焦点在输入框时不生效。</span></span></span><select id="subtitle-shortcuts"></select></label>
     </div>
   </div>
 </section>
