@@ -202,6 +202,16 @@ test('effective feature settings resolve independent services and languages with
   assert.notEqual(selection,settings);assert.equal(settings.activeProviderId,'microsoft');assert.equal(settings.targetLanguage,'zh-Hans');
 });
 
+test('feature settings detect the source instead of sending a same-language pair',()=>{
+  const settings={activeProviderId:'microsoft',sourceLanguage:'en',targetLanguage:'zh-Hans',providers:[{id:'microsoft',enabled:true}],
+    selectionOptions:{sourceLanguage:'zh_hans',targetLanguage:'follow_page'},inputOptions:{sourceLanguage:'follow_page',targetLanguage:'en'}};
+  const input=resolveFeatureSettings(settings,'input');assert.equal(input.sourceLanguage,'auto');assert.equal(input.targetLanguage,'en');
+  const selection=resolveFeatureSettings(settings,'selection');assert.equal(selection.sourceLanguage,'auto');assert.equal(selection.targetLanguage,'zh-Hans');
+  settings.inputOptions.targetLanguage='ja';assert.equal(resolveFeatureSettings(settings,'input').sourceLanguage,'en');
+  settings.inputOptions.targetLanguage='zh-Hant';settings.inputOptions.sourceLanguage='zh-Hans';assert.equal(resolveFeatureSettings(settings,'input').sourceLanguage,'zh-Hans');
+  assert.equal(resolveFeatureSettings(settings,'hover').sourceLanguage,'en');
+});
+
 test('all four complete interaction groups survive public views and secret-free backup round trips',()=>{
   const value=defaultSettings();
   value.pageOptions={autoTranslate:true,alwaysLanguages:['en'],neverLanguages:['ja'],alwaysSites:['news.example'],neverSites:['blocked.example'],translateFullPage:false,excludeSelectors:['.advert'],minTextLength:8,translateDynamic:true,contextMenuEnabled:false,shortcut:'Control+Z',displayModeShortcut:'Alt+Q'};
