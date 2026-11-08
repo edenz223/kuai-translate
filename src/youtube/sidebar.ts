@@ -5,7 +5,7 @@ interface SidebarEntry {
  rows:Map<number,SidebarRow>;cues:CaptionCue[];offsets:number[];heights:number[];failedRequests:WeakSet<CaptionCue>;start:number;end:number;active:number;
  source?:CaptionCue[];sourceLength?:number;version?:number;seekError?:boolean;dispose?:()=>void;observer?:MutationObserver;resizeObserver?:ResizeObserver;
  toggleHost?:HTMLElement|null;anchor?:HTMLElement|null;toggleButton?:HTMLButtonElement;
- panel:HTMLElement;title:HTMLElement;closeButton:HTMLButtonElement;count:HTMLElement;followButton:HTMLButtonElement;followState:HTMLElement;status:HTMLElement;list:HTMLElement;rowsHost:HTMLElement;topSpacer:HTMLElement;bottomSpacer:HTMLElement;
+ panel:HTMLElement;title:HTMLElement;closeButton:HTMLButtonElement;count:HTMLElement;followButton:HTMLButtonElement;followState:HTMLElement;status:HTMLElement;retryButton:HTMLButtonElement;list:HTMLElement;rowsHost:HTMLElement;topSpacer:HTMLElement;bottomSpacer:HTMLElement;
 }
 interface SidebarTranslationJob {entry:SidebarEntry;source:CaptionCue[]|undefined;version:number|undefined;batch:CaptionCue[];refused:boolean}
 /* YouTube subtitle list. Runs in the extension's isolated content-script world. */
@@ -16,7 +16,7 @@ const root = globalThis;
 const words = {
   en: {
     title: "Subtitle list", close: "Close subtitle list", follow: "Back to current", following: "Following current", reading: "Reading freely",
-    empty: "Turn on captions in the video to load its subtitle list.",
+    loading: "Loading the subtitle timeline…", failed: "Couldn't load the full subtitles for this video.", retry: "Retry",
     disabled: "Enable subtitle translation to use this list.", nativeDisabled: "Turn on captions in the video to continue.",
     unavailable: "A complete subtitle timeline is unavailable for this video.",
     pending: "Waiting for translation", translating: "Translating…", error: "Translation unavailable",
@@ -24,7 +24,7 @@ const words = {
   },
   zh: {
     title: "字幕列表", close: "关闭字幕列表", follow: "回到当前字幕", following: "正在跟随", reading: "自由阅读中",
-    empty: "请先开启视频字幕，字幕列表会自动加载。",
+    loading: "正在读取字幕时间轴…", failed: "暂时无法读取这条字幕的完整时间轴。", retry: "重试",
     disabled: "请开启字幕翻译后使用字幕列表。", nativeDisabled: "请开启视频字幕后继续。",
     unavailable: "此视频暂时没有完整的字幕时间轴。",
     pending: "等待翻译", translating: "翻译中…", error: "翻译暂不可用",
@@ -50,7 +50,9 @@ const panelStyle = `
   .follow-current{border:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));border-radius:6px;background:transparent;color:var(--yt-spec-call-to-action,var(--reading-accent));padding:3px 8px;font-size:12px;white-space:nowrap}
   .follow-current:hover{background:var(--yt-spec-badge-chip-background,var(--reading-hover))}
   .panel-status{margin:0;padding:20px 16px;color:var(--yt-spec-text-secondary,var(--reading-muted));font-size:13px}
-  .panel-status[hidden],.subtitle-list[hidden],.follow-current[hidden],.follow-state[hidden]{display:none}
+  .retry-timeline{align-self:flex-start;margin:-8px 16px 16px;border:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));border-radius:6px;background:transparent;color:var(--yt-spec-call-to-action,var(--reading-accent));padding:3px 10px;font-size:12px}
+  .retry-timeline:hover{background:var(--yt-spec-badge-chip-background,var(--reading-hover))}
+  .panel-status[hidden],.retry-timeline[hidden],.subtitle-list[hidden],.follow-current[hidden],.follow-state[hidden]{display:none}
   .subtitle-list{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;overflow-anchor:none;scrollbar-width:thin;touch-action:pan-y;padding:0;position:relative}
   .cue{display:flex;gap:10px;padding:10px 12px 10px 10px;min-height:60px;border-left:2px solid transparent;border-bottom:1px solid var(--yt-spec-10-percent-layer,var(--reading-border))}
   .cue[aria-current="true"]{border-left-color:var(--yt-spec-call-to-action,var(--reading-accent));background:#3ea6ff0d}
@@ -227,8 +229,14 @@ function createController(bridge:SubtitleBridge, env = root) {
         entry.follow = true; entry.forceFollow = true; schedule();
       });
       tools.append(count, followState, follow);
-      const status = element("p", "panel-status"), list = element("div", "subtitle-list");
+      const status = element("p", "panel-status"), list = element("div", "subtitle-list"), retry = element("button", "retry-timeline");
       status.setAttribute("role", "status"); list.tabIndex = 0;
+      retry.type = "button"; retry.hidden = true;
+      cancelSelectionOnPress(retry, entry, "sidebar-retry-intent");
+      retry.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        bridge.retryTimeline?.(entry.session.id); schedule();
+      });
       const top = element("div", "spacer"), rows = element("div", "cue-rows"), bottom = element("div", "spacer");
       top.setAttribute("aria-hidden", "true"); bottom.setAttribute("aria-hidden", "true"); rows.setAttribute("role", "list");
       list.append(top, rows, bottom);
@@ -244,8 +252,8 @@ function createController(bridge:SubtitleBridge, env = root) {
       });
       // Preserve selection defaults and mouseup propagation to selection translation.
       for (const type of ["pointerdown", "mousedown", "click", "dblclick"]) host.addEventListener(type, event => event.stopPropagation());
-      panel.append(header, tools, status, list); shadow.append(style, panel);
-      Object.assign(entry, { panel: host, title, closeButton: close, count, followButton: follow, followState, status, list, rowsHost: rows, topSpacer: top, bottomSpacer: bottom });
+      panel.append(header, tools, status, retry, list); shadow.append(style, panel);
+      Object.assign(entry, { panel: host, title, closeButton: close, count, followButton: follow, followState, status, retryButton: retry, list, rowsHost: rows, topSpacer: top, bottomSpacer: bottom });
       if (env.ResizeObserver) {
         entry.resizeObserver = new env.ResizeObserver(schedule);
         entry.resizeObserver.observe(list);
@@ -403,7 +411,8 @@ function createController(bridge:SubtitleBridge, env = root) {
     }
     if (!entry.open) { if (entry.panel) entry.panel.hidden = true; return; }
     // Moving even a shadow host can invalidate the browser's live selection.
-    if (held(entry)) { stopFollowing(entry); return; }
+    // A hold only freezes the list: selecting a word on the video is not manual reading.
+    if (held(entry)) return;
     if (!mountPanel(entry)) {entry.panel.hidden=true;return;}
     entry.panel.setAttribute("aria-label", text.title);
     setText(entry.title, text.title);
@@ -413,11 +422,14 @@ function createController(bridge:SubtitleBridge, env = root) {
     if (source !== entry.source || source?.length !== entry.sourceLength) resetTimeline(entry, source);
     if (entry.version !== state?.translateVersion) { entry.version = state?.translateVersion; entry.failedRequests = new WeakSet(); }
     setText(entry.count, entry.cues.length + " " + text.count);
+    const failed = enabled(entry) && !!state?.timelineFailed && (!entry.cues.length || !!state.isLiveDomCaptions);
     const reason = !enabled(entry) ? (config.isEnable === "1" ? text.nativeDisabled : text.disabled)
+      : failed ? text.failed
       : state?.isLiveDomCaptions || entry.video.duration === Infinity ? text.unavailable
-      : !entry.cues.length ? text.empty : "";
+      : !entry.cues.length ? text.loading : "";
     const statusMessage = reason || (entry.seekError ? text.seekError : "");
     entry.status.hidden = !statusMessage; setText(entry.status, statusMessage);
+    entry.retryButton.hidden = !failed || !bridge.retryTimeline; setText(entry.retryButton, text.retry);
     entry.list.hidden = !!reason;
     entry.list.setAttribute("aria-label", text.title);
     updateFollow(entry);

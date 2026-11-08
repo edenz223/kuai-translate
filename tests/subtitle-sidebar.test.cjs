@@ -226,3 +226,29 @@ test('teardown removes controls and subscriptions while BFCache pagehide preserv
   assert.equal(f.subscribers.size, 0);
   assert.deepEqual(f.controller.getSelectionRoots(f.session.id), []);
 });
+
+test('a hold from selecting video captions freezes the list without leaving follow mode', async () => {
+  const f = fixture({ count: 50 });
+  f.state.currentCaption = { start: 0, end: 8, original: 'Original 1' };
+  f.controller.toggle(f.session.id, true); await f.flush();
+  const root = f.panel().shadowRoot, follow = root.querySelector('.follow-current'), list = root.querySelector('.subtitle-list');
+  f.state.isSubtitleSelectionHeld = true; f.notify(); await f.flush();
+  f.state.isSubtitleSelectionHeld = false;
+  f.state.currentCaption = { start: 200, end: 208, original: 'Original 21' }; f.video.currentTime = 200; f.notify(); await f.flush();
+  assert.equal(follow.hidden, true);
+  assert.ok(list.scrollTop > 1000);
+  assert.equal(root.querySelector('[aria-current="true"]').querySelector('.original-text').textContent, 'Original 21');
+  f.controller.stop();
+});
+
+test('a failed timeline explains itself and can be retried from the list', async () => {
+  const f = fixture({ count: 0 }), retries = [];
+  f.bridge.retryTimeline = id => { retries.push(id); f.state.timelineFailed = false; };
+  f.state.timelineFailed = true;
+  f.controller.toggle(f.session.id, true); await f.flush();
+  const root = f.panel().shadowRoot, status = root.querySelector('.panel-status'), retry = root.querySelector('.retry-timeline');
+  assert.match(status.textContent, /Couldn't load/); assert.equal(retry.hidden, false); assert.equal(retry.textContent, 'Retry');
+  f.emit(retry, 'click'); await f.flush();
+  assert.deepEqual(retries, ['video-one']); assert.equal(retry.hidden, true); assert.match(status.textContent, /Loading/);
+  f.controller.stop();
+});

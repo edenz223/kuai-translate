@@ -5,7 +5,7 @@ export interface CaptionViewOptions {
  onPreferences?:(patch:SettingsPatch)=>unknown;onOpenOptions?:(section:'subtitles')=>unknown;onNavigate?:(direction:number)=>unknown;
  cancelSelection?:(id:string,reason:string)=>void;
 }
-interface DragState {pointerId:number;y:number;offset:number;before:number|null;cue:string;bounds:string;layout?:string;moved?:boolean}
+interface DragState {pointerId:number;y:number;offset:number;before:number|null;bounds:string;layout?:string;moved?:boolean}
 // Captured browser events are registered through runtime event names.
 type BrowserEventCallback=(event:any)=>void;
 import {applySubtitleTextStyle,applySubtitleBoxStyle,applySubtitlePositionStyle} from '../shared/styles.js';
@@ -32,7 +32,7 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   const previous=control('‹','上一句字幕 · Ctrl+Alt+←'),next=control('›','下一句字幕 · Ctrl+Alt+→'),settingsButton=control('⚙','字幕设置');
   previous.dataset.kuaiSubtitlePrevious=session.id;next.dataset.kuaiSubtitleNext=session.id;settingsButton.dataset.kuaiSubtitleSettingsToggle=session.id;
   const preferences=createSubtitlePreferences({env,player,id:session.id,trigger:settingsButton,onChange:onPreferences,onTrackChange,onOpenOptions,cancelSelection});
-  let native:HTMLElement|null=null,nativeVisibility='',nativeHidden=false,dragState:DragState|null=null,dragOffset:number|null=null,clickPointer:number|null=null,clickTimer:ReturnType<typeof setTimeout>|null=null,destroyed=false,mounting=false,presentation=subtitleStyle(),layoutKey:string|undefined,positionKey:string|undefined;
+  let native:HTMLElement|null=null,nativeVisibility='',nativeHidden=false,dragState:DragState|null=null,dragOffset:number|null=null,clickPointer:number|null=null,clickTimer:ReturnType<typeof setTimeout>|null=null,destroyed=false,mounting=false,rendering=false,lastSettings:Settings|undefined,presentation=subtitleStyle(),layoutKey:string|undefined,positionKey:string|undefined;
   function restoreNative(){if(nativeHidden&&native?.style.visibility==='hidden')native.style.visibility=nativeVisibility;nativeHidden=false;}
   function nativeVisible(show:boolean){
     const found=player.querySelector<HTMLElement>('.ytp-caption-window-container');
@@ -67,8 +67,8 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   for(const [node,direction]of [[previous,-1],[next,1]] as const)node.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(!node.disabled)void perform(onNavigate,direction);});
   retry.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();void perform(onRetry);});
   for(const type of ['click','dblclick'])box.addEventListener(type,event=>event.stopPropagation());
-  const cueKey=()=>{const caption=session.state.currentCaption;return caption?JSON.stringify([caption.start,caption.end,caption.original]):'';};
-  const boundsKey=()=>{const rect=player.getBoundingClientRect();return JSON.stringify([rect.left,rect.top,rect.width,rect.height]);};
+  // Only a player resize changes the drag bounds; page scroll and caption changes do not.
+  const boundsKey=()=>{const rect=player.getBoundingClientRect();return JSON.stringify([rect.width,rect.height]);};
   const position=()=>applySubtitlePositionStyle(host,dragOffset===null?presentation:{...presentation,offset:dragOffset});
   function clearClick(){clickPointer=null;if(clickTimer!==null)env.clearTimeout(clickTimer);clickTimer=null;}
   function finishDrag(rollback:boolean){
@@ -76,12 +76,15 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     if(rollback)dragOffset=state.before;
     box.removeAttribute('data-dragging');box.style.cursor='grab';
     try{box.releasePointerCapture?.(state.pointerId);}catch{}
-    position();return state;
+    position();
+    // Captions are frozen while dragging; show the current caption again afterwards.
+    if(!rendering&&!destroyed&&lastSettings)render(lastSettings);
+    return state;
   }
   function cancelDrag(){finishDrag(true);}
   function currentDrag(){
     if(!dragState)return false;
-    if(destroyed||!host.isConnected||!session.video.isConnected||!player.contains(session.video)||host.hidden||!session.isEnabled()||session.state.isSubtitleSelectionHeld||dragState.cue!==cueKey()||dragState.bounds!==boundsKey()){
+    if(destroyed||!host.isConnected||!session.video.isConnected||!player.contains(session.video)||host.hidden||!session.isEnabled()||session.state.isSubtitleSelectionHeld||dragState.bounds!==boundsKey()){
       cancelDrag();return false;
     }
     return true;
@@ -94,7 +97,7 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     if(destroyed||dragState||host.hidden||!host.isConnected||!session.isEnabled()||event.defaultPrevented||event.button!==0||event.isPrimary===false||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||!Number.isFinite(event.pointerId)||!Number.isFinite(event.clientY)||!isBackground(target))return;
     cancelSelection(session.id,'drag');if(destroyed||host.hidden||!host.isConnected)return;
     event.preventDefault();event.stopPropagation();clearClick();clickPointer=event.pointerId;
-    dragState={pointerId:event.pointerId,y:event.clientY,offset:dragOffset??presentation.offset,before:dragOffset,cue:cueKey(),bounds:boundsKey(),layout:layoutKey};
+    dragState={pointerId:event.pointerId,y:event.clientY,offset:dragOffset??presentation.offset,before:dragOffset,bounds:boundsKey(),layout:layoutKey};
     box.setAttribute('data-dragging','');box.style.cursor='grabbing';
     try{box.setPointerCapture?.(event.pointerId);}catch{}
   });
@@ -130,7 +133,11 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   listen(doc,'visibilitychange',()=>{if(doc.visibilityState==='hidden')cancelDrag();});
   function setTracks(values:CaptionTrack[],selectedId?:string){preferences.setTracks(values,selectedId);}
   function render(settings:Settings){
-    if(destroyed)return;mount();preferences.render(settings);
+    if(destroyed)return;lastSettings=settings;rendering=true;
+    try{paint(settings);}finally{rendering=false;}
+  }
+  function paint(settings:Settings){
+    mount();preferences.render(settings);
     const pressed=String(session.isEnabled());if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);button.style.opacity=session.isEnabled()?'1':'.55';
     const navigation=navigationState(session);
     for(const [node,target,label]of [[previous,navigation.previous,'上一句字幕'],[next,navigation.next,'下一句字幕']] as const){node.disabled=target===null;node.style.opacity=node.disabled?'.4':'1';node.title=label+' · '+(navigation.reason||(target===null?'已到时间轴边界':node===previous?'Ctrl+Alt+←':'Ctrl+Alt+→'));}
@@ -140,15 +147,16 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     if(positionKey!==undefined&&positionKey!==nextPosition)dragOffset=null;positionKey=nextPosition;presentation=nextStyle;
     applySubtitleTextStyle(original,presentation,'source',player.getBoundingClientRect().width||1200);applySubtitleTextStyle(translation,presentation,'target',player.getBoundingClientRect().width||1200);applySubtitleBoxStyle(box,presentation);
     position();
-    if(session.state.isSubtitleSelectionHeld)return;
+    if(session.state.isSubtitleSelectionHeld||dragState)return;
     const caption=session.state.currentCaption,enabled=session.isEnabled();
     const set=(node:HTMLElement,value:string)=>{if(node.textContent!==value)node.textContent=value;};set(original,caption?.original||'');set(translation,caption?.translation||'');
-    originalLine.hidden=original.hidden=presentation.displayMode==='translation_only';translationLine.hidden=translation.hidden=!caption?.translation;
+    // Translation-only still shows the source until its translation exists.
+    originalLine.hidden=original.hidden=presentation.displayMode==='translation_only'&&!!caption?.translation;translationLine.hidden=translation.hidden=!caption?.translation;
     translationLine.style.order=translation.style.order=presentation.displayOrder==='translation_on_top'?'-1':'1';applySubtitleMask(translation,presentation.hideTranslation);
     const error=caption?.errorMessage||session.state.errorMessage||'',message=error||(!caption?.translation&&caption?(caption.status==='translating'?'翻译中…':'等待翻译'):'');
     set(status,message);status.hidden=!message;retry.hidden=!error;host.hidden=!enabled||(!caption&&!message);host.style.display=host.hidden?'none':'block';nativeVisible(!enabled||!caption?.original);
   }
-  function destroy(){if(destroyed)return;cancelDrag();clearClick();destroyed=true;restoreNative();preferences.destroy();host.remove();toolbar.remove();listeners.splice(0).forEach(dispose=>dispose());}
+  function destroy(){if(destroyed)return;destroyed=true;cancelDrag();clearClick();restoreNative();preferences.destroy();host.remove();toolbar.remove();listeners.splice(0).forEach(dispose=>dispose());}
   mount();
   return{host,toolbar,mount,render,setTracks,destroy,reportError,getRoots:()=>host.isConnected&&!host.hidden?[original,translation].filter(node=>!node.hidden&&node.textContent):[]};
 }

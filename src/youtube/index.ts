@@ -6,7 +6,7 @@ export interface YouTubeControllerOptions {
  env?:typeof globalThis;createSidebar?:typeof sidebarAPI.createController;createSelection?:typeof selectionAPI.createController;createView?:typeof createCaptionView;
 }
 interface YouTubeRecord {session:SubtitleSession;videoId:string;togglePending:boolean;tracks:CaptionTrack[];track?:CaptionTrack;
- pending:{id:string;trackId:string;track:CaptionTrack;timer:ReturnType<typeof setTimeout>}|null;loadedTrack:string;failedTrack:string|undefined;timelineSignature:string;domText:string;view:ReturnType<typeof createCaptionView>}
+ pending:{id:string;trackId:string;track:CaptionTrack;timer:ReturnType<typeof setTimeout>}|null;loadedTrack:string;capturedTrack?:CaptionTrack|null;failedTrack:string|undefined;timelineSignature:string;domText:string;view:ReturnType<typeof createCaptionView>}
 interface YouTubeDataMessage {source?:unknown;videoId?:unknown;kind?:unknown;tracks?:unknown[];selectedLanguage?:unknown;requestId?:string;trackUrl?:string;languageCode?:string;body?:unknown}
 // Runtime event names include YouTube custom events and native DOM events.
 type BrowserEventCallback=(event:any)=>void;
@@ -27,6 +27,15 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   const origin=()=>new URL(env.location.href).origin;
   const post=(data:Record<string,unknown>)=>env.postMessage({source:'kuai-youtube-request',...data},origin());
   const currentRecord=()=>records.values().next().value;
+  // The same logical caption track, whichever URL token or metadata ID reached us.
+  function sameTrack(a:CaptionTrack,b:CaptionTrack,{urlKind=false}={}){
+    const left=new URL(a.baseUrl),right=new URL(b.baseUrl);
+    return a.languageCode===b.languageCode&&(urlKind?left.searchParams.get('kind')===right.searchParams.get('kind'):a.kind===b.kind)&&
+      ['name','vssId','tlang'].every(key=>left.searchParams.get(key)===right.searchParams.get(key));
+  }
+  function failTimeline(record:YouTubeRecord,trackId:string|undefined,message=''){
+    record.failedTrack=trackId;record.session.state.errorMessage=message;record.session.state.timelineFailed=true;changed();
+  }
   function changed() {
     if(stopped)return;
     for(const record of records.values())record.view?.render(config);
@@ -52,6 +61,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     cancelSelection:(id,reason)=>selection?.cancel(id,reason),
     translateCues:(id,cues)=>records.get(id)?.session.translateCues(cues)??false,
     seek:(id,time)=>{const session=records.get(id)?.session;if(!session?.isEnabled())return false;selection?.cancel(id,'seek');return session.seek(time);},
+    retryTimeline:id=>{const record=records.get(id);if(record)requestTrack(record,true);},
     subscribe:callback=>{subscribers.add(callback);return()=>subscribers.delete(callback);},
   };
   function clearPending(record:YouTubeRecord,cancel=true){
@@ -70,11 +80,13 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     const preference=normalizeSubtitleTrackPreference(config.subtitleTrackPreference),matching=preference.languageCode?tracks.filter(track=>track.languageCode===preference.languageCode):[];
     const selected=matching.find(track=>track.kind===preference.kind&&track.name.trim()===preference.name)||matching.find(track=>track.kind===preference.kind)||matching[0]||
       tracks.find(track=>track.languageCode===language)||tracks.find(track=>track.kind!=='asr')||tracks[0];
-    if(record.track?.id!==selected?.id||record.track?.kind!==selected?.kind||record.track?.languageCode!==selected?.languageCode){
+    // A capture that arrived before metadata already holds this track's timeline.
+    if(!record.track&&selected&&record.loadedTrack&&record.capturedTrack&&sameTrack(record.capturedTrack,selected)){record.loadedTrack=selected.id;record.capturedTrack=null;}
+    else if(record.track?.id!==selected?.id||record.track?.kind!==selected?.kind||record.track?.languageCode!==selected?.languageCode){
       // A CC language change is a new timeline, even when the video element is reused.
       selection?.cancel(record.session.id,'track');clearPending(record);
-      record.loadedTrack='';record.failedTrack='';record.timelineSignature='';record.domText='';
-      record.session.setCues([]);
+      record.loadedTrack='';record.failedTrack='';record.timelineSignature='';record.domText='';record.capturedTrack=null;
+      record.session.setCues([]);record.session.state.timelineFailed=false;
     }
     // The logical track can keep its ID while YouTube renews its proof/signature.
     // A previous empty response must not block the newly usable URL.
@@ -89,15 +101,15 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     const requestId='kuai-caption-'+(++requestSequence),id=record.videoId;
     const timer=env.setTimeout(()=>{
       if(record.pending?.id!==requestId)return;
-      clearPending(record);record.failedTrack=track.id;record.session.state.errorMessage='字幕读取超时，请开启视频 CC 后重试。';changed();
+      clearPending(record);failTimeline(record,track.id,'字幕读取超时，请重试。');
     },23000);
-    record.pending={id:requestId,trackId:track.id,track:{...track},timer};record.failedTrack='';
+    record.pending={id:requestId,trackId:track.id,track:{...track},timer};record.failedTrack='';record.session.state.timelineFailed=false;
     post({kind:'fetch-track',requestId,videoId:id,url:track.baseUrl});
   }
   function installCues(record:YouTubeRecord,cues:CaptionCue[],trackId:string|undefined,{live=false}={}) {
     const signature=JSON.stringify(cues.map(cue=>[cue.start,cue.end,cue.text]));
     // The fetched track is authoritative even if fallback text was byte-for-byte identical.
-    record.loadedTrack=trackId||'';record.session.state.isLiveDomCaptions=!!live;
+    record.loadedTrack=trackId||'';record.session.state.isLiveDomCaptions=!!live;if(trackId)record.session.state.timelineFailed=false;
     if(signature===record.timelineSignature){changed();return;}
     record.timelineSignature=signature;
     record.session.setCues(cues,{live});record.session.update();changed();
@@ -203,8 +215,8 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     const record=currentRecord();if(!record||record.videoId!==id)return;
     if(data.requestId&&data.requestId!==record.pending?.id)return;
     if(data.kind==='caption-error'){
-      record.failedTrack=record.pending?.trackId||record.track?.id;clearPending(record,false);
-      record.session.state.errorMessage='暂时无法读取这条字幕，请开启 CC、切换字幕语言或重试。';changed();return;
+      const trackId=record.pending?.trackId||record.track?.id;clearPending(record,false);
+      failTimeline(record,trackId,'暂时无法读取这条字幕，请切换字幕语言或重试。');return;
     }
     if(data.kind!=='captions'||typeof data.body!=='string'||data.body.length>4_000_000)return;
     if(!data.requestId&&record.track&&data.languageCode&&data.languageCode!==record.track.languageCode)return;
@@ -213,23 +225,21 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     const responseTrack=data.trackUrl?validateTrack({baseUrl:data.trackUrl},id):null;
     if(data.trackUrl&&!responseTrack)return;
     const ownTrack=data.requestId?record.pending?.track:responseTrack;
-    if(responseTrack&&record.track){
-      const selected=new URL(record.track.baseUrl),received=new URL(responseTrack.baseUrl);
-      if(responseTrack.languageCode!==record.track.languageCode||(data.requestId?selected.searchParams.get('kind')!==received.searchParams.get('kind'):responseTrack.kind!==record.track.kind)||
-        ['name','vssId','tlang'].some(key=>selected.searchParams.get(key)!==received.searchParams.get(key)))return;
-    }
+    if(responseTrack&&record.track&&!sameTrack(record.track,responseTrack,{urlKind:!!data.requestId}))return;
     const trackId=data.requestId?record.pending?.trackId:record.track?.id||responseTrack?.id||'captured';
     if(data.requestId)clearPending(record,false);
     try {
       const cues=parseTimedText(data.body,{kind:ownTrack?.kind,groupPhrases:true});
       if(cues.length){
         if(!data.requestId)clearPending(record);
+        if(!data.requestId&&!record.track)record.capturedTrack=responseTrack;
         record.failedTrack='';record.session.state.errorMessage='';installCues(record,cues,trackId,{live:record.session.video.duration===Infinity});return;
       }
     }catch{}
     // Empty/unreadable caption bodies can arrive before the first caption.
-    // Stay silent, retain native fallback cues, and accept later captures.
-    record.failedTrack=trackId;record.session.state.errorMessage='';changed();
+    // Keep the video silent and retain native fallback cues; only a requested
+    // track that came back empty marks the timeline as failed for the list.
+    if(data.requestId)failTimeline(record,trackId);else{record.failedTrack=trackId;record.session.state.errorMessage='';changed();}
   }
   function updateSettings(next:Settings){
     if(stopped||!next)return;
