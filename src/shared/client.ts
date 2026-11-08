@@ -44,5 +44,6 @@ export async function translate(texts:string[], options:TranslationOptions={}):P
 export function onSettingsChanged(callback:(settings:Settings)=>void, chromeApi:ClientChrome=globalThis.chrome) {
   const listener=(message:Partial<SettingsChanged>)=>{if(message?.type==='KUAI_SETTINGS_CHANGED' && message.settings) callback(message.settings);};
   chromeApi.runtime.onMessage.addListener(listener);
-  return ()=>chromeApi.runtime.onMessage.removeListener(listener);
+  // After an extension reload, an orphaned content script sees chrome.runtime as undefined.
+  return ()=>chromeApi.runtime?.onMessage?.removeListener(listener);
 }
