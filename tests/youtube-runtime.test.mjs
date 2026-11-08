@@ -310,4 +310,5 @@ test('subtitle shortcut schemes are normalized and accepted as player preference
   assert.equal(normalizeSettings({subtitleShortcuts:'vim'}).subtitleShortcuts,'ctrl-alt');
   assert.equal(applyPreferencePatch(defaultSettings(),{subtitleShortcuts:'off'}).subtitleShortcuts,'off');
   assert.throws(()=>applyPreferencePatch(defaultSettings(),{subtitleShortcuts:'vim'}));
+  assert.equal(applyPreferencePatch(defaultSettings(),{subtitleStyle:{horizontalOffset:-10}}).subtitleStyle.horizontalOffset,-10);
 });

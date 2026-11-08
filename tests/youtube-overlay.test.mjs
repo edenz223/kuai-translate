@@ -378,3 +378,31 @@ test('next and previous keep a sentence loop on the sentence they move to',async
   h.emit(previous,'click');await h.flush();
   assert.equal(h.video.currentTime,0);assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});
 });
+
+test('captions drag sideways inside the player, persist the horizontal offset and re-center on double-click',t=>{
+  const {h,view,box,patches}=setup();t.after(()=>view.destroy());view.render({});
+  box._rect={left:330,top:400,right:630,bottom:460,width:300,height:60};
+  h.emit(box,'pointerdown',{pointerId:4,clientX:500,clientY:300});
+  h.emit(h.env,'pointermove',{pointerId:4,clientX:404,clientY:280});
+  assert.equal(view.host.style.left,'40%','96px of a 960px player is 10%');assert.equal(view.host.style.bottom,'90px');
+  h.emit(h.env,'pointerup',{pointerId:4,clientX:404,clientY:280});
+  assert.deepEqual(patches,[{subtitleStyle:{offset:90,horizontalOffset:-10}}]);
+  view.render({subtitleStyle:{offset:90,horizontalOffset:-10}});assert.equal(view.host.style.left,'40%');
+  h.emit(box,'pointerdown',{pointerId:5,clientX:500,clientY:300});h.emit(h.env,'pointermove',{pointerId:5,clientX:5000,clientY:300});
+  assert.equal(view.host.style.left,'74.4%','the box stops at the player edge (330px right of it)');
+  h.emit(h.env,'pointercancel',{pointerId:5});assert.equal(view.host.style.left,'40%','cancel restores the start position');
+  h.emit(box,'dblclick');assert.equal(view.host.style.left,'50%');
+  assert.deepEqual(patches.at(-1),{subtitleStyle:{horizontalOffset:0}});
+});
+test('horizontal offsets apply from every anchor and stay within bounds',async()=>{
+  const {applySubtitlePositionStyle}=await import('../dist/src/shared/styles.js');
+  const {normalizeSubtitleStyle}=await import('../dist/src/shared/presentation.js');
+  const node=()=>({style:{setProperty(name,value){this[name]=value;}}});
+  for(const [position,shift,left,right]of [['bottom-center',12.5,'62.5%','auto'],['top-left',10,'13%','auto'],['bottom-right',10,'auto','-7%']]){
+    const element=node();applySubtitlePositionStyle(element,{position,horizontalOffset:shift});
+    assert.equal(element.style.left,left);assert.equal(element.style.right,right);
+  }
+  assert.equal(normalizeSubtitleStyle({horizontalOffset:80}).horizontalOffset,50);
+  assert.equal(normalizeSubtitleStyle({horizontalOffset:-12.34}).horizontalOffset,-12.3);
+  assert.equal(normalizeSubtitleStyle({}).horizontalOffset,0);
+});

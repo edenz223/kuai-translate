@@ -5,7 +5,7 @@ export interface CaptionViewOptions {
  onPreferences?:(patch:SettingsPatch)=>unknown;onOpenOptions?:(section:'subtitles')=>unknown;onNavigate?:(direction:number)=>unknown;onLoop?:(enabled:boolean)=>unknown;
  cancelSelection?:(id:string,reason:string)=>void;getLanguage?:()=>string|undefined;
 }
-interface DragState {pointerId:number;y:number;offset:number;before:number|null;bounds:string;layout?:string;moved?:boolean}
+interface DragState {pointerId:number;x:number|null;y:number;offset:number;before:number|null;shift:number;beforeShift:number|null;minDx:number;maxDx:number;bounds:string;layout?:string;moved?:boolean}
 // Captured browser events are registered through runtime event names.
 type BrowserEventCallback=(event:any)=>void;
 import {applySubtitleTextStyle,applySubtitleBoxStyle,applySubtitlePositionStyle} from '../shared/styles.js';
@@ -37,7 +37,7 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   previous.dataset.kuaiSubtitlePrevious=session.id;next.dataset.kuaiSubtitleNext=session.id;settingsButton.dataset.kuaiSubtitleSettingsToggle=session.id;
   const preferences=createSubtitlePreferences({env,player,id:session.id,trigger:settingsButton,onChange:onPreferences,onTrackChange,onOpenOptions,cancelSelection,getLanguage,
     onLoop:enabled=>perform(onLoop,enabled),isLooping:()=>!!session.state.loopingCaption});
-  let native:HTMLElement|null=null,nativeVisibility='',nativeHidden=false,dragState:DragState|null=null,dragOffset:number|null=null,clickPointer:number|null=null,clickTimer:ReturnType<typeof setTimeout>|null=null,destroyed=false,mounting=false,rendering=false,lastSettings:Settings|undefined,presentation=subtitleStyle(),layoutKey:string|undefined,positionKey:string|undefined;
+  let native:HTMLElement|null=null,nativeVisibility='',nativeHidden=false,dragState:DragState|null=null,dragOffset:number|null=null,dragShift:number|null=null,clickPointer:number|null=null,clickTimer:ReturnType<typeof setTimeout>|null=null,destroyed=false,mounting=false,rendering=false,lastSettings:Settings|undefined,presentation=subtitleStyle(),layoutKey:string|undefined,positionKey:string|undefined;
   function restoreNative(){if(nativeHidden&&native?.style.visibility==='hidden')native.style.visibility=nativeVisibility;nativeHidden=false;}
   function nativeVisible(show:boolean){
     const found=player.querySelector<HTMLElement>('.ytp-caption-window-container');
@@ -72,13 +72,18 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   for(const [node,direction]of [[previous,-1],[next,1]] as const)node.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(!node.disabled)void perform(onNavigate,direction);});
   retry.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();void perform(onRetry);});
   for(const type of ['click','dblclick'])box.addEventListener(type,event=>event.stopPropagation());
+  // Double-clicking the background puts a sideways-dragged caption back on its anchor.
+  box.addEventListener('dblclick',event=>{
+    if(destroyed||dragState||!isBackground((event.composedPath?.()||[event.target])[0])||(dragShift??presentation.horizontalOffset)===0)return;
+    event.preventDefault();dragShift=0;position();void perform(onPreferences,{subtitleStyle:{horizontalOffset:0}});
+  });
   // Only a player resize changes the drag bounds; page scroll and caption changes do not.
   const boundsKey=()=>{const rect=player.getBoundingClientRect();return JSON.stringify([rect.width,rect.height]);};
-  const position=()=>applySubtitlePositionStyle(host,dragOffset===null?presentation:{...presentation,offset:dragOffset});
+  const position=()=>applySubtitlePositionStyle(host,{...presentation,offset:dragOffset??presentation.offset,horizontalOffset:dragShift??presentation.horizontalOffset});
   function clearClick(){clickPointer=null;if(clickTimer!==null)env.clearTimeout(clickTimer);clickTimer=null;}
   function finishDrag(rollback:boolean){
     const state=dragState;if(!state)return null;dragState=null;
-    if(rollback)dragOffset=state.before;
+    if(rollback){dragOffset=state.before;dragShift=state.beforeShift;}
     box.removeAttribute('data-dragging');box.style.cursor='grab';
     try{box.releasePointerCapture?.(state.pointerId);}catch{}
     position();
@@ -102,7 +107,10 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     if(destroyed||dragState||host.hidden||!host.isConnected||!session.isEnabled()||event.defaultPrevented||event.button!==0||event.isPrimary===false||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||!Number.isFinite(event.pointerId)||!Number.isFinite(event.clientY)||!isBackground(target))return;
     cancelSelection(session.id,'drag');if(destroyed||host.hidden||!host.isConnected)return;
     event.preventDefault();event.stopPropagation();clearClick();clickPointer=event.pointerId;
-    dragState={pointerId:event.pointerId,y:event.clientY,offset:dragOffset??presentation.offset,before:dragOffset,bounds:boundsKey(),layout:layoutKey};
+    // The caption may move sideways only as far as it stays inside the player.
+    const area=player.getBoundingClientRect(),own=box.getBoundingClientRect();
+    dragState={pointerId:event.pointerId,x:Number.isFinite(event.clientX)?event.clientX:null,y:event.clientY,offset:dragOffset??presentation.offset,before:dragOffset,
+      shift:dragShift??presentation.horizontalOffset,beforeShift:dragShift,minDx:Math.min(0,area.left-own.left),maxDx:Math.max(0,area.right-own.right),bounds:boundsKey(),layout:layoutKey};
     box.setAttribute('data-dragging','');box.style.cursor='grabbing';
     try{box.setPointerCapture?.(event.pointerId);}catch{}
   });
@@ -110,9 +118,11 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   box.addEventListener('lostpointercapture',event=>{if(event.pointerId===dragState?.pointerId)cancelDrag();});
   function move(event:PointerEvent){
     if(event.pointerId!==dragState?.pointerId||!currentDrag()||!Number.isFinite(event.clientY))return;
-    const delta=presentation.position.startsWith('top-')?event.clientY-dragState!.y:dragState!.y-event.clientY;
-    if(delta===0&&!dragState!.moved)return;dragState!.moved=true;
-    dragOffset=Math.max(0,Math.min(300,Math.max(0,player.getBoundingClientRect().height-100),dragState!.offset+delta));
+    const state=dragState!,delta=presentation.position.startsWith('top-')?event.clientY-state.y:state.y-event.clientY;
+    const dx=state.x!==null&&Number.isFinite(event.clientX)?Math.max(state.minDx,Math.min(state.maxDx,event.clientX-state.x)):0,width=player.getBoundingClientRect().width;
+    if(delta===0&&dx===0&&!state.moved)return;state.moved=true;
+    dragOffset=Math.max(0,Math.min(300,Math.max(0,player.getBoundingClientRect().height-100),state.offset+delta));
+    if(width>0&&(dx!==0||dragShift!==state.beforeShift))dragShift=Math.round(Math.max(-50,Math.min(50,state.shift+dx/width*100))*10)/10;
     event.preventDefault();position();
   }
   function up(event:PointerEvent){
@@ -120,7 +130,10 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
       if(event.type==='pointercancel')cancelDrag();
       else if(currentDrag()){
         move(event);const state=finishDrag(false);
-        if(state&&dragOffset!==null&&dragOffset!==state.offset)void perform(onPreferences,{subtitleStyle:{offset:dragOffset}});
+        const style:{offset?:number;horizontalOffset?:number}={};
+        if(state&&dragOffset!==null&&dragOffset!==state.offset)style.offset=dragOffset;
+        if(state&&dragShift!==null&&dragShift!==state.shift)style.horizontalOffset=dragShift;
+        if(Object.keys(style).length)void perform(onPreferences,{subtitleStyle:style});
       }
     }
     if(event.pointerId===clickPointer){if(clickTimer!==null)env.clearTimeout(clickTimer);clickTimer=env.setTimeout(clearClick,0);}
@@ -152,10 +165,10 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
       node.disabled=target===null;node.style.opacity=node.disabled?'.4':'1';node.hidden=compact;node.style.setProperty('display',compact?'none':'inline-flex','important');
       const hint=navigation.reason||(target===null?text.boundary:shortcutLabel(settings.subtitleShortcuts,action));label(node,name+(hint?' · '+hint:''));
     }
-    const nextLayout=subtitleLayoutKey(settings),nextStyle=subtitleStyle(settings),nextPosition=JSON.stringify([nextStyle.position,nextStyle.offset]);
+    const nextLayout=subtitleLayoutKey(settings),nextStyle=subtitleStyle(settings),nextPosition=JSON.stringify([nextStyle.position,nextStyle.offset,nextStyle.horizontalOffset]);
     if(dragState&&(dragState.layout!==nextLayout||!currentDrag()))cancelDrag();
     const layoutChanged=layoutKey!==undefined&&layoutKey!==nextLayout;layoutKey=nextLayout;if(layoutChanged)cancelSelection(session.id,'subtitle-layout');
-    if(positionKey!==undefined&&positionKey!==nextPosition)dragOffset=null;positionKey=nextPosition;presentation=nextStyle;
+    if(positionKey!==undefined&&positionKey!==nextPosition)dragOffset=dragShift=null;positionKey=nextPosition;presentation=nextStyle;
     applySubtitleTextStyle(original,presentation,'source',player.getBoundingClientRect().width||1200);applySubtitleTextStyle(translation,presentation,'target',player.getBoundingClientRect().width||1200);applySubtitleBoxStyle(box,presentation);
     position();
     if(session.state.isSubtitleSelectionHeld||dragState)return;
