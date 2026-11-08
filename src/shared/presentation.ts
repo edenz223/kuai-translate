@@ -58,7 +58,8 @@ export function normalizeSubtitleStyle(input?: unknown) {
     backgroundOpacity:bound(value.backgroundOpacity,0,100,defaults.backgroundOpacity),
     backgroundMode:choice(value.backgroundMode,['line','panel'],defaults.backgroundMode),
     position:choice(value.position,['top-left','top-center','top-right','bottom-left','bottom-center','bottom-right'],defaults.position),
-    offset:bound(value.offset,0,300,defaults.offset),
+    // Pixels from the anchored edge; renderers keep it inside the current player.
+    offset:bound(value.offset,0,2000,defaults.offset),
     // Percent of the player width the caption moves right (+) or left (−) from its anchor.
     horizontalOffset:Math.round(bound(value.horizontalOffset,-50,50,defaults.horizontalOffset)*10)/10,
     maxWidth:bound(value.maxWidth,40,100,defaults.maxWidth),

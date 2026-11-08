@@ -5,7 +5,7 @@ export interface CaptionViewOptions {
  onPreferences?:(patch:SettingsPatch)=>unknown;onOpenOptions?:(section:'subtitles')=>unknown;onNavigate?:(direction:number)=>unknown;onLoop?:(enabled:boolean)=>unknown;
  cancelSelection?:(id:string,reason:string)=>void;getLanguage?:()=>string|undefined;
 }
-interface DragState {pointerId:number;x:number|null;y:number;offset:number;before:number|null;shift:number;beforeShift:number|null;minDx:number;maxDx:number;bounds:string;layout?:string;moved?:boolean}
+interface DragState {pointerId:number;x:number|null;y:number;offset:number;before:number|null;shift:number;beforeShift:number|null;minDx:number;maxDx:number;maxOffset:number;bounds:string;layout?:string;moved?:boolean}
 // Captured browser events are registered through runtime event names.
 type BrowserEventCallback=(event:any)=>void;
 import {applySubtitleTextStyle,applySubtitleBoxStyle,applySubtitlePositionStyle} from '../shared/styles.js';
@@ -79,7 +79,11 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   });
   // Only a player resize changes the drag bounds; page scroll and caption changes do not.
   const boundsKey=()=>{const rect=player.getBoundingClientRect();return JSON.stringify([rect.width,rect.height]);};
-  const position=()=>applySubtitlePositionStyle(host,{...presentation,offset:dragOffset??presentation.offset,horizontalOffset:dragShift??presentation.horizontalOffset});
+  // A saved offset from a taller (fullscreen) player still keeps the caption inside this one.
+  const position=()=>{
+    const room=Math.max(0,(player.getBoundingClientRect().height||Infinity)-box.getBoundingClientRect().height);
+    applySubtitlePositionStyle(host,{...presentation,offset:Math.min(dragOffset??presentation.offset,room),horizontalOffset:dragShift??presentation.horizontalOffset});
+  };
   function clearClick(){clickPointer=null;if(clickTimer!==null)env.clearTimeout(clickTimer);clickTimer=null;}
   function finishDrag(rollback:boolean){
     const state=dragState;if(!state)return null;dragState=null;
@@ -107,10 +111,12 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     if(destroyed||dragState||host.hidden||!host.isConnected||!session.isEnabled()||event.defaultPrevented||event.button!==0||event.isPrimary===false||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||!Number.isFinite(event.pointerId)||!Number.isFinite(event.clientY)||!isBackground(target))return;
     cancelSelection(session.id,'drag');if(destroyed||host.hidden||!host.isConnected)return;
     event.preventDefault();event.stopPropagation();clearClick();clickPointer=event.pointerId;
-    // The caption may move sideways only as far as it stays inside the player.
-    const area=player.getBoundingClientRect(),own=box.getBoundingClientRect();
-    dragState={pointerId:event.pointerId,x:Number.isFinite(event.clientX)?event.clientX:null,y:event.clientY,offset:dragOffset??presentation.offset,before:dragOffset,
-      shift:dragShift??presentation.horizontalOffset,beforeShift:dragShift,minDx:Math.min(0,area.left-own.left),maxDx:Math.max(0,area.right-own.right),bounds:boundsKey(),layout:layoutKey};
+    // The caption may move only as far as it stays inside the player, in any direction.
+    const area=player.getBoundingClientRect(),own=box.getBoundingClientRect(),offset=Math.min(dragOffset??presentation.offset,Math.max(0,area.height-own.height));
+    const room=presentation.position.startsWith('top-')?area.bottom-own.bottom:own.top-area.top;
+    dragState={pointerId:event.pointerId,x:Number.isFinite(event.clientX)?event.clientX:null,y:event.clientY,offset,before:dragOffset,
+      shift:dragShift??presentation.horizontalOffset,beforeShift:dragShift,minDx:Math.min(0,area.left-own.left),maxDx:Math.max(0,area.right-own.right),
+      maxOffset:Math.min(2000,offset+Math.max(0,room)),bounds:boundsKey(),layout:layoutKey};
     box.setAttribute('data-dragging','');box.style.cursor='grabbing';
     try{box.setPointerCapture?.(event.pointerId);}catch{}
   });
@@ -121,7 +127,7 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     const state=dragState!,delta=presentation.position.startsWith('top-')?event.clientY-state.y:state.y-event.clientY;
     const dx=state.x!==null&&Number.isFinite(event.clientX)?Math.max(state.minDx,Math.min(state.maxDx,event.clientX-state.x)):0,width=player.getBoundingClientRect().width;
     if(delta===0&&dx===0&&!state.moved)return;state.moved=true;
-    dragOffset=Math.max(0,Math.min(300,Math.max(0,player.getBoundingClientRect().height-100),state.offset+delta));
+    dragOffset=Math.round(Math.max(0,Math.min(state.maxOffset,state.offset+delta)));
     if(width>0&&(dx!==0||dragShift!==state.beforeShift))dragShift=Math.round(Math.max(-50,Math.min(50,state.shift+dx/width*100))*10)/10;
     event.preventDefault();position();
   }

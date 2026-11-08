@@ -15,7 +15,8 @@ function setup(options={}){
   const session={id:'one',video,state:{currentCaption:{original:'Hello',translation:'<img onerror=bad()>你好',status:'success'},isSubtitleSelectionHeld:false},isEnabled:()=>true};
   const patches=[],trackChanges=[],retries=[],cancellations=[];
   const view=api.createCaptionView(session,{env:h.env,onToggle(){},onTrackChange:id=>trackChanges.push(id),onRetry:()=>retries.push(true),onPreferences:patch=>patches.push(patch),cancelSelection:(...args)=>cancellations.push(args),...options});
-  const box=view.host.shadowRoot.querySelector('.captions'),captures=[];
+  // Bottom-centered 300×70 caption 70px above the bottom of a 960×540 player.
+  const box=view.host.shadowRoot.querySelector('.captions'),captures=[];box._rect={left:330,top:400,right:630,bottom:470,width:300,height:70};
   box.setPointerCapture=id=>captures.push(['capture',id]);box.releasePointerCapture=id=>captures.push(['release',id]);
   return{h,player,native,session,view,box,patches,trackChanges,retries,cancellations,captures};
 }
@@ -81,9 +82,9 @@ test('caption background drags in the configured direction and persists only its
   }
 });
 
-test('drag movement is bounded by the player height and persisted offset range',t=>{
-  for(const [height,y,want]of [[540,1000,0],[540,-1000,300],[180,-1000,80]]){
-    const {h,player,view,box,patches}=setup();t.after(()=>view.destroy());player._rect.height=height;player._rect.bottom=height;
+test('dragging up reaches the top of the player but never leaves it',t=>{
+  for(const [height,top,y,want]of [[540,400,1000,0],[540,400,-1000,470],[1080,940,-2000,1010],[180,40,-1000,110]]){
+    const {h,player,view,box,patches}=setup();t.after(()=>view.destroy());player._rect.height=height;player._rect.bottom=height;box._rect={...box._rect,top,bottom:top+70};
     view.render({});h.emit(box,'pointerdown',{pointerId:1,clientY:100});h.emit(h.env,'pointermove',{pointerId:1,clientY:y});h.emit(h.env,'pointerup',{pointerId:1,clientY:y});
     assert.deepEqual(patches,[{subtitleStyle:{offset:want}}]);assert.equal(view.host.style.bottom,want+'px');
   }
@@ -175,7 +176,7 @@ test('subtitle navigation shortcuts ignore editors and seek without starting pau
 });
 test('dragging top-positioned captions keeps the offset across renders and saves only the position patch',async t=>{
   const h=studyFixture({settings:{subtitleStyle:{position:'top-center',offset:70}}});t.after(()=>h.manager.stop());await h.load();
-  const host=h.captionHost(),background=host.shadowRoot.querySelector('.captions');h.emit(background,'pointerdown',{clientY:100,pointerId:1});
+  const host=h.captionHost(),background=host.shadowRoot.querySelector('.captions');background._rect={left:330,top:170,right:630,bottom:240,width:300,height:70};h.emit(background,'pointerdown',{clientY:100,pointerId:1});
   h.emit(h.env,'pointermove',{clientY:140,pointerId:1});h.manager.sync();assert.equal(host.style.top,'110px');
   h.emit(h.env,'pointerup',{clientY:140,pointerId:1});await h.flush();h.manager.sync();
   assert.deepEqual(h.patches.at(-1),{subtitleStyle:{offset:110}});assert.equal(host.style.top,'110px');
@@ -405,4 +406,9 @@ test('horizontal offsets apply from every anchor and stay within bounds',async()
   assert.equal(normalizeSubtitleStyle({horizontalOffset:80}).horizontalOffset,50);
   assert.equal(normalizeSubtitleStyle({horizontalOffset:-12.34}).horizontalOffset,-12.3);
   assert.equal(normalizeSubtitleStyle({}).horizontalOffset,0);
+});
+test('an offset saved in a taller fullscreen player keeps the caption inside a smaller one',t=>{
+  const {view,player}=setup();t.after(()=>view.destroy());
+  view.render({subtitleStyle:{offset:1010}});assert.equal(view.host.style.bottom,'470px','540px player minus the 70px caption');
+  player._rect.height=1080;player._rect.bottom=1080;view.render({subtitleStyle:{offset:1010}});assert.equal(view.host.style.bottom,'1010px');
 });
