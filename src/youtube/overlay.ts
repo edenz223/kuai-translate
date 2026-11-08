@@ -3,7 +3,7 @@ import type {SubtitleSession,CaptionTrack,SettingsPatch} from './types.js';
 export interface CaptionViewOptions {
  env?:typeof globalThis;onToggle?:()=>unknown;onTrackChange?:(id:string)=>unknown;onRetry?:()=>unknown;
  onPreferences?:(patch:SettingsPatch)=>unknown;onOpenOptions?:(section:'subtitles')=>unknown;onNavigate?:(direction:number)=>unknown;
- cancelSelection?:(id:string,reason:string)=>void;
+ cancelSelection?:(id:string,reason:string)=>void;getLanguage?:()=>string|undefined;
 }
 interface DragState {pointerId:number;y:number;offset:number;before:number|null;bounds:string;layout?:string;moved?:boolean}
 // Captured browser events are registered through runtime event names.
@@ -12,10 +12,11 @@ import {applySubtitleTextStyle,applySubtitleBoxStyle,applySubtitlePositionStyle}
 import {subtitleStyle,subtitleLayoutKey,applySubtitleMask} from './presentation.js';
 import {navigationState} from './navigation.js';
 import {createSubtitlePreferences} from './preferences.js';
+import {subtitleWords} from './i18n.js';
 
 /** Selectable captions with a draggable background; player controls stay available without captions. */
-export function createCaptionView(session:SubtitleSession,{env=globalThis,onToggle,onTrackChange,onRetry,onPreferences,onOpenOptions,onNavigate,cancelSelection=()=>{}}:CaptionViewOptions) {
-  const doc=env.document,player=(session.video.closest('.html5-video-player')||session.video.parentElement)!;
+export function createCaptionView(session:SubtitleSession,{env=globalThis,onToggle,onTrackChange,onRetry,onPreferences,onOpenOptions,onNavigate,cancelSelection=()=>{},getLanguage=()=>env.navigator?.language}:CaptionViewOptions) {
+  const doc=env.document,words=()=>subtitleWords(getLanguage()),player=(session.video.closest('.html5-video-player')||session.video.parentElement)!;
   const element=<K extends keyof HTMLElementTagNameMap>(tag:K,className?:string,text?:string):HTMLElementTagNameMap[K]=>{const node=doc.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
   const host=element('div');host.id='kuai-captions-window-'+session.id;host.dataset.kuaiCaptionUi='true';host.hidden=true;
   host.style.cssText='position:absolute;width:max-content;z-index:2050;pointer-events:none;';
@@ -23,15 +24,15 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   style.textContent=':host{color:white;font:20px/1.5 system-ui,sans-serif;text-align:center}*{box-sizing:border-box}.captions{pointer-events:auto;max-width:100%;touch-action:none}.caption-lines{display:flex;flex-direction:column}.caption-line{font-size:0;line-height:0}.original-text,.translation-text{display:inline;white-space:normal;overflow-wrap:anywhere;cursor:text;user-select:text!important;-webkit-user-select:text!important;unicode-bidi:plaintext}.captions[data-dragging] *{cursor:grabbing!important}.status{font:13px/1.4 system-ui;color:#fde68a;cursor:text}.retry{margin-left:8px;font:12px/1.4 system-ui;color:inherit;background:#ffffff13;border:1px solid #ffffff35;border-radius:5px;padding:2px 6px;cursor:pointer}button:focus-visible,.translation-text:focus-visible{outline:2px solid #a5b4fc}.caption-line[hidden],.original-text[hidden],.translation-text[hidden],.status[hidden],button[hidden]{display:none!important}';
   const box=element('div','captions'),lines=element('div','caption-lines'),originalLine=element('div','caption-line original-line'),translationLine=element('div','caption-line translation-line'),original=element('span','original-text'),translation=element('span','translation-text'),status=element('span','status');
   original.dir=translation.dir='auto';original.dataset.kuaiSubtitleText=translation.dataset.kuaiSubtitleText='true';
-  const retry=element('button','retry','重试');retry.type='button';retry.hidden=true;box.style.cursor='grab';
+  const retry=element('button','retry',words().retry);retry.type='button';retry.hidden=true;box.style.cursor='grab';
   originalLine.append(original);translationLine.append(translation);lines.append(originalLine,translationLine);box.append(lines,status,retry);shadow.append(style,box);player.append(host);
 
-  const toolbar=element('span');toolbar.dataset.kuaiCaptionUi='true';toolbar.setAttribute('role','group');toolbar.setAttribute('aria-label','Kuai translate 字幕工具');
+  const toolbar=element('span');toolbar.dataset.kuaiCaptionUi='true';toolbar.setAttribute('role','group');toolbar.setAttribute('aria-label',words().toolbar);
   function control(text:string,title:string){const node=element('button','ytp-button',text);node.type='button';node.title=title;node.setAttribute('aria-label',title);node.style.cssText='display:inline-flex!important;align-items:center;justify-content:center;flex:0 0 34px;width:34px;height:100%;color:inherit;background:transparent;border:0;padding:0;font:700 17px system-ui;cursor:pointer;';toolbar.append(node);return node;}
-  const button=control('译','开启或关闭 Kuai translate 字幕翻译');button.id='kuai-subtitle-button-'+session.id;
-  const previous=control('‹','上一句字幕 · Ctrl+Alt+←'),next=control('›','下一句字幕 · Ctrl+Alt+→'),settingsButton=control('⚙','字幕设置');
+  const button=control('译',words().toggle);button.id='kuai-subtitle-button-'+session.id;
+  const previous=control('‹',words().previous+' · Ctrl+Alt+←'),next=control('›',words().next+' · Ctrl+Alt+→'),settingsButton=control('⚙',words().settings);
   previous.dataset.kuaiSubtitlePrevious=session.id;next.dataset.kuaiSubtitleNext=session.id;settingsButton.dataset.kuaiSubtitleSettingsToggle=session.id;
-  const preferences=createSubtitlePreferences({env,player,id:session.id,trigger:settingsButton,onChange:onPreferences,onTrackChange,onOpenOptions,cancelSelection});
+  const preferences=createSubtitlePreferences({env,player,id:session.id,trigger:settingsButton,onChange:onPreferences,onTrackChange,onOpenOptions,cancelSelection,getLanguage});
   let native:HTMLElement|null=null,nativeVisibility='',nativeHidden=false,dragState:DragState|null=null,dragOffset:number|null=null,clickPointer:number|null=null,clickTimer:ReturnType<typeof setTimeout>|null=null,destroyed=false,mounting=false,rendering=false,lastSettings:Settings|undefined,presentation=subtitleStyle(),layoutKey:string|undefined,positionKey:string|undefined;
   function restoreNative(){if(nativeHidden&&native?.style.visibility==='hidden')native.style.visibility=nativeVisibility;nativeHidden=false;}
   function nativeVisible(show:boolean){
@@ -138,9 +139,11 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
   }
   function paint(settings:Settings){
     mount();preferences.render(settings);
+    const text=words(),label=(node:HTMLElement,value:string)=>{if(node.title!==value){node.title=value;node.setAttribute('aria-label',value);}};
+    toolbar.setAttribute('aria-label',text.toolbar);label(button,text.toggle);label(settingsButton,text.settings);if(retry.textContent!==text.retry)retry.textContent=text.retry;
     const pressed=String(session.isEnabled());if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);button.style.opacity=session.isEnabled()?'1':'.55';
-    const navigation=navigationState(session);
-    for(const [node,target,label]of [[previous,navigation.previous,'上一句字幕'],[next,navigation.next,'下一句字幕']] as const){node.disabled=target===null;node.style.opacity=node.disabled?'.4':'1';node.title=label+' · '+(navigation.reason||(target===null?'已到时间轴边界':node===previous?'Ctrl+Alt+←':'Ctrl+Alt+→'));}
+    const navigation=navigationState(session,{words:text,subtitlesEnabled:settings.subtitlesEnabled!==false});
+    for(const [node,target,name]of [[previous,navigation.previous,text.previous],[next,navigation.next,text.next]] as const){node.disabled=target===null;node.style.opacity=node.disabled?'.4':'1';label(node,name+' · '+(navigation.reason||(target===null?text.boundary:node===previous?'Ctrl+Alt+←':'Ctrl+Alt+→')));}
     const nextLayout=subtitleLayoutKey(settings),nextStyle=subtitleStyle(settings),nextPosition=JSON.stringify([nextStyle.position,nextStyle.offset]);
     if(dragState&&(dragState.layout!==nextLayout||!currentDrag()))cancelDrag();
     const layoutChanged=layoutKey!==undefined&&layoutKey!==nextLayout;layoutKey=nextLayout;if(layoutChanged)cancelSelection(session.id,'subtitle-layout');
@@ -153,7 +156,7 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
     // Translation-only still shows the source until its translation exists.
     originalLine.hidden=original.hidden=presentation.displayMode==='translation_only'&&!!caption?.translation;translationLine.hidden=translation.hidden=!caption?.translation;
     translationLine.style.order=translation.style.order=presentation.displayOrder==='translation_on_top'?'-1':'1';applySubtitleMask(translation,presentation.hideTranslation);
-    const error=caption?.errorMessage||session.state.errorMessage||'',message=error||(!caption?.translation&&caption?(caption.status==='translating'?'翻译中…':'等待翻译'):'');
+    const error=caption?.errorMessage||session.state.errorMessage||'',message=error||(!caption?.translation&&caption?(caption.status==='translating'?text.translating:text.pending):'');
     set(status,message);status.hidden=!message;retry.hidden=!error;host.hidden=!enabled||(!caption&&!message);host.style.display=host.hidden?'none':'block';nativeVisible(!enabled||!caption?.original);
   }
   function destroy(){if(destroyed)return;destroyed=true;cancelDrag();clearClick();restoreNative();preferences.destroy();host.remove();toolbar.remove();listeners.splice(0).forEach(dispose=>dispose());}

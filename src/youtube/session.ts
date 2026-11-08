@@ -1,5 +1,6 @@
 import type {Settings} from '../shared/settings.js';
 import type {SubtitleSession,SubtitleState,CaptionCue,TranslateSubtitles} from './types.js';
+import {subtitleWords} from './i18n.js';
 interface TranslationJob {revision:number;controller:AbortController;promise?:Promise<void>}
 // Live DOM captions change word by word. Translate once the text settles, or at
 // least once per wait while speech keeps rolling, instead of once per change.
@@ -7,7 +8,7 @@ const LIVE_SETTLE_MS=700,LIVE_MAX_WAIT_MS=3000,OVERLAP_SCAN=8;
 const lastLine=(text:string)=>text.split('\n').map(line=>line.trim()).filter(Boolean).at(-1)||'';
 const continuesText=(previous:string,next:string)=>{const line=lastLine(previous);return !!line&&(next.startsWith(previous)||next.includes(line));};
 /** Framework-independent subtitle state and translation scheduling. */
-export function createSubtitleSession({id,video,settings,translate,onChange=()=>{}}:{id:string;video:HTMLVideoElement;settings:Settings;translate:TranslateSubtitles;onChange?:(session:SubtitleSession)=>void}):SubtitleSession {
+export function createSubtitleSession({id,video,settings,translate,onChange=()=>{},getLanguage=()=>undefined}:{id:string;video:HTMLVideoElement;settings:Settings;translate:TranslateSubtitles;onChange?:(session:SubtitleSession)=>void;getLanguage?:()=>string|undefined}):SubtitleSession {
   let config=settings,enabled=true,destroyed=false,running:TranslationJob|null=null,revision=0,timer:ReturnType<typeof setInterval>|null=null,queued=false;
   let liveChangedAt=0,livePendingSince:number|null=null,liveTimer:ReturnType<typeof setTimeout>|null=null,liveSource:{text:string;translation:string}|null=null;
   const state:SubtitleState={videoId:id,subtitlesList:[],currentCaption:null,selectionCaptionSnapshot:null,isSubtitleSelectionHeld:false,translateVersion:0,isLiveDomCaptions:false,timelineFailed:false,errorMessage:''};
@@ -62,7 +63,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     for(const cue of new Set(candidates)) {
       if(!membership.has(cue)||!cue.text||cue.status!=='pending')continue;
       if(cue.text.length>40000){
-        cue.status='error';cue.errorMessage='这句字幕过长（超过 40000 字符），未发送翻译请求。';rejected=true;continue;
+        cue.status='error';cue.errorMessage=subtitleWords(getLanguage()).cueTooLong;rejected=true;continue;
       }
       if(cues.length>=8||size+cue.text.length>40000)break;
       cues.push(cue);size+=cue.text.length;
@@ -79,12 +80,12 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     job.promise=Promise.resolve().then(()=>translate(fragments,{providerId:providerId(),sourceLanguage:config.sourceLanguage,targetLanguage:targetLanguage(),signal:job.controller.signal})).then(result=>{
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
       const values=result?.translations;
-      if(!Array.isArray(values)||values.length!==fragments.length||values.some(value=>typeof value!=='string'||!value.trim()))throw new Error('翻译返回为空或数量不匹配，请重试');
+      if(!Array.isArray(values)||values.length!==fragments.length||values.some(value=>typeof value!=='string'||!value.trim()))throw new Error(subtitleWords(getLanguage()).emptyTranslation);
       cues.forEach((cue,index)=>{cue.translation=values.slice(...mapping[index]).join('');cue.status='success';});
       if(state.isLiveDomCaptions){const latest=cues.at(-1)!;liveSource={text:latest.text,translation:latest.translation!};carryLive(state.subtitlesList);}
     }).catch(error=>{
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
-      cues.forEach(cue=>{cue.status='error';cue.errorMessage=error?.message||'字幕翻译失败，请重试';});
+      cues.forEach(cue=>{cue.status='error';cue.errorMessage=error?.message||subtitleWords(getLanguage()).translationFailed;});
     }).finally(()=>{
       if(running===job)running=null;
       if(!destroyed&&job.revision===revision){notify();scheduleUpdate();}

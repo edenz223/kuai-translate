@@ -284,3 +284,30 @@ test('translation-only captions show the source until the translation arrives',t
   session.state.currentCaption={original:'Hello',translation:'你好',status:'success'};view.render(settings);
   assert.equal(original.hidden,true);
 });
+
+test('an English interface localizes the toolbar, captions, settings panel and runtime errors, and follows language changes',async t=>{
+  const h=studyFixture({settings:{interfaceLanguage:'en'}});t.after(()=>h.manager.stop());await h.flush();
+  assert.equal(h.mainButton().title,'Turn Kuai Translate subtitles on or off');
+  assert.equal(h.settingsButton().getAttribute('aria-label'),'Subtitle settings');
+  h.emit(h.settingsButton(),'click');const shadow=h.settingsPanel().shadowRoot;
+  assert.equal(shadow.querySelector('h2').textContent,'Subtitle settings');
+  assert.equal(shadow.querySelector('.subtitle-mode').getAttribute('aria-label'),'Display');
+  assert.equal(shadow.querySelector('.subtitle-mode').children[1].textContent,'Translation only');
+  assert.equal(shadow.querySelector('.subtitle-target').children[0].textContent,'Same as page target language');
+  assert.equal(shadow.querySelector('.subtitle-track').children[0].textContent,'Auto (no captions found yet)');
+  h.tracks();const request=h.outbound.filter(item=>item.kind==='fetch-track').at(-1);
+  h.message({kind:'caption-error',requestId:request.requestId});await h.flush();
+  assert.equal(h.session().state.errorMessage,"Couldn't load these subtitles. Switch the subtitle language or retry.");
+  assert.equal(h.captionHost().shadowRoot.querySelector('.retry').textContent,'Retry');
+  assert.match(h.document.querySelector('[data-kuai-subtitle-next]').title,/^Next subtitle · /);
+  h.manager.updateSettings({...h.config,interfaceLanguage:'zh-CN'});await h.flush();
+  assert.equal(h.mainButton().title,'开启或关闭 Kuai translate 字幕翻译');
+  assert.equal(shadow.querySelector('h2').textContent,'字幕设置');assert.equal(shadow.querySelector('.subtitle-mode').children[1].textContent,'只显示译文');
+  assert.equal(h.captionHost().shadowRoot.querySelector('.retry').textContent,'重试');
+});
+test('navigation explains whether subtitle translation or video captions are off',async t=>{
+  const off=studyFixture({settings:{subtitlesEnabled:false}});t.after(()=>off.manager.stop());await off.flush();
+  assert.match(off.document.querySelector('[data-kuai-subtitle-next]').title,/请先开启字幕翻译/);
+  const cc=studyFixture({cc:false});t.after(()=>cc.manager.stop());await cc.flush();
+  assert.match(cc.document.querySelector('[data-kuai-subtitle-next]').title,/请开启视频字幕后继续/);
+});
