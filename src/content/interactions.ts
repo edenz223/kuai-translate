@@ -12,7 +12,7 @@ interface Popup {host:HTMLDivElement;section:HTMLElement;header:HTMLElement;pin:
 type TextResult = {cancelled:true} | {skipped:true} | {translation:string;applied:boolean};
 
 import {appendIcon} from './icons.js';
-import {batches,BLOCK_SELECTOR,blockText,configurationKey,isChinese,isEditable,isOwnedUI,isReadable,makeId,parentElement,requestOptions,splitText,translationsOf} from './dom.js';
+import {batches,BLOCK_SELECTOR,blockText,configurationKey,isChinese,isEditable,isOwnedUI,isReadable,makeId,parentElement,requestOptions,splitText,translationsOf,withLayoutCache} from './dom.js';
 import {normalizeInteractionOptions,normalizeKey,resolveFeatureSettings,isSiteListed} from '../shared/interactions.js';
 import {isPageSiteBlocked} from './page-policy.js';
 import {createHeldKeys,matchesShortcut} from './shortcuts.js';
@@ -249,8 +249,9 @@ export function createInteractions({document,env=globalThis,translate,cancel=()=
     const regions=root.tagName==='SHREDDIT-POST'
       ?Array.from(root.querySelectorAll<HTMLElement>('[slot="title"],[slot="text-body"],[slot="body"]')):[root];
     const elements=new Set(regions.flatMap(region=>[region,...region.querySelectorAll<HTMLElement>(BLOCK_SELECTOR)]));
-    return [...elements].filter(element=>isReadable(element,env)).map(element=>({element,text:blockText(element,env)}))
-      .filter(block=>/[\p{L}\p{N}]/u.test(block.text));
+    // Nested blocks share ancestors; a large region otherwise re-reads each ancestor's style per block.
+    return withLayoutCache(()=>[...elements].filter(element=>isReadable(element,env)).map(element=>({element,text:blockText(element,env)}))
+      .filter(block=>/[\p{L}\p{N}]/u.test(block.text)));
   }
 
   const blocksKey=(blocks: readonly PageBlock[]): string=>blocks.map(item=>item.text).join('\n');
