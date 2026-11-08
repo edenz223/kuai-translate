@@ -4,7 +4,7 @@ interface SourceRun {text:string; anchor:HTMLAnchorElement|null; indices?:number
 export interface PageContent {source:string; runs:SourceRun[]; linked:boolean; units:string[]}
 export interface PageLinkBinding {source:HTMLAnchorElement; node:HTMLElement; output:HTMLElement; valid:()=>boolean; document:Document; env:BrowserEnvironment}
 
-import {ancestors,BLOCK_SELECTOR,isReadable,splitText} from './dom.js';
+import {ancestors,BLOCK_SELECTOR,computedStyle,isReadable,splitText} from './dom.js';
 
 export const PAGE_LINK_ATTRIBUTES=['href','target','rel','download','title','aria-label','hreflang','referrerpolicy'];
 const safeProtocols=new Set(['https:','http:','mailto:','tel:']);
@@ -63,6 +63,11 @@ function linkAttributes(source: HTMLAnchorElement,document: Document,env: Browse
   return attributes;
 }
 
+// Unchanged writes still invalidate style, and every presentation refresh re-syncs each link.
+function setImportant(node: HTMLElement,property: string,value: string): void{
+  if(node.style.getPropertyValue(property)!==value||node.style.getPropertyPriority(property)!=='important')node.style.setProperty(property,value,'important');
+}
+
 /** Update native navigation only from the live source. Provider output never supplies an attribute. */
 function syncLink(binding: PageLinkBinding,document: Document,env: BrowserEnvironment): boolean{
   const attributes=linkAttributes(binding.source,document,env),tag=attributes?'A':'SPAN';
@@ -76,10 +81,9 @@ function syncLink(binding: PageLinkBinding,document: Document,env: BrowserEnviro
     if(value===null||value===undefined){if(binding.node.hasAttribute(name))binding.node.removeAttribute(name);}
     else if(binding.node.getAttribute(name)!==value)binding.node.setAttribute(name,value);
   }
-  const sourceStyle=env.getComputedStyle?.(binding.source);
-  binding.node.style.setProperty('color',sourceStyle?.color||'inherit','important');
-  const decoration=attributes?sourceStyle?.textDecorationLine||'none':'none';
-  binding.node.style.setProperty('text-decoration-line',decoration,'important');
+  const sourceStyle=computedStyle(binding.source,env);
+  setImportant(binding.node,'color',sourceStyle?.color||'inherit');
+  setImportant(binding.node,'text-decoration-line',attributes?sourceStyle?.textDecorationLine||'none':'none');
   return !!attributes;
 }
 function bindActivation(binding: PageLinkBinding): void{

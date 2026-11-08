@@ -10,7 +10,7 @@ export interface PresentationControls { render(settings: Settings): void; bind()
 
 import {PAGE_STYLE_DEFAULTS,SUBTITLE_STYLE_DEFAULTS,PAGE_PRESETS} from '../shared/presentation.js';
 import {applyPageStyle,applySubtitleTextStyle,applySubtitleBoxStyle} from '../shared/styles.js';
-import {byId,fillSelect,LANGUAGES,DISPLAY_MODES} from './common.js';
+import {byId,fillSelect,languageName,LANGUAGES,DISPLAY_MODES} from './common.js';
 
 export const presetNames: Record<string,string>={border:'左侧边线',plain:'跟随原文', 'thin-dashed':'细虚线下划线',dashed:'虚线下划线',dotted:'点状下划线',background:'背景色',transparent:'透明效果','orange-underline':'橙色下划线',underline:'实线下划线',wavy:'波浪下划线',marker:'马克笔',highlight:'高亮',blur:'模糊遮盖（悬停显示）',italic:'斜体',bold:'加粗','dashed-border':'虚线边框'};
 const weights: SelectEntry[]=Array.from({length:9},(_,index)=>{const value=(index+1)*100;return [String(value),value===400?'400 · 正常':value===600?'600 · 半粗':value===700?'700 · 粗体':String(value)];});
@@ -41,7 +41,7 @@ export function createPresentationControls({document,editor,onError=()=>{}}: Pre
     }
     const page=settings.pageStyle||PAGE_STYLE_DEFAULTS,subtitle=settings.subtitleStyle||SUBTITLE_STYLE_DEFAULTS;
     fillSelect(document,node('page-display-mode'),modes,settings.pageDisplayMode||'bilingual');
-    fillSelect(document,node('subtitle-target-language'),[['follow_page','跟随网页目标语言'],...LANGUAGES.filter(([id])=>id!=='auto')],settings.subtitleTargetLanguage||'follow_page');
+    fillSelect(document,node('subtitle-target-language'),[['follow_page',`跟随网页（${languageName(settings.targetLanguage)}）`],...LANGUAGES.filter(([id])=>id!=='auto')],settings.subtitleTargetLanguage||'follow_page');
     node<HTMLInputElement>('page-color-inherit').checked=page.textColor==='inherit';node<HTMLInputElement>('page-style-textColor').disabled=page.textColor==='inherit';
     node('page-preview-source').hidden=settings.pageDisplayMode==='translation_only';
     applyPageStyle(node('page-preview-translation'),page);

@@ -9,20 +9,23 @@ type InteractionProperty = 'pageOptions' | 'selectionOptions' | 'inputOptions' |
 interface InteractionGroup { property: InteractionProperty; defaults: Settings[InteractionProperty]; fields: Record<string,InteractionField>; }
 interface ValidationResult { value?: unknown; error?: string; empty?: true; partial?: true; }
 export interface InteractionControlOptions { document: Document; editor: SettingsEditor; onError?: (error: unknown) => void; onValidationChange?: () => void; }
-export interface InteractionControls { render(settings: Settings): void; bind(): void; resetDrafts(group?: string): void; validationCount(): number; incompleteCount(): number; }
+export interface InteractionControls { render(settings: Settings): void; bind(): void; resetDrafts(group?: string): void; validationCount(): number; incompleteCount(): number; invalidGroups(): string[]; }
 
 import {PAGE_OPTIONS_DEFAULTS,SELECTION_OPTIONS_DEFAULTS,INPUT_OPTIONS_DEFAULTS,HOVER_OPTIONS_DEFAULTS,normalizeShortcut,normalizeKey,normalizeSiteList} from '../shared/interactions.js';
 import {byId,fillProviders,fillSelect,languageName,LANGUAGES,hoverTriggers,selectionTriggers} from './common.js';
 
-const sourceLanguages: SelectEntry[]=[['follow_page','跟随网页原文语言'],...LANGUAGES];
-const targetLanguages: SelectEntry[]=[['follow_page','跟随网页目标语言'],...LANGUAGES.filter(([id])=>id!=='auto')];
+const sourceLanguages: SelectEntry[]=[['follow_page','跟随网页'],...LANGUAGES];
+const targetLanguages: SelectEntry[]=[['follow_page','跟随网页'],...LANGUAGES.filter(([id])=>id!=='auto')];
 const writeBackEntries: SelectEntry[]=[['translation','仅译文（替换原文）'],['original-translation','原文 + 译文'],['translation-original','译文 + 原文']];
 /** One select for what ends up in the box; stored as `includeOriginal` + `displayOrder`. */
 const writeBackValue=(input: Settings['inputOptions']): string=>input.includeOriginal?input.displayOrder:'translation';
 /** Follow-page labels name the language the web page settings currently resolve to. */
 function languageEntries(entries: SelectEntry[],current: string): SelectEntry[] {
-  return entries.map(([id,label])=>id==='follow_page'?[id,`${label}（当前：${languageName(current)}）`]:[id,label]);
+  return entries.map(([id,label])=>id==='follow_page'?[id,`${label}（${languageName(current)}）`]:[id,label]);
 }
+/** Languages a feature resolves to, so a follow-page value can be swapped as an explicit choice. */
+type LanguageOptions = Settings['selectionOptions'] | Settings['inputOptions'];
+const resolvedSource=(settings: Settings,options: LanguageOptions): string=>options.sourceLanguage==='follow_page'?settings.sourceLanguage:options.sourceLanguage;
 const groups: Record<string,InteractionGroup>={
   page:{property:'pageOptions',defaults:PAGE_OPTIONS_DEFAULTS,fields:{
     autoTranslate:['checkbox'],alwaysLanguages:['languages'],neverLanguages:['languages'],alwaysSites:['sites'],neverSites:['sites'],
@@ -126,9 +129,10 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
     node('selection-trigger-action-field').hidden=!buttonTrigger;
     node('selection-delay-field').hidden=buttonTrigger && selection.triggerAction==='click';
     node('input-options-panel').hidden=!input.enabled;
-    const inputSource=input.sourceLanguage==='follow_page'?settings.sourceLanguage:input.sourceLanguage;
-    node<HTMLButtonElement>('input-swap-languages').disabled=inputSource==='auto';
-    node('input-swap-help').hidden=inputSource!=='auto';
+    for(const [group,options] of [['selection',selection],['input',input]] as const){
+      const auto=resolvedSource(settings,options)==='auto';
+      node<HTMLButtonElement>(group+'-swap-languages').disabled=auto;node(group+'-swap-help').hidden=!auto;
+    }
     node('input-icon-help').textContent=input.icon==='dot'?'聚焦输入框时右下角显示小圆点；点击展开翻译图标，再点图标翻译，完成后再点还原。':
       input.icon==='icon'?'聚焦输入框时显示翻译图标，点击即翻译，完成后再点还原。':'不显示入口，只用快捷键或右键菜单翻译。';
     node('input-write-back-help').hidden=!input.includeOriginal;
@@ -193,12 +197,12 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
         resetDrafts(group);return save(settings=>{(settings as unknown as Record<string,unknown>)[property]=structuredClone(defaults);});
       });
     }
-    // Swaps the languages input translation resolves to, so a follow-page value becomes explicit.
-    node('input-swap-languages').addEventListener('click',()=>save(settings=>{
-      const input=settings.inputOptions,source=input.sourceLanguage==='follow_page'?settings.sourceLanguage:input.sourceLanguage;
+    for(const group of ['selection','input'] as const)node(group+'-swap-languages').addEventListener('click',()=>save(settings=>{
+      const options=settings[groups[group].property] as LanguageOptions,source=resolvedSource(settings,options);
       if(source==='auto')return;
-      input.sourceLanguage=input.targetLanguage==='follow_page'?settings.targetLanguage:input.targetLanguage;input.targetLanguage=source;
+      options.sourceLanguage=options.targetLanguage==='follow_page'?settings.targetLanguage:options.targetLanguage;options.targetLanguage=source;
     }));
   }
-  return {render,bind,resetDrafts,validationCount:()=>errors.size,incompleteCount:()=>incomplete.size};
+  const invalidGroups=(): string[]=>[...new Set([...errors.keys()].map(id=>id.slice(0,id.indexOf('-option-'))))];
+  return {render,bind,resetDrafts,validationCount:()=>errors.size,incompleteCount:()=>incomplete.size,invalidGroups};
 }

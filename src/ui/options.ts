@@ -12,7 +12,7 @@ import type {ProviderField} from './common.js';
 import type {Provider} from '../shared/settings.js';
 
 const SUBTITLE_SHORTCUT_CHOICES:[string,string][]=[
-  ['ctrl-alt','Ctrl+Alt+方向键：← 上一句 · ↓ 重播 · → 下一句 · ↑ 循环'],['letters','字母键：A 上一句 · S 重播 · D 下一句 · R 循环'],['off','关闭'],
+  ['ctrl-alt','Ctrl+Alt+方向键'],['letters','字母键 A / S / D / R'],['off','关闭'],
 ];
 
 /** Hint icons sit inside labels: clicking must not toggle the control, and bubbles stay inside the viewport. */
@@ -32,9 +32,27 @@ function bindHints(document: Document): void {
   document.addEventListener('focusin',place);
 }
 
+const SECTIONS=['webpage','hover','selection','input','subtitles','providers','backup'];
+/** One section at a time; the address hash keeps links from the popup and context menu working. */
+function bindSections(document: Document): void {
+  const view=document.defaultView;
+  const show=(): void=>{
+    const hash=view?.location?.hash.slice(1) || '',current=SECTIONS.includes(hash) ? hash : SECTIONS[0];
+    for(const id of SECTIONS){
+      byId(document,id).hidden=id!==current;
+      const link=byId(document,'nav-'+id);
+      if(id===current)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
+    }
+    view?.scrollTo?.(0,0);
+  };
+  view?.addEventListener('hashchange',show);
+  show();
+}
+
 export async function startOptions(document: Document = globalThis.document): Promise<void> {
   document.title=APP_NAME + ' · 设置';
   bindHints(document);
+  bindSections(document);
   const status=byId(document,'status'), testStatus=byId(document,'test-status');
   const fail=(error: unknown): void=>setStatus(status,errorMessage(error),true);
   let selectedId: string | undefined,providerFingerprint: string | undefined='',pickerOpen=false;
@@ -156,15 +174,23 @@ export async function startOptions(document: Document = globalThis.document): Pr
     fillSelect(document,byId<HTMLSelectElement>(document,'target-language'),LANGUAGES.filter(([id])=>id!=='auto'),settings.targetLanguage);
     fillSelect(document,byId<HTMLSelectElement>(document,'subtitle-shortcuts'),SUBTITLE_SHORTCUT_CHOICES,settings.subtitleShortcuts);
     for(const [key,id] of Object.entries(preferences))byId<HTMLInputElement>(document,id).checked=!!settings[key as keyof Settings];
+    byId(document,'subtitle-options-panel').hidden=!settings.subtitlesEnabled;
+    byId<HTMLButtonElement>(document,'page-swap-languages').disabled=settings.sourceLanguage==='auto';
+    byId(document,'page-swap-help').hidden=settings.sourceLanguage!=='auto';
     presentation.render(settings);
     interactions.render(settings);
     const conflicted=(state.error as {code?: string} | null)?.code==='SETTINGS_CONFLICT';
     const unsavedUrls=[...urlDrafts.keys()].filter(id=>touched.has(id+':baseUrl') && settings.providers.some(item=>item.id===id)).length;
     const invalid=interactions.validationCount()+unsavedUrls,incomplete=interactions.incompleteCount();
+    // The sidebar shows which features are off and which hidden section still holds an unsaved draft.
+    const off: Record<string,boolean>={hover:!settings.hoverEnabled,selection:!settings.selectionEnabled,input:!settings.inputOptions.enabled,subtitles:!settings.subtitlesEnabled};
+    const unsaved=new Set(interactions.invalidGroups().map(group=>group==='page' ? 'webpage' : group));
+    if(unsavedUrls)unsaved.add('providers');
+    for(const id of SECTIONS){const link=byId(document,'nav-'+id);link.classList.toggle('off',!!off[id]);link.classList.toggle('invalid',unsaved.has(id));}
     byId(document,'retry-save').hidden=!state.error || conflicted;
     byId<HTMLButtonElement>(document,'reload-settings').hidden=!conflicted && !invalid && !incomplete;
     byId<HTMLButtonElement>(document,'reload-settings').disabled=state.saving;
-    setStatus(status,conflicted ? '其他页面修改了同一配置，当前草稿仍保留。请先复制需要保留的修改，再重新读取最新设置。' : state.error ? '保存失败：'+errorMessage(state.error) : invalid ? `有 ${invalid} 项输入尚未保存，请修正对应提示。其他设置仍会正常保存。` : incomplete ? `有 ${incomplete} 项数字未输入完整，完成输入后自动保存；留空并离开输入框会恢复已保存值。` : state.saving ? '正在保存…' : '设置已保存到此浏览器。',!!state.error || !!invalid);
+    setStatus(status,conflicted ? '其他页面修改了同一配置，当前草稿仍保留。请先复制需要保留的修改，再重新读取最新设置。' : state.error ? '保存失败：'+errorMessage(state.error) : invalid ? `有 ${invalid} 项输入尚未保存，请修正对应提示。其他设置仍会正常保存。` : incomplete ? `有 ${incomplete} 项数字未输入完整，完成输入后自动保存；留空并离开输入框会恢复已保存值。` : state.saving ? '正在保存…' : '更改已自动保存',!!state.error || !!invalid);
   }
   editor.subscribe(render);
   try {await editor.load();}catch(error){fail(error);return;}
@@ -187,6 +213,10 @@ export async function startOptions(document: Document = globalThis.document): Pr
   const selectFields={'active-provider':'activeProviderId','subtitle-provider':'subtitleProviderId','source-language':'sourceLanguage','target-language':'targetLanguage','subtitle-shortcuts':'subtitleShortcuts'};
   for(const [id,key] of Object.entries(selectFields))byId(document,id).addEventListener('change',event=>editor.update(settings=>{(settings as unknown as Record<string,unknown>)[key]=(event.target as HTMLSelectElement).value;}).catch(fail));
   for(const [key,id] of Object.entries(preferences))byId(document,id).addEventListener('change',event=>editor.update(settings=>{(settings as unknown as Record<string,unknown>)[key]=(event.target as HTMLInputElement).checked;}).catch(fail));
+  byId(document,'page-swap-languages').addEventListener('click',()=>editor.update(settings=>{
+    if(settings.sourceLanguage==='auto')return;
+    [settings.sourceLanguage,settings.targetLanguage]=[settings.targetLanguage,settings.sourceLanguage];
+  }).catch(fail));
   byId(document,'retry-save').addEventListener('click',()=>editor.retry().catch(fail));
   byId<HTMLButtonElement>(document,'reload-settings').addEventListener('click',async()=>{try{await editor.reload();interactions.resetDrafts();urlDrafts.clear();render(editor.get(),editor.status());}catch(error){fail(error);}});
   const typeButtons=Object.entries(PROVIDER_INFO).map(([type,info])=>{
@@ -210,7 +240,11 @@ export async function startOptions(document: Document = globalThis.document): Pr
   byId(document,'cancel-add').addEventListener('click',()=>setPicker(false));
   byId(document,'provider-picker').addEventListener('keydown',event=>{if((event as KeyboardEvent).key==='Escape')setPicker(false);});
   byId(document,'make-default').addEventListener('click',()=>editor.update(settings=>{if(selectedId)settings.activeProviderId=selectedId;}).catch(fail));
-  byId<HTMLButtonElement>(document,'delete-provider').addEventListener('click',()=>editor.removeProvider(selectedId).catch(fail));
+  byId<HTMLButtonElement>(document,'delete-provider').addEventListener('click',()=>{
+    const provider=editor.get().providers.find(item=>item.id===selectedId);
+    if(!provider || globalThis.confirm && !globalThis.confirm(`删除“${provider.name || TYPE_NAMES[provider.type]}”？其地址、Key 和模型设置会一并删除。`))return;
+    return editor.removeProvider(provider.id).catch(fail);
+  });
   byId(document,'show-key').addEventListener('click',event=>{const show=fields.apiKey.type==='password';fields.apiKey.type=show?'text':'password';const button=event.target as HTMLButtonElement;button.textContent=show?'隐藏':'显示';button.setAttribute('aria-pressed',String(show));});
   byId<HTMLButtonElement>(document,'test-provider').addEventListener('click',()=>{
     const provider=editor.get().providers.find(item=>item.id===selectedId)!;

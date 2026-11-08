@@ -88,6 +88,11 @@ test('direct hover reads one paragraph without requiring a key',async()=>{
  const h=fixture(),p=h.paragraph('Direct hover');h.settings.hoverEnabled=true;h.settings.hoverOptions={trigger:'hover',delay:50};const ui=createInteractions(h.dependencies).start();h.emit(p,'mousemove');h.advance(50);await settleTriggers();assert.deepEqual(h.requests.map(item=>item.texts),[['Direct hover']]);ui.stop();
 });
 
+test('hover resolves a docs paragraph rendered as span[data-as=p] instead of its whole article',async()=>{
+ const h=fixture(),article=h.paragraph('','div'),spans=['First paragraph','Second paragraph'].map(text=>{const span=h.doc.createElement('span');span.setAttribute('data-as','p');span.textContent=text;article.append(span);return span;});
+ h.settings.hoverEnabled=true;h.settings.hoverOptions={trigger:'hover',delay:50};const ui=createInteractions(h.dependencies).start();h.emit(spans[1],'mousemove');h.advance(50);await settleTriggers();assert.deepEqual(h.requests.map(item=>item.texts),[['Second paragraph']]);ui.stop();
+});
+
 test('area hover reads each descendant block once and applies page language and selector exclusions',async()=>{
  const h=fixture(),area=h.paragraph('Heading ','section'),first=h.doc.createElement('p'),blocked=h.doc.createElement('p'),excluded=h.doc.createElement('p'),last=h.doc.createElement('p');
  first.textContent='First';blocked.textContent='Bonjour';blocked.setAttribute('lang','fr');excluded.textContent='Private region';excluded.className='skip';last.textContent='Last';area.append(first,blocked,excluded,last);
