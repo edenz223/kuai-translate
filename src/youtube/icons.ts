@@ -1,10 +1,12 @@
 /** Player toolbar icons, drawn locally to sit with YouTube's own white controls. */
 export type ToolbarIcon='translate'|'list'|'previous'|'replay'|'next'|'kuai';
+/** Leading icons of the settings menu rows, in YouTube's 24px white line style. */
+export type MenuIcon='captions'|'source'|'service'|'target'|'display'|'order'|'mask'|'loop'|'keyboard'|'options';
 type Shape=[tag:'path'|'rect'|'text',attributes:Record<string,string>,text?:string];
 const SVG='http://www.w3.org/2000/svg';
 const line={fill:'none',stroke:'currentColor','stroke-width':'2','stroke-linecap':'round','stroke-linejoin':'round'};
 const chevron={...line,'stroke-width':'2.4'};
-const icons:Record<ToolbarIcon,{viewBox:string;size:number;shapes:Shape[]}>={
+const icons:Record<ToolbarIcon|MenuIcon,{viewBox:string;size:number;shapes:Shape[]}>={
   // A caption box with 译, read as "translated captions" next to YouTube's CC button.
   translate:{viewBox:'0 0 24 24',size:24,shapes:[
     ['rect',{x:'2.5',y:'4.5',width:'19',height:'15',rx:'3',...line}],
@@ -20,9 +22,31 @@ const icons:Record<ToolbarIcon,{viewBox:string;size:number;shapes:Shape[]}>={
     ['path',{d:'M34 29H49V57L74 29H94L65 62L95 99H75L49 68V99H34Z',fill:'#ffffff'}],
     ['path',{d:'M88 82H112V101H102L96 108V101H88Z',fill:'#7de3e0'}],
   ]},
+  captions:{viewBox:'0 0 24 24',size:24,shapes:[
+    ['rect',{x:'2.5',y:'4.5',width:'19',height:'15',rx:'3',...line}],
+    ['path',{d:'M10.5 10.2a2.4 2.4 0 1 0 0 3.6M17 10.2a2.4 2.4 0 1 0 0 3.6',...line}],
+  ]},
+  source:{viewBox:'0 0 24 24',size:24,shapes:[['path',{d:'M3 6h18M3 12h12M3 18h7M16 15.5l2.5 2.5L22 13',...line}]]},
+  service:{viewBox:'0 0 24 24',size:24,shapes:[['path',{d:'M7 18.5h10.5a4 4 0 0 0 .4-8A6 6 0 0 0 6.4 9.1 4.7 4.7 0 0 0 7 18.5Z',...line}]]},
+  target:{viewBox:'0 0 24 24',size:24,shapes:[
+    ['rect',{x:'3',y:'3',width:'18',height:'18',rx:'9',...line}],
+    ['path',{d:'M3 12h18M12 3c-4.5 4.8-4.5 13.2 0 18M12 3c4.5 4.8 4.5 13.2 0 18',...line}],
+  ]},
+  display:{viewBox:'0 0 24 24',size:24,shapes:[
+    ['rect',{x:'2.5',y:'4.5',width:'19',height:'15',rx:'3',...line}],
+    ['path',{d:'M7 12.5h10M8.5 16h7',...line}],
+  ]},
+  order:{viewBox:'0 0 24 24',size:24,shapes:[['path',{d:'M8 19V5M4.5 8.5 8 5l3.5 3.5M16 5v14M12.5 15.5 16 19l3.5-3.5',...line}]]},
+  mask:{viewBox:'0 0 24 24',size:24,shapes:[['path',{d:'M3.5 12s3-6 8.5-6 8.5 6 8.5 6-3 6-8.5 6-8.5-6-8.5-6ZM12 14.6a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2ZM4 20 20 4',...line}]]},
+  loop:{viewBox:'0 0 24 24',size:24,shapes:[['path',{d:'M17 3.5 20 6.5l-3 3M4 11.5v-1a4 4 0 0 1 4-4h12M7 20.5l-3-3 3-3M20 12.5v1a4 4 0 0 1-4 4H4',...line}]]},
+  keyboard:{viewBox:'0 0 24 24',size:24,shapes:[
+    ['rect',{x:'2.5',y:'5.5',width:'19',height:'13',rx:'2.5',...line}],
+    ['path',{d:'M6.5 9.5h1M10.5 9.5h1M14.5 9.5h1M6.5 12.5h1M10.5 12.5h1M14.5 12.5h1M8 15.5h8',...line}],
+  ]},
+  options:{viewBox:'0 0 24 24',size:24,shapes:[['path',{d:'M4 7h9M17 7h3M4 17h3M11 17h9M15 4.5v5M9 14.5v5',...line}]]},
 };
 
-export function createToolbarIcon(doc:Document,name:ToolbarIcon):SVGSVGElement {
+export function createToolbarIcon(doc:Document,name:ToolbarIcon|MenuIcon):SVGSVGElement {
   const {viewBox,size,shapes}=icons[name],svg=doc.createElementNS(SVG,'svg');
   for(const [key,value]of Object.entries({viewBox,width:String(size),height:String(size),'aria-hidden':'true',focusable:'false'}))svg.setAttribute(key,value);
   svg.setAttribute('data-icon',name);

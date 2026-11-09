@@ -2,7 +2,7 @@
 const zh={
   // Player toolbar and captions
   toolbar:'Kuai translate 字幕工具',toggle:'开启或关闭字幕翻译（关闭后仍保留 Kuai 字幕和列表）',previous:'上一句字幕',next:'下一句字幕',
-  settings:'字幕设置',closeSettings:'关闭字幕设置',retry:'重试',pending:'等待翻译',translating:'翻译中…',
+  settings:'字幕设置',back:'返回',retry:'重试',pending:'等待翻译',translating:'翻译中…',
   replay:'重播本句',loop:'单句循环',looping:'单句循环中',
   boundary:'已到时间轴边界',navDisabled:'请先开启 Kuai 字幕',navCaptionsOff:'请开启视频字幕后继续',navLive:'当前字幕没有可跳转的完整时间轴',
   navUnseekable:'视频暂时无法定位',navWaiting:'正在等待字幕时间轴',
@@ -28,7 +28,7 @@ const zh={
 export type SubtitleWords={[key in keyof typeof zh]:string};
 const en:SubtitleWords={
   toolbar:'Kuai Translate subtitle tools',toggle:'Turn subtitle translation on or off (Kuai captions and the list stay)',previous:'Previous subtitle',next:'Next subtitle',
-  settings:'Subtitle settings',closeSettings:'Close subtitle settings',retry:'Retry',pending:'Waiting for translation',translating:'Translating…',
+  settings:'Subtitle settings',back:'Back',retry:'Retry',pending:'Waiting for translation',translating:'Translating…',
   replay:'Replay sentence',loop:'Loop sentence',looping:'Looping sentence',
   boundary:'No more subtitles this way',navDisabled:'Turn on Kuai captions first',navCaptionsOff:'Turn on captions in the video to continue',
   navLive:'These subtitles have no complete timeline to jump through',navUnseekable:'The video cannot seek right now',navWaiting:'Waiting for the subtitle timeline',
