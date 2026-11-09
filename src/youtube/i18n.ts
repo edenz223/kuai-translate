@@ -22,7 +22,7 @@ const zh={
   // Subtitle list
   listTitle:'字幕列表',listClose:'关闭字幕列表',follow:'回到当前字幕',following:'正在跟随',reading:'自由阅读中',
   loading:'正在读取字幕时间轴…',failed:'暂时无法读取这条字幕的完整时间轴。',disabled:'请开启 Kuai 字幕后使用字幕列表。',nativeDisabled:'请开启视频字幕后继续。',
-  unavailable:'此视频暂时没有完整的字幕时间轴。',error:'翻译暂不可用',seek:'跳转到',count:'句字幕',
+  unavailable:'此视频暂时没有完整的字幕时间轴。',noCaptions:'此视频没有字幕。',error:'翻译暂不可用',seek:'跳转到',count:'句字幕',
   search:'搜索字幕',noMatches:'没有匹配的字幕',matches:'条匹配',view:'列表显示',viewBoth:'双语',viewOriginal:'原文',viewTranslation:'译文',
 };
 export type SubtitleWords={[key in keyof typeof zh]:string};
@@ -47,7 +47,7 @@ const en:SubtitleWords={
   fieldShortcuts:'Player shortcuts',shortcutsCtrlAlt:'Ctrl+Alt+arrow keys',shortcutsLetters:'A / S / D letter keys',shortcutsOff:'Off',
   listTitle:'Subtitle list',listClose:'Close subtitle list',follow:'Back to current',following:'Following current',reading:'Reading freely',
   loading:'Loading the subtitle timeline…',failed:"Couldn't load the full subtitles for this video.",disabled:'Turn on Kuai captions to use this list.',
-  nativeDisabled:'Turn on captions in the video to continue.',unavailable:'A complete subtitle timeline is unavailable for this video.',
+  nativeDisabled:'Turn on captions in the video to continue.',unavailable:'A complete subtitle timeline is unavailable for this video.',noCaptions:'This video has no subtitles.',
   error:'Translation unavailable',seek:'Seek to',count:'captions',
   search:'Search subtitles',noMatches:'No matching subtitles',matches:'matches',view:'List view',viewBoth:'Both',viewOriginal:'Original',viewTranslation:'Translation',
 };

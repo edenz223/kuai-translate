@@ -160,6 +160,13 @@ export function blockText(element: HTMLElement, env: BrowserEnvironment): string
   return read(element).replace(/\s+/gu, ' ').trim();
 }
 
+const urlToken=/^(?:[a-z][a-z\d+.-]*:\/\/|www\.|(?:[a-z\d-]+\.)+[a-z]{2,}(?::\d+)?\/)[\w\-.~:/?#[\]@!$&'()*+,;=%]*$/i;
+/** A line holding only web addresses reads the same in every language. */
+export function isUrlText(text: string): boolean {
+  const tokens=text.trim().split(/\s+/u).map(token=>token.replace(/^[<(（「『【"'“‘]+|[>)）」』】"'”’.,;:!?。，；：！？]+$/gu,''));
+  return tokens.every(token=>urlToken.test(token));
+}
+
 function establishesContainingBlock(style: StyleSnapshot | undefined): boolean {
   return ['transform','filter','perspective'].some(key=>{const value=style?.[key as keyof StyleSnapshot];return value&&value!=='none';})||
     /layout|paint|strict|content/.test(style?.contain||'')||/transform|filter|perspective/.test(style?.willChange||'');

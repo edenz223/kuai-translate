@@ -14,6 +14,7 @@ import {applySubtitleMask} from './presentation.js';
 import {subtitleWords,type SubtitleWords} from './i18n.js';
 import {timelineStatus} from './status.js';
 import {createToolbarIcon,createActiveMark,setActiveMark} from './icons.js';
+import {playerSurface} from './surface.js';
 const root = globalThis;
 "use strict";
 
@@ -21,7 +22,8 @@ const panelStyle = `
   :host{--reading-surface:#fff;--reading-text:#202124;--reading-muted:#606060;--reading-border:#e5e7eb;--reading-hover:#f1f3f5;--reading-accent:#065fd4;display:block;box-sizing:border-box;margin-bottom:16px;color:var(--yt-spec-text-primary,var(--reading-text));font:14px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;color-scheme:light dark}
   @media(prefers-color-scheme:dark){:host{--reading-surface:#0f0f0f;--reading-text:#f1f1f1;--reading-muted:#aaa;--reading-border:#303030;--reading-hover:#272727;--reading-accent:#3ea6ff}}
   :host([hidden]){display:none!important}
-  :host([data-placement="drawer"]){position:absolute;top:12px;right:12px;bottom:64px;width:min(370px,calc(100% - 24px));margin:0;z-index:2300}
+  :host([data-placement="drawer"]){position:absolute;top:12px;right:12px;bottom:64px;width:min(370px,max(50%,260px),calc(100% - 24px));margin:0;z-index:2300}
+  :host([data-placement="drawer"][data-side="left"]){top:8px;bottom:8px;left:8px;right:auto}
   *{box-sizing:border-box}button{font:inherit;color:inherit;cursor:pointer;user-select:none;-webkit-user-select:none}
   button:focus-visible,.subtitle-list:focus-visible,.translation-text:focus-visible{outline:2px solid var(--yt-spec-call-to-action,var(--reading-accent));outline-offset:-2px}
   .panel{display:flex;flex-direction:column;height:min(640px,70vh);min-height:220px;overflow:hidden;border:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));border-radius:12px;background:var(--yt-spec-base-background,var(--reading-surface))}
@@ -42,8 +44,8 @@ const panelStyle = `
   .cue{display:flex;gap:10px;padding:10px 12px 10px 10px;min-height:60px;border-left:2px solid transparent;border-bottom:1px solid var(--yt-spec-10-percent-layer,var(--reading-border))}
   .cue[aria-current="true"]{border-left:3px solid var(--yt-spec-call-to-action,var(--reading-accent));padding-left:9px;background:#3ea6ff24}
   .cue[aria-current="true"] .original-text{font-weight:600}
-  .panel-filters{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));flex:none}
-  .search{flex:1;min-width:0;height:28px;padding:0 10px;border:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));border-radius:14px;background:transparent;color:inherit;font:inherit;font-size:13px}
+  .panel-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));flex:none}
+  .search{flex:1 1 110px;min-width:0;height:28px;padding:0 10px;border:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));border-radius:14px;background:transparent;color:inherit;font:inherit;font-size:13px}
   .search:focus-visible{outline:2px solid var(--yt-spec-call-to-action,var(--reading-accent));outline-offset:-1px}
   .views{display:inline-flex;flex:none;border:1px solid var(--yt-spec-10-percent-layer,var(--reading-border));border-radius:14px;overflow:hidden}
   .views button{border:0;background:transparent;padding:4px 9px;font-size:12px;line-height:18px;color:var(--yt-spec-text-secondary,var(--reading-muted))}
@@ -93,9 +95,12 @@ function offsetIndex(offsets:number[], top:number) {
 function createController(bridge:SubtitleBridge, env = root) {
   const doc = env.document, entries = new Map<string,SidebarEntry>();
   let configuredOpen = bridge.getConfig?.()?.subtitleListOpen;
+  // An embedded player has no column: its list is a drawer over the picture, so it
+  // opens only on request and that choice stays on this page.
+  const embedded = /^\/embed\//.test(new URL(env.location.href).pathname);
   // Reading-list filters are page-local; they never change the video captions.
   let query = "", view: SidebarView = "both";
-  let preferredOpen = configuredOpen === true, preferenceVersion = 0, pendingPreference:{version:number}|null = null, stopped = false, started = false, frame:number|null = null, unsubscribe:(()=>void)|undefined, translationJob:SidebarTranslationJob|null = null;
+  let preferredOpen = !embedded && configuredOpen === true, preferenceVersion = 0, pendingPreference:{version:number}|null = null, stopped = false, started = false, frame:number|null = null, unsubscribe:(()=>void)|undefined, translationJob:SidebarTranslationJob|null = null;
 
   function labels() {
     return subtitleWords(bridge.getLanguage?.() || env.navigator?.language);
@@ -133,24 +138,27 @@ function createController(bridge:SubtitleBridge, env = root) {
   }
   function placement(entry:SidebarEntry) {
     const video = entry.video, player = video.closest?.(".html5-video-player") || video.parentElement;
+    const surface = player && playerSurface(player, doc);
+    // The embedded player's own buttons line its right edge; the drawer takes the left.
+    const side = surface === player ? "right" : "left";
     const fullscreen = doc.fullscreenElement;
     if (fullscreen?.contains(video)) {
-      return { parent: fullscreen.contains(player) ? player : fullscreen, type: "drawer" };
+      return { parent: fullscreen.contains(surface) ? surface : fullscreen.contains(player) ? player : fullscreen, type: "drawer", side };
     }
     const watch = video.closest?.("ytd-watch-flexy");
     // YouTube moves the early player into the watch layout asynchronously.
     // Defer a saved-open panel until that layout exists instead of painting a drawer.
-    if(!watch&&new URL(env.location.href).pathname==='/watch')return {parent:null,type:"column"};
+    if(!watch&&new URL(env.location.href).pathname==='/watch')return {parent:null,type:"column",side};
     const secondary = watch?.querySelector("#secondary-inner") || watch?.querySelector("#secondary");
     if (secondary?.isConnected) {
       const box = secondary.getBoundingClientRect(), style = env.getComputedStyle?.(secondary);
-      if (box.width > 0 && style?.display !== "none" && style?.visibility !== "hidden") return { parent: secondary, type: "column" };
+      if (box.width > 0 && style?.display !== "none" && style?.visibility !== "hidden") return { parent: secondary, type: "column", side };
     }
     const watchPage=new URL(env.location.href).pathname==='/watch';
     const loading=doc.readyState==='loading'||doc.readyState==='interactive';
     if(watchPage&&!watch?.hasAttribute('theater')&&(loading||watch?.hasAttribute('is-two-columns_')))
-      return {parent:null,type:"column"};
-    return { parent: player, type: "drawer" };
+      return {parent:null,type:"column",side};
+    return { parent: surface, type: "drawer", side };
   }
 
   function mountToggle(entry:SidebarEntry) {
@@ -276,7 +284,7 @@ function createController(bridge:SubtitleBridge, env = root) {
       }
     }
     const target = placement(entry);
-    entry.panel.dataset.placement = target.type;
+    entry.panel.dataset.placement = target.type; entry.panel.dataset.side = target.side;
     if (target.parent && entry.panel.parentNode !== target.parent) {
       if (target.type === "column") target.parent.insertBefore(entry.panel, target.parent.firstChild);
       else target.parent.appendChild(entry.panel);
@@ -464,7 +472,7 @@ function createController(bridge:SubtitleBridge, env = root) {
       button.setAttribute("aria-pressed", String(view === value));
     }
     const status = timelineStatus({ enabled: enabled(entry), subtitlesEnabled: config.isEnable === "1", state, video: entry.video }), failed = status === "failed";
-    const reason = { disabled: text.disabled, "captions-off": text.nativeDisabled, failed: text.failed, live: text.unavailable, loading: text.loading, ready: "" }[status];
+    const reason = { disabled: text.disabled, "captions-off": text.nativeDisabled, none: text.noCaptions, failed: text.failed, live: text.unavailable, loading: text.loading, ready: "" }[status];
     const statusMessage = reason || (query && !entry.cues.length ? text.noMatches : "") || (entry.seekError ? text.seekError : "");
     entry.status.hidden = !statusMessage; setText(entry.status, statusMessage);
     entry.retryButton.hidden = !failed || !bridge.retryTimeline; setText(entry.retryButton, text.retry);
@@ -501,7 +509,8 @@ function createController(bridge:SubtitleBridge, env = root) {
         const target = entry.open && !held(entry) ? placement(entry).parent : null;
         if (!entry.video.isConnected || anchor !== entry.anchor || (anchor && !entry.toggleHost?.isConnected) || (entry.open && (!entry.panel?.isConnected || (target && target !== entry.panel.parentNode)))) schedule();
       });
-      const watch = entry.video.closest?.("ytd-watch-flexy") || entry.video.closest?.(".html5-video-player") || entry.video.parentElement;
+      const player = entry.video.closest?.(".html5-video-player") || entry.video.parentElement;
+      const watch = entry.video.closest?.("ytd-watch-flexy") || (player && playerSurface(player, doc));
       if (watch) entry.observer.observe(watch, { childList: true, subtree: true, attributes:true, attributeFilter:["theater","is-two-columns_"] });
     }
     return entry;
@@ -514,7 +523,7 @@ function createController(bridge:SubtitleBridge, env = root) {
   function sync() {
     if (stopped) return;
     const savedOpen = bridge.getConfig?.()?.subtitleListOpen;
-    if (typeof savedOpen === 'boolean' && savedOpen !== configuredOpen) {
+    if (!embedded && typeof savedOpen === 'boolean' && savedOpen !== configuredOpen) {
       configuredOpen = savedOpen;
       if (!pendingPreference) {
         preferredOpen = savedOpen;
@@ -555,7 +564,7 @@ function createController(bridge:SubtitleBridge, env = root) {
     const nextOpen = open === undefined ? !entry.open : !!open;
     if (entry.open === nextOpen) return nextOpen;
     preferredOpen = nextOpen;setOpen(entry, nextOpen);
-    if (bridge.saveSidebarOpen) {
+    if (bridge.saveSidebarOpen && !embedded) {
       const version = ++preferenceVersion;pendingPreference = {version};
       Promise.resolve().then(() => bridge.saveSidebarOpen!(nextOpen)).then(() => finishPreference(version), error => finishPreference(version, error));
     }

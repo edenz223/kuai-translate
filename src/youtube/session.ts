@@ -13,7 +13,7 @@ const continuesText=(previous:string,next:string)=>{const line=lastLine(previous
 export function createSubtitleSession({id,video,settings,translate,onChange=()=>{},getLanguage=()=>undefined}:{id:string;video:HTMLVideoElement;settings:Settings;translate:TranslateSubtitles;onChange?:(session:SubtitleSession)=>void;getLanguage?:()=>string|undefined}):SubtitleSession {
   let config=settings,enabled=true,destroyed=false,running:TranslationJob|null=null,revision=0,timer:ReturnType<typeof setInterval>|null=null,queued=false,opening=false;
   let loop:{start:number;end:number}|null=null,liveChangedAt=0,livePendingSince:number|null=null,liveTimer:ReturnType<typeof setTimeout>|null=null,liveSource:{text:string;translation:string}|null=null;
-  const state:SubtitleState={videoId:id,subtitlesList:[],currentCaption:null,loopingCaption:null,selectionCaptionSnapshot:null,isSubtitleSelectionHeld:false,translateVersion:0,isLiveDomCaptions:false,timelineFailed:false,errorMessage:''};
+  const state:SubtitleState={videoId:id,subtitlesList:[],currentCaption:null,loopingCaption:null,selectionCaptionSnapshot:null,isSubtitleSelectionHeld:false,translateVersion:0,isLiveDomCaptions:false,timelineFailed:false,noTracks:false,errorMessage:''};
   // A preroll ad hides captions, but the timeline and its opening translation can be prepared meanwhile.
   const preparable=()=>!destroyed&&enabled&&config.subtitlesEnabled&&video.isConnected;
   const available=()=>preparable()&&!video.closest?.('.ad-showing, .ad-interrupting');

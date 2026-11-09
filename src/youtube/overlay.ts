@@ -14,6 +14,7 @@ import {navigationState} from './navigation.js';
 import {createSubtitlePreferences} from './preferences.js';
 import {subtitleWords,shortcutLabel} from './i18n.js';
 import {createToolbarIcon,createActiveMark,setActiveMark,type ToolbarIcon} from './icons.js';
+import {playerSurface} from './surface.js';
 // Below this player width the toolbar keeps only its main buttons; shortcuts still work.
 const COMPACT_WIDTH=560;
 
@@ -59,15 +60,16 @@ export function createCaptionView(session:SubtitleSession,{env=globalThis,onTogg
       const controls=[...player.querySelectorAll<HTMLElement>('.ytp-right-controls')].find(node=>{
         const style=env.getComputedStyle?.(node);
         return !node.hidden&&style?.display!=='none'&&style?.visibility!=='hidden'&&style?.visibility!=='collapse';
-      }),parent=controls||player;
+      }),home=playerSurface(player,doc),parent=controls||home;
       // Keep native controls in their existing order, with fullscreen at the right
       // edge. Ignore opacity so native auto-hide does not relocate the toolbar.
       if(toolbar.parentNode!==parent||(parent===controls&&parent.firstChild!==toolbar)){
         cancelSelection(session.id,'controls-relocated');if(destroyed)return;
         if(parent===controls)parent.insertBefore(toolbar,parent.firstChild);else parent.append(toolbar);
-        toolbar.style.cssText=parent===player?'position:absolute;right:12px;top:12px;display:inline-flex;align-items:center;z-index:2400;height:34px;color:white;background:#111b;border-radius:6px;':'display:inline-flex;align-items:center;height:100%;float:left;color:inherit;';
+        // Without a native control bar the toolbar floats; the embedded player keeps its own buttons in the top 52px.
+        toolbar.style.cssText=parent===controls?'display:inline-flex;align-items:center;height:100%;float:left;color:inherit;':'position:absolute;right:12px;top:'+(home===player?12:56)+'px;display:inline-flex;align-items:center;z-index:2400;height:34px;color:white;background:#111b;border-radius:6px;';
       }
-      if(host.parentNode!==player){cancelDrag();cancelSelection(session.id,'captions-relocated');if(destroyed)return;player.append(host);}preferences.mount();
+      if(host.parentNode!==home){cancelDrag();cancelSelection(session.id,'captions-relocated');if(destroyed)return;home.append(host);}preferences.mount();
     }finally{mounting=false;}
   }
   const press=(node:HTMLElement,reason:string)=>{for(const type of ['pointerdown','mousedown'])node.addEventListener(type,event=>{if((event as MouseEvent).button===0)cancelSelection(session.id,reason);event.stopPropagation();});};

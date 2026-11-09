@@ -181,22 +181,25 @@ function emit(target, type, init = {}) {
   return event;
 }
 
-function createFixture(api, { count = 12, translated = true, secondary = true, language = 'en' } = {}) {
+function createFixture(api, { count = 12, translated = true, secondary = true, language = 'en', embed = false, config: settings = {}, bridge: extra = {} } = {}) {
   const document = new Document(), env = new Target(), frames = new Map(); let frameId = 0;
   Object.assign(env, {
     document, HTMLVideoElement: Video, HTMLElement: Element, Node, URL,
-    location: { href: 'https://www.youtube.com/watch?v=one' }, navigator: { language },
+    location: { href: embed ? 'https://www.youtube.com/embed/one' : 'https://www.youtube.com/watch?v=one' }, navigator: { language },
     innerHeight: 900, innerWidth: 1440, console,
     requestAnimationFrame: callback => { frames.set(++frameId, callback); return frameId; },
     cancelAnimationFrame: id => frames.delete(id),
     getComputedStyle: element => ({ display: element.hidden ? 'none' : 'block', visibility: 'visible' }),
   });
   const watch = document.createElement('ytd-watch-flexy'), player = document.createElement('div');
-  player.className = 'html5-video-player'; document.body.append(watch); watch.append(player);
+  player.className = 'html5-video-player';
+  // An embed has no watch layout; its controls are a layer beside the player, not inside it.
+  const layer = document.createElement('div'); layer.id = 'player-controls';
+  if (embed) document.body.append(player, layer); else { document.body.append(watch); watch.append(player); }
   const video = document.createElement('video'); player.append(video);
   const controls = document.createElement('div'), controlHost = document.createElement('span');
   controls.className = 'ytp-right-controls'; controlHost.id = 'kuai-subtitle-button-video-one';
-  player.append(controls); controls.append(controlHost);
+  (embed ? document.body : player).append(controls); controls.append(controlHost);
   const right = document.createElement('div'); right.id = 'secondary'; if (secondary) watch.append(right);
   const session = { id: 'video-one', rule: { id: 'youtube' }, video };
   const cues = Array.from({ length: count }, (_, index) => ({
@@ -206,7 +209,7 @@ function createFixture(api, { count = 12, translated = true, secondary = true, l
   const state = { subtitlesList: cues, currentCaption: null, translateVersion: 0, isSubtitleSelectionHeld: false };
   const sessions = new Map([[session.id, session]]), states = new Map([[session.id, state]]);
   const subscribers = new Set(), requests = [], seeks = [];
-  const config = { isEnable: '1', hideTranslation: '0', styleConfig: {} };
+  const config = { isEnable: '1', hideTranslation: '0', styleConfig: {}, ...settings };
   const bridge = {
     getSessions: () => sessions.values(), getState: id => states.get(id), getConfig: () => config,
     getLanguage: () => language, subscribe(callback) { subscribers.add(callback); return () => subscribers.delete(callback); },
@@ -217,6 +220,7 @@ function createFixture(api, { count = 12, translated = true, secondary = true, l
       for (const callback of subscribers) callback(id);
     },
     seek: (id, time) => { seeks.push({ id, time }); sessions.get(id).video.currentTime = time; return true; },
+    ...extra,
   };
   const controller = api.createController(bridge, env).start();
   async function flush() {
@@ -228,7 +232,7 @@ function createFixture(api, { count = 12, translated = true, secondary = true, l
     throw Error('Sidebar did not become idle within 40 frame turns');
   }
   return {
-    document, env, player, watch, video, controls, controlHost, right, session, state, cues, sessions, states,
+    document, env, player, watch, layer, video, controls, controlHost, right, session, state, cues, sessions, states,
     bridge, config, controller, requests, seeks, subscribers, flush, emit,
     notify(id = session.id) { for (const callback of subscribers) callback(id); },
     panel() { return document.getElementById('kuai-subtitle-sidebar-' + session.id); },
