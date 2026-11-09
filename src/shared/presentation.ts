@@ -4,8 +4,8 @@ export const PAGE_PRESETS = Object.freeze([
   'orange-underline','underline','wavy','marker','highlight','blur','italic','bold','dashed-border',
 ]);
 export const PAGE_STYLE_DEFAULTS = Object.freeze({
-  preset:'border',fontSize:100,fontWeight:400,fontFamily:'inherit',textColor:'inherit',
-  accentColor:'#4285d4',backgroundColor:'#eef5ff',opacity:100,italic:false,lineHeight:1.6,
+  preset:'border',fontSize:100,fontWeight:0,fontFamily:'inherit',textColor:'inherit',
+  accentColor:'#4285d4',backgroundColor:'#eef5ff',opacity:100,italic:false,lineHeight:0,
 });
 export const SUBTITLE_STYLE_DEFAULTS = Object.freeze({
   displayMode:'bilingual',displayOrder:'original_on_top',hideTranslation:false,
@@ -35,11 +35,11 @@ export function normalizePageStyle(input?: unknown) {
   const value=record(input), defaults=PAGE_STYLE_DEFAULTS;
   return {
     preset:choice(value.preset,PAGE_PRESETS,defaults.preset),
-    fontSize:bound(value.fontSize,50,200,defaults.fontSize),fontWeight:bound(value.fontWeight,100,900,defaults.fontWeight),
+    fontSize:bound(value.fontSize,50,200,defaults.fontSize),fontWeight:Number(value.fontWeight)===0?0:bound(value.fontWeight,100,900,defaults.fontWeight),
     fontFamily:font(value.fontFamily,defaults.fontFamily),textColor:color(value.textColor,defaults.textColor,true),
     accentColor:color(value.accentColor,defaults.accentColor),backgroundColor:color(value.backgroundColor,defaults.backgroundColor),
     opacity:bound(value.opacity,0,100,defaults.opacity),italic:boolean(value.italic,defaults.italic),
-    lineHeight:bound(value.lineHeight,1,3,defaults.lineHeight),
+    lineHeight:Number(value.lineHeight)===0?0:bound(value.lineHeight,1,3,defaults.lineHeight),
   };
 }
 

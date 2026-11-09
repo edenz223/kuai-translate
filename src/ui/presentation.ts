@@ -18,7 +18,7 @@ const modes=DISPLAY_MODES;
 const orders: SelectEntry[]=[['original_on_top','原文在上'],['translation_on_top','译文在上']];
 const strokes: SelectEntry[]=[['soft','柔和投影'],['none','无阴影'],['light','轻阴影'],['normal','普通阴影'],['bold','加粗阴影'],['shadow45','45° 投影']];
 const positions: SelectEntry[]=[['bottom-center','底部居中'],['top-center','顶部居中'],['bottom-left','左下角'],['bottom-right','右下角'],['top-left','左上角'],['top-right','右上角']];
-const pageFields: Record<string,PresentationField>={preset:['select',PAGE_PRESETS.map(id=>[id,presetNames[id]||id])],fontSize:['number'],fontWeight:['number-select',weights],fontFamily:['text'],textColor:['color'],accentColor:['color'],backgroundColor:['color'],opacity:['number'],italic:['checkbox'],lineHeight:['number']};
+const pageFields: Record<string,PresentationField>={preset:['select',PAGE_PRESETS.map(id=>[id,presetNames[id]||id])],fontSize:['number'],fontWeight:['number-select',[['0','跟随网页'],...weights]],fontFamily:['text'],textColor:['color'],accentColor:['color'],backgroundColor:['color'],opacity:['number'],italic:['checkbox'],lineHeight:['number-select',[['0','跟随网页'],...Array.from({length:21},(_,index)=>{const value=String(Math.round((1+index/10)*10)/10);return [value,value] as SelectEntry;})]]};
 const subtitleFields: Record<string,PresentationField>={displayMode:['select',modes],displayOrder:['select',orders],hideTranslation:['checkbox'],fontSizeMode:['select',[['responsive','跟随播放器宽度'],['fixed','固定字号']]],sourceFontSize:['number'],targetFontSize:['number'],sourceColor:['color'],targetColor:['color'],sourceWeight:['number-select',weights],targetWeight:['number-select',weights],sourceStroke:['select',strokes],targetStroke:['select',strokes],fontFamily:['text'],backgroundColor:['color'],backgroundOpacity:['number'],backgroundMode:['select',[['line','逐行背景'],['panel','整块背景']]],position:['select',positions],offset:['number'],horizontalOffset:['number'],maxWidth:['number']};
 
 /** Settings controls share the exact presentation helpers used by the real page. */
@@ -27,7 +27,7 @@ export function createPresentationControls({document,editor,onError=()=>{}}: Pre
   const groups: [group: 'pageStyle' | 'subtitleStyle', prefix: string, fields: Record<string,PresentationField>, defaults: Settings['pageStyle'] | Settings['subtitleStyle']][]=[['pageStyle','page-style-',pageFields,PAGE_STYLE_DEFAULTS],['subtitleStyle','subtitle-style-',subtitleFields,SUBTITLE_STYLE_DEFAULTS]];
   const save=(change: SettingsChange)=>{try{return Promise.resolve(editor.update(change)).catch(onError);}catch(error){onError(error);}};
   function syncField(field: FormControl,kind: PresentationKind,value: unknown,entries?: SelectEntry[]): void {
-    if(entries)fillSelect(document,field,entries,String(value));
+    if(entries)fillSelect(document,field,entries.some(([id])=>id===String(value))?entries:[...entries,[String(value),String(value)]],String(value));
     else if(kind==='checkbox')(field as HTMLInputElement).checked=!!value;
     else if(field!==document.activeElement)field.value=String(value??'');
   }

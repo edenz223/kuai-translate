@@ -26,12 +26,12 @@ function pageMask(element:HTMLElement,preset:string) {
   state.render!();
 }
 
-function pageStyleProperties(input?:unknown) {
+function pageStyleProperties(input?:unknown,inline=false) {
   const style=normalizePageStyle(input),preset=style.preset;
   const accent=style.accentColor,background=style.backgroundColor;
   const properties:Record<string,string|number>={
-    color:style.textColor,'font-size':style.fontSize+'%','font-weight':preset==='bold'?Math.max(700,style.fontWeight):style.fontWeight,
-    'font-family':style.fontFamily,'font-style':style.italic||preset==='italic'?'italic':'normal','line-height':style.lineHeight,
+    color:style.textColor,
+    'font-family':style.fontFamily,'font-style':style.italic||preset==='italic'?'italic':'inherit',
     opacity:style.opacity/100,
     border:'0','border-left':'0','border-radius':'0',padding:'0',background:'none','background-color':'transparent',
     'text-decoration-line':'none','text-decoration-style':'solid','text-decoration-color':accent,
@@ -49,21 +49,28 @@ function pageStyleProperties(input?:unknown) {
   }
   if(preset==='marker')properties.background=`linear-gradient(transparent 45%, ${background} 45%, ${background} 90%, transparent 90%)`;
   if(preset==='dashed-border'){properties.border=properties['border-left']='1px dashed '+accent;properties.padding='.25em .5em';properties['padding-left']='.5em';properties['border-radius']='.25em';}
+  if(style.fontSize!==100)properties['font-size']=style.fontSize+'%';
+  if(style.fontWeight||preset==='bold')properties['font-weight']=preset==='bold'?Math.max(700,style.fontWeight):style.fontWeight;
+  if(style.lineHeight)properties['line-height']=style.lineHeight;
+  if(inline){properties.border=properties['border-left']='0';properties.padding=properties['padding-left']='0';properties.background='none';properties['background-color']='transparent';}
   return {style,properties};
 }
 
 /** Class-based page output shares the same validated theme values as previews. */
-export function pageStyleRule(selector:string,input?:unknown) {
-  const {style,properties}=pageStyleProperties(input);
+export function pageStyleRule(selector:string,input?:unknown,inline=false) {
+  const {style,properties}=pageStyleProperties(input,inline);
   // Filters need a paintable box; ordinary inline font elements ignore them.
-  if(style.preset==='blur'){properties.display='inline-block';properties['max-width']='100%';}
+  const masked=style.preset==='blur'&&!inline;
+  if(masked){properties.display='inline-block';properties['max-width']='100%';}
+  else if(inline&&style.preset==='blur')properties.display='inline';
   const declarations=Object.entries(properties).map(([key,value])=>key+':'+value+'!important').join(';');
-  return selector+'{'+declarations+';filter:'+(style.preset==='blur'?'blur(4px)':'none')+'!important}'+
-    (style.preset==='blur'?selector+':hover,'+selector+':focus{filter:none!important}':'');
+  return selector+'{'+declarations+';filter:'+(masked?'blur(4px)':'none')+'!important}'+
+    (masked?selector+':hover,'+selector+':focus{filter:none!important}':'');
 }
 
 export function applyPageStyle(element:HTMLElement,input?:unknown) {
   const {style,properties}=pageStyleProperties(input);
+  for(const property of ['font-size','font-weight','line-height'])if(!(property in properties))element.style.setProperty(property,'inherit','important');
   apply(element,properties);element.setAttribute('data-kuai-preset',style.preset);pageMask(element,style.preset);
   return style;
 }

@@ -21,7 +21,7 @@ test('bilingual output preserves original inline nodes/listeners and restore rem
 
 test('translated rows share one page stylesheet that is removed with the last row', async()=>{
  const h=fixture(),first=h.paragraph('First'),second=h.paragraph('Second');const controller=createPageTranslator(h.dependencies);await controller.translatePage();
- assert.ok(output(first)&&output(second));assert.equal(h.doc.querySelectorAll('[data-kuai-page-style]').length,1);assert.match(sheet(h),/kuai-translator\[data-state=success\]>\.kuai-translator-inner\{/);
+ assert.ok(output(first)&&output(second));assert.equal(h.doc.querySelectorAll('[data-kuai-page-style]').length,1);assert.match(sheet(h),/kuai-translator\[data-state=success\]>font\.kuai-translator-inner\{/);
  controller.restore();assert.equal(h.doc.querySelectorAll('[data-kuai-page-style]').length,0);
 });
 
@@ -430,4 +430,257 @@ test('subtitle background and six-position changes remove stale positioning',()=
   assert.equal(typeof api.applySubtitlePositionStyle,'function');
   api.applySubtitlePositionStyle(node,{position:'top-right',offset:24,maxWidth:72});assert.equal(node.style.top,'24px');assert.equal(node.style.right,'3%');assert.equal(node.style.left,'auto');assert.equal(node.style.bottom,'auto');
   api.applySubtitlePositionStyle(node,{position:'bottom-center',offset:80});assert.equal(node.style.bottom,'80px');assert.equal(node.style.top,'auto');assert.equal(node.style.left,'50%');assert.equal(node.style.right,'auto');assert.equal(node.style.transform,'translateX(-50%)');
+});
+
+test('page controls translate readable text without enabling generic button hover',async()=>{
+ const {isReadable}=await import('../dist/src/content/dom.js');
+ const h=fixture(),button=h.paragraph('Explore','button'),icon=h.doc.createElement('svg'),hidden=h.doc.createElement('span');
+ icon.textContent='Icon';hidden.textContent='Hidden label';hidden.hidden=true;button.append(icon,hidden);
+ for(const role of ['button','tab','menuitem']){const node=h.paragraph('Role '+role,'span');node.setAttribute('role',role);}
+ assert.equal(isReadable(button,h.env),false);
+ const page=createPageTranslator(h.dependencies);await page.translatePage();
+ assert.deepEqual(h.requests.flatMap(r=>r.texts),['Explore','Role button','Role tab','Role menuitem']);
+ assert.equal(output(button).getAttribute('data-kuai-layout'),'inline');assert.strictEqual(output(button).parentNode,button);page.restore();
+});
+
+test('blockified flex links and atomic pills stand alone while an inline badge stays in prose',()=>{
+ const h=fixture(),toolbar=h.paragraph('','div');toolbar.style.display='flex';
+ for(const text of ['Personal','Business']){const a=h.doc.createElement('a');a.textContent=text;a.style.display='block';toolbar.append(a);}
+ const pills=h.paragraph('','div');for(const text of ['Download','News']){const a=h.doc.createElement('a');a.textContent=text;a.style.display='inline-flex';pills.append(a);}
+ const p=h.paragraph('Read '),badge=h.doc.createElement('a');badge.style.display='inline-block';badge.textContent='Guide';p.append(badge,h.doc.createTextNode(' for details.'));
+ assert.deepEqual(collectBlocks(h.doc,h.env).map(b=>b.text),['Personal','Business','Download','News','Read Guide for details.']);
+});
+
+test('visible br stays in one translation unit and forces block output; hidden br does not',async()=>{
+ for(const hidden of [false,true]){
+  const h=fixture(),p=h.paragraph('First','strong'),br=h.doc.createElement('br');br.hidden=hidden;p.append(br,h.doc.createTextNode(' second'));p.style.position='absolute';
+  const page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.deepEqual(h.requests.flatMap(r=>r.texts),['First second']);
+  assert.equal(output(p).getAttribute('data-kuai-layout'),hidden?'inline':'block');assert.equal(output(p).querySelector('br'),null);page.restore();
+ }
+});
+
+test('layout thresholds use both texts and force multiline or long narrow text into blocks',async()=>{
+ const {pageLayout,measureSourceLayout}=await import('../dist/src/content/page-layout.js');
+ const h=fixture(),p=h.paragraph('Short'),a=h.paragraph('Link','a'),metrics={multiline:false,width:300,fontSize:16,nowrap:false,display:'block',column:false};
+ assert.equal(pageLayout(p,'Short','短文',metrics).layout,'inline');
+ assert.equal(pageLayout(p,'Short','这是一段很长很长很长很长的翻译',metrics).layout,'block');
+ assert.equal(pageLayout(a,'A'.repeat(40),'译',metrics).layout,'inline');assert.equal(pageLayout(a,'A'.repeat(41),'译',metrics).layout,'block');
+ assert.deepEqual(pageLayout(p,'Text','译',{...metrics,multiline:true}),{layout:'block'});
+ assert.deepEqual(pageLayout(p,'A long long long sentence','译',{...metrics,width:63,textWidth:60}),{layout:'block'});
+ assert.deepEqual(pageLayout(p,'Text','译',{...metrics,multiline:true,width:30}),{layout:'block'});
+ const createRange=h.doc.createRange;h.doc.createRange=()=>({...createRange(),selectNodeContents(){},getClientRects:()=>[{top:0,bottom:20,width:100,height:20},{top:20,bottom:40,width:50,height:20}]});
+ assert.equal(measureSourceLayout(p,h.env).multiline,true);
+});
+
+test('block and flex/grid scoping restore the exact original markup',async()=>{
+ for(const display of ['block','flex','grid']){
+  const h=fixture(),p=h.paragraph('This paragraph has enough words for block presentation.');p.style.display=display;
+  const before=p.outerHTML,page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.equal(output(p).getAttribute('data-kuai-layout'),'block');assert.equal(output(p).hasAttribute('data-kuai-contain'),false);
+  assert.equal(p.hasAttribute('data-kuai-flex-layout'),display!=='block');
+  page.restore();assert.equal(p.outerHTML,before);
+ }
+});
+
+test('inline and button translation-only hide original text and spacing and restore exactly',async()=>{
+ for(const tag of ['button','a','p']){
+  const h=fixture(),p=h.paragraph(tag==='p'?'A paragraph long enough to require block output.':'Explore',tag);if(tag==='a')p.style.display='inline-block';const before=p.outerHTML;h.settings.pageDisplayMode='translation_only';
+  const page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.ok(output(p).hasAttribute('data-kuai-only'));assert.ok(p.querySelector('[data-kuai-original]'));
+  assert.equal(output(p).querySelector('br'),null);assert.match(sheet(h),/\[data-kuai-only\]\{margin-inline-start:0!important\}/);
+  page.restore();assert.equal(p.outerHTML,before);
+ }
+});
+
+test('viewport clipping respects propagated body overflow and positioned containing blocks',async()=>{
+ const {isInViewport}=await import('../dist/src/content/dom.js');
+ const h=fixture(),scroller=h.paragraph('','div'),fixed=h.doc.createElement('nav'),label=h.doc.createElement('button');label.textContent='Menu';scroller.append(fixed);fixed.append(label);
+ h.doc.body._rect={top:100,bottom:900,left:0,right:1200,width:1200,height:800};h.doc.body.style.overflow='auto';
+ scroller._rect={top:100,bottom:200,left:0,right:400,width:400,height:100};scroller.style.overflow='hidden';fixed.style.position='fixed';label._rect={top:10,bottom:40,left:10,right:60,width:50,height:30};
+ const read=h.env.getComputedStyle;h.env.getComputedStyle=e=>({...read(e),overflow:e.style.overflow||'visible',position:e.style.position||'static',transform:e.style.transform||'none'});
+ assert.equal(isInViewport(label,h.env),true);
+ scroller.style.transform='translateZ(0)';assert.equal(isInViewport(label,h.env),false);
+ scroller.style.transform='none';fixed.style.position='absolute';assert.equal(isInViewport(label,h.env),true);
+ scroller.style.position='relative';assert.equal(isInViewport(label,h.env),false);
+ scroller.style.overflow='visible';assert.equal(isInViewport(label,h.env),true,'body overflow propagates to viewport');
+ h.doc.documentElement.style.overflow='hidden';assert.equal(isInViewport(label,h.env),false,'non-propagated body overflow clips its contents');
+});
+
+test('inline themes remove geometric decoration while retaining emphasis',()=>{
+ for(const preset of ['border','background','highlight','dashed-border','blur']){
+  const css=api.pageStyleRule('output',{preset},true);assert.match(css,/border-left:0!important/);assert.match(css,/padding:0!important/);assert.doesNotMatch(css,/display:inline-block|filter:blur/);
+ }
+ assert.match(api.pageStyleRule('output',{preset:'bold'},true),/font-weight:700/);
+ assert.doesNotMatch(api.pageStyleRule('output'),/font-weight:|line-height:|font-size:/);
+});
+
+test('unchanged translations stay deduplicated without adding visible or hidden markup',async()=>{
+ const h=fixture(),p=h.paragraph('Brand'),before=p.outerHTML;h.respond(async texts=>({translations:texts}));
+ const page=createPageTranslator(h.dependencies);await page.translatePage();await page.translatePage();
+ assert.equal(output(p),null);assert.equal(h.requests.length,1);assert.equal(p.outerHTML,before);page.restore();assert.equal(p.outerHTML,before);
+});
+
+test('an offscreen text-indent icon label is unreadable',()=>{
+ const h=fixture(),p=h.paragraph('Pause','span');p.style.display='block';p.style.overflow='hidden';p.style.textIndent='-9999px';
+ assert.deepEqual(collectBlocks(h.doc,h.env),[]);
+});
+
+test('inline flex controls restore preexisting scoped attributes',async()=>{
+ const h=fixture(),p=h.paragraph('Explore','button');p.style.display='flex';p.style.flexDirection='column';p.setAttribute('data-kuai-inline-layout','site');const before=p.outerHTML;
+ const page=createPageTranslator(h.dependencies);await page.translatePage();assert.equal(p.getAttribute('data-kuai-inline-layout'),'column');page.restore();assert.equal(p.outerHTML,before);
+});
+
+test('zero-height duplicate pseudo labels are suppressed only while laying out inline column controls',async()=>{
+ const h=fixture(),p=h.paragraph('Personal','button');p.style.display='flex';p.style.flexDirection='column';const read=h.env.getComputedStyle;
+ h.env.getComputedStyle=(e,pseudo)=>pseudo?{height:'0px',content:pseudo==='::after'?'"Personal"':'none'}:read(e);
+ const before=p.outerHTML,page=createPageTranslator(h.dependencies);await page.translatePage();assert.equal(p.getAttribute('data-kuai-duplicate-pseudo'),'after');
+ assert.match(sheet(h),/\[data-kuai-inline-layout=column\]\{display:block!important;width:max-content!important;max-width:100%!important\}/);
+ page.restore();assert.equal(p.outerHTML,before);
+});
+
+test('an inline translation stays beside text inside a control label, including translation-only',async()=>{
+ for(const mode of ['bilingual','translation_only']){
+  const h=fixture(),button=h.paragraph('','button'),label=h.doc.createElement('span');label.textContent='United States';label.style.display='inline-block';button.append(label);h.settings.pageDisplayMode=mode;
+  const before=button.outerHTML,page=createPageTranslator(h.dependencies);await page.translatePage();
+  page.refreshPresentation();page.refreshPresentation();
+  assert.strictEqual(output(button).parentNode,label);assert.equal(output(button).closest('[data-kuai-original]'),null);
+  if(mode==='translation_only')assert.ok(label.querySelector('[data-kuai-original]'));
+  page.restore();assert.equal(button.outerHTML,before);
+ }
+});
+
+test('block translations supply intrinsic width to shrink-to-fit hosts in both display modes',async()=>{
+ for(const mode of ['bilingual','translation_only']){
+  const h=fixture(),p=h.paragraph('A heading long enough for block output.','h2');p.style.width='max-content';h.settings.pageDisplayMode=mode;
+  const page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.equal(output(p).getAttribute('data-kuai-layout'),'block');
+  assert.equal(output(p).hasAttribute('data-kuai-contain'),false);assert.equal(output(p).style.getPropertyValue('contain-intrinsic-inline-size'),'');
+  assert.doesNotMatch(sheet(h),/contain:|contain-intrinsic|data-kuai-contain/);assert.equal(p.style.width,'max-content');page.restore();
+ }
+});
+
+test('inline translations wrap without adding ellipsis, clipping or nowrap to hosts or outputs',async()=>{
+ for(const display of ['inline','flex','grid']){
+  const h=fixture(),p=h.paragraph('Explore','button');p.style.display=display;p.style.whiteSpace='nowrap';
+  const page=createPageTranslator(h.dependencies);await page.translatePage();assert.equal(output(p).getAttribute('data-kuai-layout'),'inline');
+  assert.equal(p.style.whiteSpace,'nowrap');assert.doesNotMatch(sheet(h),/white-space:nowrap|text-overflow:ellipsis|overflow:hidden|flex-shrink:/);
+  assert.match(sheet(h),/\[data-kuai-layout=inline\]\{[^}]*white-space:normal!important/);page.restore();
+ }
+});
+
+test('squeezed inline results fall back in one batch, stay stacked across refreshes and restore exactly',async()=>{
+ const h=fixture(),hosts=['block','flex','grid'].map(display=>{
+  const host=h.paragraph('Explore','button');host.style.display=display;host.style.fontSize='16px';host.style.lineHeight='20px';return host;
+ });
+ hosts[1].setAttribute('data-kuai-inline-layout','site-inline');hosts[1].setAttribute('data-kuai-flex-layout','site-flex');
+ const before=hosts.map(host=>host.outerHTML),sources=hosts.map(host=>host.firstChild),events=[];
+ const create=h.doc.createElement;let narrow=true;
+ h.doc.createElement=tag=>{
+  const element=create(tag),set=element.setAttribute.bind(element);
+  element.setAttribute=(name,value)=>{if(name==='data-kuai-layout'&&value==='block')events.push('write');set(name,value);};
+  if(tag==='font')element.getBoundingClientRect=()=>{events.push('read');return {width:narrow?(element.parentElement?.parentElement===hosts[1]?50:16):160,height:narrow?40:20};};
+  return element;
+ };
+ h.respond(async texts=>({translations:texts.map(()=>'企业')}));
+ const page=createPageTranslator(h.dependencies);await page.translatePage();
+ assert.deepEqual(events,['read','read','read','write','write','write']);
+ for(const [index,host]of hosts.entries()){
+  assert.equal(output(host).getAttribute('data-kuai-layout'),'block');assert.strictEqual(output(host).parentNode,host);
+  assert.equal(host.hasAttribute('data-kuai-flex-layout'),index!==0);assert.strictEqual(host.firstChild,sources[index]);
+  assert.equal(host.hasAttribute('data-kuai-page-source'),index!==1);
+ }
+ assert.equal(hosts[1].getAttribute('data-kuai-inline-layout'),'site-inline');assert.equal(hosts[1].getAttribute('data-kuai-flex-layout'),'row');
+ narrow=false;page.refreshPresentation();page.refreshPresentation();
+ h.settings.pageDisplayMode='translation_only';page.refreshPresentation();h.settings.pageDisplayMode='bilingual';page.refreshPresentation();
+ for(const host of hosts)assert.equal(output(host).getAttribute('data-kuai-layout'),'block');
+ page.restore();assert.deepEqual(hosts.map(host=>host.outerHTML),before);
+ assert.equal(h.doc.querySelector('[data-kuai-page-style]'),null);
+ await page.translatePage();for(const host of hosts)assert.equal(output(host).getAttribute('data-kuai-layout'),'inline');
+ page.restore();assert.deepEqual(hosts.map(host=>host.outerHTML),before);
+});
+
+test('stacked flex controls reserve space for a wider translation without adding both intrinsic widths',async()=>{
+ const h=fixture(),host=h.paragraph('IR','button');Object.assign(host.style,{display:'flex',fontSize:'14px',lineHeight:'20px'});
+ host._rect={left:10,top:10,right:60,bottom:110,width:50,height:100};const before=host.outerHTML;
+ const createRange=h.doc.createRange,create=h.doc.createElement;
+ h.doc.createRange=()=>{
+  const range=createRange();range.getClientRects=()=>range.startContainer===host.firstChild?[{width:15,height:20,top:10,bottom:30}]:[{width:14},{width:14}];return range;
+ };
+ h.doc.createElement=tag=>{const element=create(tag);if(tag==='font')element._rect={width:14,height:40};return element;};
+ h.respond(async()=>({translations:['以及']}));const page=createPageTranslator(h.dependencies);await page.translatePage();
+ assert.equal(output(host).getAttribute('data-kuai-layout'),'block');assert.equal(output(host).getAttribute('data-kuai-forced-width'),'63');
+ assert.match(sheet(h),/width:63px!important;align-content:center!important/);
+ assert.match(sheet(h),/\[data-kuai-forced-block=row\]:not\(\[data-kuai-only\]\)\{width:0!important\}/);
+ assert.equal(host.hasAttribute('data-kuai-page-source'),false);assert.equal(host.style.height,undefined);
+ page.restore();assert.equal(host.outerHTML,before);
+});
+
+test('wide natural wrapping stays inline while later squeezing can still trigger fallback',async()=>{
+ const h=fixture(),host=h.paragraph('content-visibility','a');host.style.display='inline-block';host.style.fontSize='16px';host.style.lineHeight='20px';
+ const create=h.doc.createElement;let width=225,height=40;
+ h.doc.createElement=tag=>{const element=create(tag);if(tag==='font')element.getBoundingClientRect=()=>({width,height});return element;};
+ h.respond(async()=>({translations:['内容-可见性']}));const before=host.outerHTML;
+ const page=createPageTranslator(h.dependencies);await page.translatePage();page.refreshPresentation();await Promise.resolve();
+ assert.equal(output(host).getAttribute('data-kuai-layout'),'inline');
+ width=16;height=20;page.refreshPresentation();await Promise.resolve();assert.equal(output(host).getAttribute('data-kuai-layout'),'inline');
+ height=40;page.refreshPresentation();await Promise.resolve();assert.equal(output(host).getAttribute('data-kuai-layout'),'block');
+ page.restore();assert.equal(host.outerHTML,before);
+});
+
+test('block output preserves source white-space and only expands overflow for clamped or ellipsized hosts',async()=>{
+ for(const style of [{whiteSpace:'pre-wrap',overflow:'auto'},{whiteSpace:'nowrap',overflow:'hidden'},{overflow:'clip'},{overflow:'hidden',webkitLineClamp:'2'},{overflow:'hidden',textOverflow:'ellipsis'},{overflow:'visible',textOverflow:'ellipsis'}]){
+  const h=fixture(),p=h.paragraph('A paragraph long enough to require a block translation.');Object.assign(p.style,style);
+  p.setAttribute('data-kuai-page-overflow','site');const before=p.outerHTML;
+  const page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.equal(output(p).getAttribute('data-kuai-layout'),'block');assert.equal(p.style.whiteSpace,style.whiteSpace);
+  assert.equal(p.getAttribute('data-kuai-page-overflow'),style.webkitLineClamp||style.textOverflow==='ellipsis'&&style.overflow==='hidden'?'expanded':'site');
+  assert.doesNotMatch(sheet(h),/\[data-kuai-page-source=expanded\][^{]*\{[^}]*(?:white-space|overflow:)/);
+  for(const rule of sheet(h).split('}'))if(rule.includes('white-space:'))assert.ok(rule.startsWith('kuai-translator'),rule);
+  page.restore();assert.equal(p.outerHTML,before);
+ }
+});
+
+test('atomic siblings scan their parent once per layout cache and recompute after it ends',async()=>{
+ const {isBlock,withLayoutCache}=await import('../dist/src/content/dom.js');
+ const h=fixture(),parent=h.paragraph('','div'),links=[];let checks=0;
+ for(let i=0;i<300;i++){
+  const a=h.doc.createElement('a');a.style.display='inline-block';a.textContent='Tag '+i;parent.append(a);links.push(a);
+  const matches=a.matches.bind(a);a.matches=selector=>{checks++;return matches(selector);};
+ }
+ withLayoutCache(()=>{for(const a of links)assert.equal(isBlock(a,h.env),true);});
+ assert.ok(checks<300*4,`atomic checks should be linear, got ${checks}`);
+ const prose=h.doc.createElement('span');prose.append(h.doc.createTextNode('Sentence '));parent.append(prose);
+ withLayoutCache(()=>{for(const a of links)assert.equal(isBlock(a,h.env),false);});
+ prose.remove();assert.equal(isBlock(links[0],h.env),true);
+ parent.append('Prose');assert.equal(isBlock(links[0],h.env),false);
+});
+
+test('short clamped and ellipsized controls also release clipping without changing source whitespace',async()=>{
+ for(const style of [{webkitLineClamp:'1'},{textOverflow:'ellipsis'}]){
+  const h=fixture(),p=h.paragraph('Explore','button');Object.assign(p.style,{overflow:'hidden',whiteSpace:'nowrap'},style);const before=p.outerHTML;
+  const page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.equal(output(p).getAttribute('data-kuai-layout'),'inline');assert.equal(p.getAttribute('data-kuai-page-source'),'expanded');assert.equal(p.getAttribute('data-kuai-page-overflow'),'expanded');assert.equal(p.style.whiteSpace,'nowrap');
+  page.restore();assert.equal(p.outerHTML,before);
+ }
+});
+
+test('linked card paragraphs use prose thresholds and fitting while sole nested labels remain controls',async()=>{
+ const {pageLayout}=await import('../dist/src/content/page-layout.js'),{isPageControl}=await import('../dist/src/content/dom.js');
+ const metrics={multiline:false,width:300,fontSize:16,nowrap:false,display:'block',column:false,textWidth:290};
+ for(const mode of ['bilingual','translation_only']){
+  const h=fixture(),card=h.paragraph('','a'),title=h.doc.createElement('h3'),p=h.doc.createElement('p');
+  title.textContent='Title';p.textContent='A description here';card.append(title,p);
+  const a=h.paragraph('','a'),label=h.doc.createElement('span');label.textContent='Label';label.style.display='block';a.append(label);
+  const hidden=h.doc.createElement('span');hidden.hidden=true;hidden.textContent='Ignored';a.append(hidden);
+  assert.equal(isPageControl(p,p.textContent,h.env),false);assert.equal(isPageControl(label,'Label',h.env),true);
+  assert.equal(pageLayout(p,p.textContent,'描述',metrics,h.env).layout,'block');
+  assert.equal(pageLayout(p,'x'.repeat(17),'描述',{...metrics,textWidth:0},h.env).layout,'block');
+  assert.equal(pageLayout(p,'Short','短',{...metrics,textWidth:299},h.env).layout,'block');
+  assert.equal(pageLayout(label,'Label','标签',metrics,h.env).layout,'inline');
+  const before=card.outerHTML,labelBefore=a.outerHTML;h.settings.pageDisplayMode=mode;
+  const page=createPageTranslator(h.dependencies);await page.translatePage();page.refreshPresentation();
+  assert.equal(output(p).getAttribute('data-kuai-layout'),'block');assert.strictEqual(output(p).parentNode,p);
+  assert.equal(output(label).getAttribute('data-kuai-layout'),'inline');page.restore();assert.equal(card.outerHTML,before);assert.equal(a.outerHTML,labelBefore);
+ }
 });

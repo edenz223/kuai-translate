@@ -4,7 +4,7 @@ interface SourceRun {text:string; anchor:HTMLAnchorElement|null; indices?:number
 export interface PageContent {source:string; runs:SourceRun[]; linked:boolean; units:string[]}
 export interface PageLinkBinding {source:HTMLAnchorElement; node:HTMLElement; output:HTMLElement; valid:()=>boolean; document:Document; env:BrowserEnvironment}
 
-import {ancestors,computedStyle,isBlock,isReadable,splitText} from './dom.js';
+import {ancestors,computedStyle,isBlock,isPageReadable as isReadable,splitText} from './dom.js';
 
 export const PAGE_LINK_ATTRIBUTES=['href','target','rel','download','title','aria-label','hreflang','referrerpolicy'];
 const safeProtocols=new Set(['https:','http:','mailto:','tel:']);

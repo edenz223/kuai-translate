@@ -1,16 +1,18 @@
 import type {Settings} from '../shared/settings.js';
 import type {Translate} from '../shared/messages.js';
 import type {BrowserEnvironment,CodedError,PageBlock} from './dom.js';
+import type {SourceLayout} from './page-layout.js';
+import {measureSourceLayout,pageLayout} from './page-layout.js';
 import type {PageContent,PageLinkBinding} from './page-content.js';
 
 export interface PageStatus {active:boolean;translated:number;errors:number;total:number;cancelled:boolean;isTranslated:boolean;error?:string}
 export interface PageTranslatorOptions {document:Document;env?:BrowserEnvironment;translate:Translate;cancel?:(id:string)=>unknown;getSettings:()=>Settings;makeRequestId?:()=>string;onBeforeTranslate?:()=>void;onRestore?:()=>void;onChange?:(status:PageStatus)=>void}
 export interface TranslateBlocksOptions {validate?:()=>boolean;retryErrors?:boolean;viewportOnly?:boolean}
 type PageEntryStatus = 'pending'|'success'|'error'|'cancelled';
-interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>boolean;viewportOnly:boolean;url:string;status:PageEntryStatus;output:HTMLElement|null;inner?:HTMLElement;sourceLayout?:string|null;parts:(string|undefined)[];originals:HTMLElement[];content:PageContent;links:PageLinkBinding[];resolve:(()=>void)|null;done?:Promise<void>;titleLayout?:boolean;loadingHost?:HTMLElement|null;loadingNode?:Text|null;expected?:number;shownAt?:number}
+interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>boolean;viewportOnly:boolean;url:string;status:PageEntryStatus;output:HTMLElement|null;inner?:HTMLElement;sourceLayout?:string|null;overflowLayout?:string|null;parts:(string|undefined)[];originals:HTMLElement[];content:PageContent;links:PageLinkBinding[];resolve:(()=>void)|null;done?:Promise<void>;titleLayout?:string|null;layout:SourceLayout;forcedBlock?:boolean;forcedWidth?:number;flexLayout?:string|null;inlineLayout?:string|null;duplicatePseudo?:string|null;loadingHost?:HTMLElement|null;loadingNode?:Text|null;expected?:number;shownAt?:number}
 interface PageRequest {owners:Set<PageEntry>;release:(()=>void)|null}
 
-import { ancestors, batches, blockText, collectBlocks, isBlock, isChinese, isReadable, isInViewport, makeId, requestOptions, translationsOf, withLayoutCache } from './dom.js';
+import { ancestors, batches, blockText, collectBlocks, computedStyle, isPageControl, isBlock, isChinese, isPageReadable as isReadable, isInViewport, visibleRect, makeId, requestOptions, translationsOf, withLayoutCache } from './dom.js';
 import {filterPageBlocks,isPageBlockAllowed,isPageSiteBlocked,pageTranslationKey} from './page-policy.js';
 import {pageStyleRule} from '../shared/styles.js';
 import {hideOriginal,restoreOriginal} from './originals.js';
@@ -28,7 +30,7 @@ const WIPE_WINDOW=1000,WIPE_LIMIT=3;
 export function createPageTranslator({ document, env = globalThis, translate, cancel = () => {}, getSettings, makeRequestId = makeId,onBeforeTranslate=()=>{},onRestore=()=>{},onChange }: PageTranslatorOptions) {
   const entries = new Map<HTMLElement,PageEntry>(), requests = new Map<string,PageRequest>(),loadingEntries=new Set<PageEntry>(),loadingDisposers: (()=>void)[]=[];
   const requestCancelled=Symbol('cancelled request'),wipes=new Map<string,number>();
-  let cancelled = false,observer: MutationObserver|null=null,repairQueued=false,positionQueued=false,titleLayoutStyle: HTMLStyleElement|null=null,pageSheet: HTMLStyleElement|null=null,lastError='';
+  let cancelled = false,observer: MutationObserver|null=null,repairQueued=false,positionQueued=false,squeezeQueued=false,titleLayoutStyle: HTMLStyleElement|null=null,pageSheet: HTMLStyleElement|null=null,lastError='';
   const labels = () => words[isChinese(getSettings(), env) ? 'zh' : 'en'];
   const route = () => env.location?.href || '';
   const status = (): PageStatus => {
@@ -58,7 +60,11 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
       if(entry.sourceLayout===null)entry.element.removeAttribute('data-kuai-page-source');
       else entry.element.setAttribute('data-kuai-page-source',entry.sourceLayout);
     }
-    if(entry.titleLayout&&entry.element.getAttribute('data-kuai-title-layout')==='stacked')entry.element.removeAttribute('data-kuai-title-layout');
+    if(entry.overflowLayout!==undefined){if(entry.overflowLayout===null)entry.element.removeAttribute('data-kuai-page-overflow');else entry.element.setAttribute('data-kuai-page-overflow',entry.overflowLayout);}
+    if(entry.duplicatePseudo!==undefined){if(entry.duplicatePseudo===null)entry.element.removeAttribute('data-kuai-duplicate-pseudo');else entry.element.setAttribute('data-kuai-duplicate-pseudo',entry.duplicatePseudo);}
+    if(entry.inlineLayout!==undefined){if(entry.inlineLayout===null)entry.element.removeAttribute('data-kuai-inline-layout');else entry.element.setAttribute('data-kuai-inline-layout',entry.inlineLayout);}
+    if(entry.flexLayout!==undefined){if(entry.flexLayout===null)entry.element.removeAttribute('data-kuai-flex-layout');else entry.element.setAttribute('data-kuai-flex-layout',entry.flexLayout);}
+    if(entry.titleLayout!==undefined&&entry.element.getAttribute('data-kuai-title-layout')==='stacked'){if(entry.titleLayout===null)entry.element.removeAttribute('data-kuai-title-layout');else entry.element.setAttribute('data-kuai-title-layout',entry.titleLayout);}
     if(entries.get(entry.element)===entry)entries.delete(entry.element);
     changed();
     if(!entries.size){observer?.disconnect();observer=null;titleLayoutStyle?.remove();titleLayoutStyle=null;pageSheet?.remove();pageSheet=null;}
@@ -76,7 +82,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:PAGE_LINK_ATTRIBUTES});
   }
   function makeEntry(element: HTMLElement, source: string, key: string, validate: ()=>boolean, viewportOnly: boolean): PageEntry {
-    const entry: PageEntry={element,source,key,validate,viewportOnly,url:route(),status:'pending',output:null,parts:[],originals:[],content:capturePageContent(element,env),links:[],resolve:null};
+    const entry: PageEntry={element,source,key,validate,viewportOnly,url:route(),status:'pending',layout:measureSourceLayout(element,env),output:null,parts:[],originals:[],content:capturePageContent(element,env),links:[],resolve:null};
     entry.done=new Promise<void>(resolve=>{entry.resolve=resolve;});entries.set(element,entry);observe();changed();return entry;
   }
   function stackYouTubeTitle(entry: PageEntry): void{
@@ -91,7 +97,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
       titleLayoutStyle.textContent='h1[data-kuai-title-layout=stacked]{display:block!important;height:auto!important;max-height:none!important;overflow:visible!important}h1[data-kuai-title-layout=stacked]>[data-kuai-page-translation]{display:block!important;width:100%!important;min-width:0!important;max-width:100%!important;box-sizing:border-box!important}h1[data-kuai-title-layout=stacked]>[data-kuai-page-translation]>br{display:none!important}';
       document.documentElement.append(titleLayoutStyle);
     }
-    element.setAttribute('data-kuai-title-layout','stacked');entry.titleLayout=true;
+    if(entry.titleLayout===undefined)entry.titleLayout=element.getAttribute('data-kuai-title-layout');
+    element.setAttribute('data-kuai-title-layout','stacked');
   }
   function lastSourceText(element: HTMLElement,allowOriginal=false): Text | null{
     let last: Text|null=null;
@@ -111,11 +118,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     }catch{}
     rect ||=entry.element.getBoundingClientRect();
     const x=Math.max(0,Math.min((env.innerWidth||1200)-14,(rect.right||0)+4)),y=Math.max(0,(rect.bottom||0)-13);
-    const endVisible=rect.right>0&&rect.right<=(env.innerWidth||1200)&&rect.bottom>0&&rect.bottom<=(env.innerHeight||800)&&ancestors(node||entry.element).every(ancestor=>{
-      const style=env.getComputedStyle?.(ancestor),clipX=/^(auto|scroll|hidden|clip)$/.test(style?.overflowX||style?.overflow||''),clipY=/^(auto|scroll|hidden|clip)$/.test(style?.overflowY||style?.overflow||'');
-      if(!clipX&&!clipY)return true;const bounds=ancestor.getBoundingClientRect();
-      return (!clipX||x>=bounds.left&&x+12<=bounds.right)&&(!clipY||y>=bounds.top&&y+12<=bounds.bottom);
-    });
+    const bounds=visibleRect(node?.parentElement||entry.element,env,rect,true);
+    const endVisible=rect.right>0&&rect.right<=(env.innerWidth||1200)&&rect.bottom>0&&rect.bottom<=(env.innerHeight||800)&&x>=bounds.left&&x+12<=bounds.right+16&&y>=bounds.top&&y+12<=bounds.bottom;
     return {visible:endVisible,x,y};
   }
   // Read every position before moving any spinner, so one layout serves the whole pass.
@@ -153,10 +157,14 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     if(!entry.output)return;
     let anchor: Node|null=lastSourceText(entry.element,true);
     if(!anchor)return;
-    while(anchor.parentNode&&anchor.parentNode!==entry.element)anchor=anchor.parentNode;
-    if(anchor.parentNode!==entry.element)return;
-    const next=Array.from(entry.element.childNodes)[Array.from(entry.element.childNodes).indexOf(anchor as ChildNode)+1]||null;
-    if(next!==entry.output)entry.element.insertBefore(entry.output,next);
+    const inline=entry.output.getAttribute('data-kuai-layout')==='inline'&&isPageControl(entry.element,entry.source,env);
+    // A full-width label wrapper can leave no space after itself; keep its sole text and result together.
+    const label=anchor.parentElement?.hasAttribute('data-kuai-original')?anchor.parentElement.parentNode!:anchor.parentNode!;
+    const parent=inline&&(label as HTMLElement).tagName==='SPAN'&&(anchor.nodeValue||'').replace(/\s+/gu,' ').trim()===entry.source?label:entry.element;
+    while(anchor.parentNode&&anchor.parentNode!==parent)anchor=anchor.parentNode;
+    if(anchor.parentNode!==parent)return;
+    const next=Array.from(parent.childNodes)[Array.from(parent.childNodes).indexOf(anchor as ChildNode)+1]||null;
+    if(next!==entry.output)parent.insertBefore(entry.output,next);
   }
   function ensureOutput(entry: PageEntry): asserts entry is PageEntry & {output:HTMLElement} {
     if(entry.output)return;
@@ -166,27 +174,78 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     output.setAttribute('role','status');output.setAttribute('aria-live','polite');output.setAttribute('translate','no');
     inner.className='kuai-translator-inner';
     inner.setAttribute('lang',getSettings().targetLanguage||'');
-    output.append(document.createElement('br'),inner);entry.element.append(output);
+    output.append(inner);entry.element.append(output);
     entry.output=output;entry.inner=inner;positionOutput(entry);
   }
   /** One sheet styles every row by state; a stylesheet per row restyled the whole document on each insertion. */
   function updatePageSheet(): void {
-    const style=getSettings().pageStyle||{},inner='>.kuai-translator-inner';
+    const style=getSettings().pageStyle||{};
     let success=false,other=false;
     for(const entry of entries.values())if(entry.status==='success')success=true;else other=true;
-    let css='kuai-translator.kuai-translator-wrapper{display:inline!important;white-space:normal;overflow-wrap:anywhere}'+
+    let css='kuai-translator.kuai-translator-wrapper{font:inherit!important;letter-spacing:inherit!important;color:inherit!important;box-sizing:border-box!important;min-width:0!important;max-width:100%!important;white-space:normal;overflow-wrap:anywhere}'+
+      'kuai-translator[data-kuai-layout=inline]{display:inline!important;margin-inline-start:.35em!important;white-space:normal!important;overflow-wrap:anywhere!important}'+
+      'kuai-translator[data-kuai-layout=inline]>.kuai-translator-inner{white-space:normal!important;overflow-wrap:anywhere!important}'+
+      'kuai-translator[data-kuai-layout=block]{display:block!important;white-space:normal!important}'+
       'kuai-translator[data-state=pending]{display:none!important}'+
-      'kuai-translator[data-kuai-only]>br{display:none!important}'+
+      'kuai-translator[data-kuai-only]{margin-inline-start:0!important}'+
       '[data-kuai-page-source=expanded]{-webkit-line-clamp:unset!important;max-height:none!important;height:auto!important}'+
-      'kuai-translator.kuai-translator-wrapper'+inner+'{white-space:pre-wrap;overflow-wrap:anywhere}';
-    if(success)css+=pageStyleRule('kuai-translator[data-state=success]'+inner,style);
-    if(other)css+=pageStyleRule('kuai-translator:not([data-state=success])'+inner,{...style,preset:style.preset==='blur'?'plain':style.preset,opacity:100});
+      '[data-kuai-page-overflow=expanded]{overflow:visible!important}'+
+      '[data-kuai-inline-layout=column]{display:block!important;width:max-content!important;max-width:100%!important}'+
+      '[data-kuai-inline-layout=column][data-kuai-duplicate-pseudo~=before]::before,[data-kuai-inline-layout=column][data-kuai-duplicate-pseudo~=after]::after{display:none!important}'+
+      '[data-kuai-inline-layout^=flex]{flex-direction:row!important;flex-wrap:nowrap!important;align-items:center!important}'+
+      '[data-kuai-inline-layout=grid]{display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;align-items:center!important}'+
+      '[data-kuai-flex-layout=row]{flex-wrap:wrap!important}'+
+      '[data-kuai-flex-layout]>kuai-translator[data-kuai-layout=block]{flex-basis:100%!important;width:100%!important;grid-column:1/-1!important}'+
+      // A full-width flex basis starts a new row; zero preferred width avoids adding to the host's intrinsic width.
+      'kuai-translator[data-kuai-forced-block=row]:not([data-kuai-only]){width:0!important}'+
+      'kuai-translator>font.kuai-translator-inner{font:inherit!important;letter-spacing:inherit!important;color:inherit;white-space:pre-wrap;overflow-wrap:anywhere}';
+    for(const [active,selector,theme] of [[success,'[data-state=success]',style],[other,':not([data-state=success])',{...style,preset:style.preset==='blur'?'plain':style.preset,opacity:100}]] as const){
+      if(!active)continue;
+      // Include the font tag to outrank the inherited baseline without per-row inline styles.
+      css+=pageStyleRule('kuai-translator'+selector+'>font.kuai-translator-inner',theme);
+      css+=pageStyleRule('kuai-translator'+selector+'[data-kuai-layout=inline]>font.kuai-translator-inner',theme,true);
+      css+=pageStyleRule('kuai-translator'+selector+'[data-kuai-forced-block]>font.kuai-translator-inner',theme,true);
+    }
+    for(const width of new Set([...entries.values()].map(entry=>entry.forcedWidth).filter(width=>width!==undefined))){
+      css+='[data-kuai-flex-layout=row]:has(>kuai-translator[data-kuai-forced-width="'+width+'"]:not([data-kuai-only])){width:'+width+'px!important;align-content:center!important}';
+    }
     if(!pageSheet?.isConnected){
       pageSheet=document.createElement('style');pageSheet.setAttribute('data-kuai-owned','');pageSheet.setAttribute('data-kuai-page-style','');
       document.documentElement.append(pageSheet);
     }
     // Avoid observer churn when a presentation refresh leaves the theme unchanged.
     if(pageSheet.textContent!==css)pageSheet.textContent=css;
+  }
+  function queueSqueezeCheck(): void {
+    if(squeezeQueued)return;
+    squeezeQueued=true;queueMicrotask(()=>{
+      squeezeQueued=false;
+      // Finish reading every inline result before changing any host's layout.
+      const squeezed=withLayoutCache(()=>[...entries.values()].flatMap(entry=>{
+        if(entry.forcedBlock||entry.status!=='success'||!entry.inner||!entry.output?.isConnected||entry.output.getAttribute('data-kuai-layout')!=='inline')return [];
+        const box=entry.inner.getBoundingClientRect(),hostStyle=computedStyle(entry.element,env),innerStyle=computedStyle(entry.inner,env);
+        const fontSize=parseFloat(innerStyle?.fontSize||'')||entry.layout.fontSize;
+        const lineHeight=parseFloat(hostStyle?.lineHeight||'')||(parseFloat(hostStyle?.fontSize||'')||entry.layout.fontSize)*1.2;
+        // Mixed-width glyphs can make a three-character column slightly wider than three em.
+        if(!(box.width>0&&box.width<fontSize*4&&box.height>lineHeight*1.5))return [];
+        let width: number|undefined;
+        if(/flex/.test(entry.layout.display)&&!entry.layout.column){
+          let textWidth=0;
+          const visit=(node: Node): void=>{
+            if(node.nodeType===3){
+              try{const range=document.createRange();range.selectNodeContents(node);for(const rect of Array.from(range.getClientRects?.()||[]))textWidth+=rect.width;}catch{}
+            }else for(const child of node.childNodes)visit(child);
+          };
+          visit(entry.inner);
+          // Preserve the source's preferred width, adding only what a wider translation needs.
+          width=entry.layout.width+Math.max(0,textWidth-(entry.layout.textWidth||0));
+        }
+        return [{entry,width}];
+      }));
+      // Keep the fallback for this translation even if a later refresh has more space.
+      for(const {entry,width} of squeezed){entry.forcedBlock=true;entry.forcedWidth=width;}
+      withLayoutCache(()=>{for(const {entry} of squeezed)present(entry);});
+    });
   }
   function present(entry: PageEntry): void {
     if(!entry.output||!entry.inner)return;
@@ -198,13 +257,40 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
       restoreOriginal(entry);appendLoading(entry);
       entry.output.setAttribute('aria-label',labels().loading);return;
     }
-    removeLoading(entry);entry.output.removeAttribute('aria-label');stackYouTubeTitle(entry);
+    removeLoading(entry);entry.output.removeAttribute('aria-label');
+    const layout=entry.forcedBlock?{layout:'block' as const}:pageLayout(entry.element,entry.source,entry.inner.textContent||'',entry.layout,env);
+    entry.output.setAttribute('data-kuai-layout',layout.layout);
+    if(entry.forcedBlock)entry.output.setAttribute('data-kuai-forced-block',/flex/.test(entry.layout.display)&&!entry.layout.column?'row':'');
+    if(entry.forcedWidth!==undefined)entry.output.setAttribute('data-kuai-forced-width',String(entry.forcedWidth));
+    if(layout.layout==='inline'&&/flex|grid/.test(entry.layout.display)){
+      if(entry.layout.duplicatePseudo){
+        if(entry.duplicatePseudo===undefined)entry.duplicatePseudo=entry.element.getAttribute('data-kuai-duplicate-pseudo');
+        entry.element.setAttribute('data-kuai-duplicate-pseudo',entry.layout.duplicatePseudo);
+      }
+      if(entry.inlineLayout===undefined)entry.inlineLayout=entry.element.getAttribute('data-kuai-inline-layout');
+      entry.element.setAttribute('data-kuai-inline-layout',/flex/.test(entry.layout.display)?entry.layout.column?'column':'flex':'grid');
+    }else if(entry.inlineLayout!==undefined){
+      if(entry.inlineLayout===null)entry.element.removeAttribute('data-kuai-inline-layout');else entry.element.setAttribute('data-kuai-inline-layout',entry.inlineLayout);
+    }
+    if(layout.layout==='block'&&/flex|grid/.test(entry.layout.display)){
+      if(entry.flexLayout===undefined)entry.flexLayout=entry.element.getAttribute('data-kuai-flex-layout');
+      entry.element.setAttribute('data-kuai-flex-layout',entry.layout.column?'column':'row');
+    }else if(entry.flexLayout!==undefined){
+      if(entry.flexLayout===null)entry.element.removeAttribute('data-kuai-flex-layout');else entry.element.setAttribute('data-kuai-flex-layout',entry.flexLayout);
+    }
+    stackYouTubeTitle(entry);positionOutput(entry);
     if(entry.sourceLayout===undefined)entry.sourceLayout=entry.element.getAttribute('data-kuai-page-source');
-    if(entry.element.getAttribute('data-kuai-page-source')!=='expanded')entry.element.setAttribute('data-kuai-page-source','expanded');
+    // Stacked flex rows can use a control's existing height without expanding the whole header.
+    if((layout.layout==='block'&&entry.forcedWidth===undefined||entry.layout.expandOverflow)&&entry.element.getAttribute('data-kuai-page-source')!=='expanded')entry.element.setAttribute('data-kuai-page-source','expanded');
+    if(entry.layout.expandOverflow){
+      if(entry.overflowLayout===undefined)entry.overflowLayout=entry.element.getAttribute('data-kuai-page-overflow');
+      entry.element.setAttribute('data-kuai-page-overflow','expanded');
+    }
     if(entry.status==='success')refreshPageLinks(entry.links,document,env);
-    if(theme.preset==='blur')entry.inner.setAttribute('tabindex','0');else entry.inner.removeAttribute('tabindex');
+    if(theme.preset==='blur'&&layout.layout==='block')entry.inner.setAttribute('tabindex','0');else entry.inner.removeAttribute('tabindex');
     if(translationOnly){entry.output.setAttribute('data-kuai-only','');hideOriginal(entry,document,env);}
     else{entry.output.removeAttribute('data-kuai-only');restoreOriginal(entry);}
+    if(layout.layout==='inline'&&entry.status==='success')queueSqueezeCheck();
   }
 
   function current(entry: PageEntry): boolean {
@@ -227,6 +313,9 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     return !!entry&&current(entry)&&entry.source===source&&['pending','success'].includes(entry.status);
   }
   function show(entry: PageEntry, text: string, state: PageEntryStatus): void {
+    if(state==='success'&&text.trim()===entry.source.trim()){
+      removeLoading(entry);entry.output?.remove();entry.output=null;entry.inner=undefined;entry.status=state;finish(entry);changed();return;
+    }
     ensureOutput(entry);entry.status = state;entry.output.setAttribute('data-state',state);entry.output.setAttribute('aria-busy',String(state==='pending'));entry.inner!.replaceChildren();
     entry.links=[];
     if(state!=='pending')positionOutput(entry);

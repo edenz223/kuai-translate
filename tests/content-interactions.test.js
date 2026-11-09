@@ -174,7 +174,7 @@ test('paragraph output uses the page style, translation-only mode and safe plain
   const ui=createInteractions(h.dependencies).start();await hover(h,link);
   const output=result(p);assert.ok(output,'the translation must appear inside the source paragraph');
   assert.equal(output.tagName,'KUAI-TRANSLATOR');assert.equal(p.childNodes.at(-1),output);assert.equal(output.className,'kuai-translator-wrapper notranslate');
-  assert.equal(output.firstChild.tagName,'BR');assert.equal(output.querySelector('font').getAttribute('lang'),'zh-Hans');
+  assert.equal(output.firstChild.tagName,'FONT');assert.equal(output.querySelector('font').getAttribute('lang'),'zh-Hans');
   assert.equal(output.querySelector('font').firstChild.nodeType,3);assert.equal(text(p),'<img src=x onerror=alert(1)>你好');assert.equal(output.querySelector('img'),null);
   assert.equal(output.getAttribute('data-state'),'success');assert.match(sheet(h),/font-size:125%/);assert.match(sheet(h),/color:#123456/);assert.match(sheet(h),/border-left:2px solid/);assert.equal(output.getAttribute('style'),null);
   assert.equal(original.parentElement.hidden,true);assert.equal(link.parentElement.hidden,true);assert.ok(p.querySelector('[data-kuai-original]'));

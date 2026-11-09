@@ -41,7 +41,7 @@ export function normalizeSubtitleTrackPreference(input?:unknown):SubtitleTrackPr
 
 export function defaultSettings() {
   return {
-    schemaVersion:1, inputDefaultsVersion:3, paragraphDefaultsVersion:1, subtitleStyleDefaultsVersion:2, providerRevision:0, providers:structuredClone(FREE_PROVIDERS) as Provider[],
+    schemaVersion:1, inputDefaultsVersion:3, paragraphDefaultsVersion:1, subtitleStyleDefaultsVersion:2, pageStyleDefaultsVersion:1, providerRevision:0, providers:structuredClone(FREE_PROVIDERS) as Provider[],
     activeProviderId:'microsoft', subtitleProviderId:'follow_page',
     sourceLanguage:'auto', targetLanguage:'zh-Hans', interfaceLanguage:'auto',
     // subtitlesEnabled turns Kuai captions and the list on; translation can be off within them.
@@ -109,6 +109,10 @@ export function normalizeSettings(input:unknown):Settings {
     const wasDefault=Object.entries(prior).every(([key,value])=>styleInput[key]===value);
     styleInput=wasDefault?{...styleInput,fontSizeMode:'responsive',sourceStroke:'soft',targetStroke:'soft',backgroundMode:'panel'}:{...styleInput,fontSizeMode:'fixed'};
   }
+  let pageInput=input.pageStyle;
+  if(input.schemaVersion===1&&version(input.pageStyleDefaultsVersion,0)<1&&plain(pageInput)){
+    pageInput={...pageInput,fontWeight:pageInput.fontWeight===400?0:pageInput.fontWeight,lineHeight:pageInput.lineHeight===1.6?0:pageInput.lineHeight};
+  }
   const subtitleStyle=normalizeSubtitleStyle(styleInput);
   if (!['bilingual','translation_only'].includes(input.subtitleStyle?.displayMode))
     subtitleStyle.displayMode=flag(input.showOriginal,true) ? 'bilingual' : 'translation_only';
@@ -124,14 +128,14 @@ export function normalizeSettings(input:unknown):Settings {
   if(input.schemaVersion===1&&version(input.paragraphDefaultsVersion,0)<1&&input.hoverOptions?.trigger==='alt')
     interactionInput={...interactionInput,hoverOptions:{...input.hoverOptions,trigger:'shift'}};
   return {
-    schemaVersion:1,inputDefaultsVersion:version(input.inputDefaultsVersion,3),paragraphDefaultsVersion:version(input.paragraphDefaultsVersion,1),subtitleStyleDefaultsVersion:version(input.subtitleStyleDefaultsVersion,2),providerRevision:Number.isSafeInteger(input.providerRevision)&&input.providerRevision>=0?input.providerRevision:0,providers,activeProviderId:active,
+    schemaVersion:1,inputDefaultsVersion:version(input.inputDefaultsVersion,3),paragraphDefaultsVersion:version(input.paragraphDefaultsVersion,1),subtitleStyleDefaultsVersion:version(input.subtitleStyleDefaultsVersion,2),pageStyleDefaultsVersion:version(input.pageStyleDefaultsVersion,1),providerRevision:Number.isSafeInteger(input.providerRevision)&&input.providerRevision>=0?input.providerRevision:0,providers,activeProviderId:active,
     subtitleProviderId:input.subtitleProviderId==='follow_page' || !enabled(input.subtitleProviderId) ? 'follow_page' : input.subtitleProviderId,
     sourceLanguage:language(input.sourceLanguage,'auto',true),targetLanguage:language(input.targetLanguage,'zh-Hans'),
     interfaceLanguage:['auto','en','zh-CN'].includes(input.interfaceLanguage) ? input.interfaceLanguage : 'auto',
     subtitlesEnabled:flag(input.subtitlesEnabled,true),subtitleTranslationEnabled:flag(input.subtitleTranslationEnabled,true),selectionEnabled:flag(input.selectionEnabled,false),
     hoverEnabled:flag(input.hoverEnabled,true),showOriginal:subtitleStyle.displayMode!=='translation_only',
     pageDisplayMode:input.pageDisplayMode==='translation_only' ? 'translation_only' : 'bilingual',
-    pageStyle:normalizePageStyle(input.pageStyle),subtitleStyle,
+    pageStyle:normalizePageStyle(pageInput),subtitleStyle,
     subtitleTrackPreference:normalizeSubtitleTrackPreference(input.subtitleTrackPreference),subtitleListOpen:flag(input.subtitleListOpen,false),
     subtitleShortcuts:SUBTITLE_SHORTCUT_SCHEMES.includes(input.subtitleShortcuts)?input.subtitleShortcuts as SubtitleShortcutScheme:'ctrl-alt',
     subtitleTargetLanguage:input.subtitleTargetLanguage==null || input.subtitleTargetLanguage==='follow_page' ? 'follow_page' : language(input.subtitleTargetLanguage,'zh-Hans'),
