@@ -10,6 +10,7 @@ interface SelectionEntry {
  dispose?:()=>void;observer?:MutationObserver;
 }
 /* Subtitle text selection and playback ownership, in the isolated content world. */
+import {playerSurface} from './surface.js';
 const root = globalThis;
 "use strict";
 function createController(bridge:SubtitleBridge, env = root) {
@@ -307,7 +308,9 @@ function createController(bridge:SubtitleBridge, env = root) {
       return;
     }
     for (const entry of entries.values()) {
-      if (entry.held && (path.includes(entry.video) || path.includes(playerOf(entry) as EventTarget))) cancelEntry(entry);
+      const player = playerOf(entry);
+      // A press on the embedded player lands on its control layer, outside the player element.
+      if (entry.held && (path.includes(entry.video) || path.includes(player as EventTarget) || !!player && path.includes(playerSurface(player, doc)))) cancelEntry(entry);
     }
   }
   function up() {

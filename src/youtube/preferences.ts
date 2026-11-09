@@ -9,6 +9,7 @@ export interface SubtitlePreferencesOptions {
 interface OptionsSelect extends HTMLSelectElement {_kuaiOptions?:string}
 import {subtitleStyle} from './presentation.js';
 import {subtitleWords,type SubtitleWords} from './i18n.js';
+import {playerSurface} from './surface.js';
 
 // Language names are shown in their own language; only the follow choice is translated.
 const PANEL_WIDTH=340;
@@ -31,7 +32,8 @@ export function createSubtitlePreferences({env,player,id,trigger,onChange,onTrac
   }
   const enabled=field('fieldEnabled','subtitles-enabled','checkbox'),translate=field('fieldTranslate','subtitle-translate','checkbox'),tracks=field('fieldTrack','subtitle-track'),provider=field('fieldProvider','subtitle-provider'),target=field('fieldTarget','subtitle-target'),mode=field('fieldMode','subtitle-mode'),order=field('fieldOrder','subtitle-order'),mask=field('fieldMask','subtitle-mask','checkbox'),
     loop=field('loop','subtitle-loop','checkbox'),shortcuts=field('fieldShortcuts','subtitle-shortcuts');
-  const status=element('p','settings-status'),all=element('button','all-subtitle-settings');all.type='button';status.setAttribute('role','status');panel.append(status,all);shadow.append(style,panel);player.append(host);
+  const status=element('p','settings-status'),all=element('button','all-subtitle-settings');all.type='button';status.setAttribute('role','status');panel.append(status,all);shadow.append(style,panel);
+  const home=()=>playerSurface(player,doc);home().append(host);
   trigger.setAttribute('aria-controls',host.id);trigger.setAttribute('aria-haspopup','dialog');host.setAttribute('role','dialog');
   function applyLabels(text:SubtitleWords){
     const set=(node:HTMLElement,value:string)=>{if(node.textContent!==value)node.textContent=value;};
@@ -87,7 +89,7 @@ export function createSubtitlePreferences({env,player,id,trigger,onChange,onTrac
   // Sit just left of an open subtitle list drawer, near the toolbar button; only a
   // player too narrow for both moves the panel to its left edge.
   function place(){
-    const drawer=Array.from(player.querySelectorAll<HTMLElement>('section')).find(node=>node.dataset.placement==='drawer'&&!node.hidden&&node!==host);
+    const drawer=Array.from(home().querySelectorAll<HTMLElement>('section')).find(node=>node.dataset.placement==='drawer'&&node.dataset.side!=='left'&&!node.hidden&&node!==host);
     const width=drawer?.getBoundingClientRect().width||0,fits=player.getBoundingClientRect().width-width-36>=PANEL_WIDTH;
     const right=!drawer?12:fits?Math.round(width)+24:null;
     host.style.right=right===null?'auto':right+'px';host.style.left=right===null?'12px':'auto';
@@ -104,5 +106,5 @@ export function createSubtitlePreferences({env,player,id,trigger,onChange,onTrac
   // Wheel inside the panel must not scroll YouTube's fullscreen recommendation grid.
   for(const type of ['wheel','touchmove'])host.addEventListener(type,event=>event.stopPropagation(),{passive:true});
   applyLabels(words());renderTracks();
-  return{host,render,toggle,error,setTracks,mount(){if(!destroyed&&host.parentNode!==player)player.append(host);},destroy(){destroyed=true;doc.removeEventListener('pointerdown',outside,true);host.remove();}};
+  return{host,render,toggle,error,setTracks,mount(){if(!destroyed&&host.parentNode!==home())home().append(host);},destroy(){destroyed=true;doc.removeEventListener('pointerdown',outside,true);host.remove();}};
 }

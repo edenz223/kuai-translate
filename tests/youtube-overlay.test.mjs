@@ -444,3 +444,12 @@ test('toolbar buttons use player-style icons, the Kuai logo for settings and a r
   h.ccButton.setAttribute('aria-pressed','false');h.manager.sync();await h.flush();
   assert.equal(h.mainButton().getAttribute('aria-pressed'),'false');assert.equal(mark.style.display,'none');
 });
+test('an embedded player layers its controls over the player, so captions, toolbar and settings mount beside that layer',async t=>{
+  const h=studyFixture({onHarness:f=>{f.controls.remove();const layer=f.document.createElement('div');layer.id='player-controls';f.watch.append(layer);}});t.after(()=>h.manager.stop());await h.load();
+  const toolbar=h.mainButton().parentElement;
+  assert.equal(h.captionHost().parentElement,h.watch);assert.equal(toolbar.parentElement,h.watch);assert.equal(h.settingsPanel().parentElement,h.watch);
+  assert.match(toolbar.style.cssText,/position:absolute;right:12px;top:56px/,'below the embedded player\'s own top-right buttons');
+  // The classic player keeps its control bar inside the player and stays the mount point.
+  const classic=studyFixture({onHarness:f=>{const layer=f.document.createElement('div');layer.id='player-controls';f.watch.append(layer);const bar=f.document.createElement('div');bar.className='ytp-chrome-bottom';f.player.append(bar);}});t.after(()=>classic.manager.stop());await classic.load();
+  assert.equal(classic.captionHost().parentElement,classic.player);assert.equal(classic.mainButton().parentElement.parentElement,classic.controls);
+});

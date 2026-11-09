@@ -5,7 +5,7 @@ export interface CurrentCaption {start:number;end:number;original:string;transla
 export interface CaptionTrack {id:string;baseUrl:string;languageCode:string;kind:string;name:string}
 export interface JsonSegment {utf8:string;tOffsetMs?:unknown}
 export interface JsonCaptionEvent {tStartMs:unknown;dDurationMs?:unknown;segs:JsonSegment[];wWinId?:unknown;aAppend?:unknown}
-export interface SubtitleState {videoId:string;subtitlesList:CaptionCue[];currentCaption:CurrentCaption|null;loopingCaption:{start:number;end:number}|null;selectionCaptionSnapshot:CurrentCaption|null;isSubtitleSelectionHeld:boolean;translateVersion:number;isLiveDomCaptions:boolean;timelineFailed:boolean;errorMessage:string}
+export interface SubtitleState {videoId:string;subtitlesList:CaptionCue[];currentCaption:CurrentCaption|null;loopingCaption:{start:number;end:number}|null;selectionCaptionSnapshot:CurrentCaption|null;isSubtitleSelectionHeld:boolean;translateVersion:number;isLiveDomCaptions:boolean;timelineFailed:boolean;noTracks:boolean;errorMessage:string}
 export type {Translate as TranslateSubtitles} from '../shared/messages.js';
 export type {PreferencePatch as SettingsPatch} from '../shared/messages.js';
 export interface SubtitleSession {

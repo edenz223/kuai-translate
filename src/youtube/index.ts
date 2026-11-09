@@ -100,6 +100,8 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     // A previous empty response must not block the newly usable URL.
     if(record.track?.id===selected?.id&&record.track?.baseUrl!==selected?.baseUrl){clearPending(record);record.failedTrack='';}
     record.tracks=tracks;record.track=selected;
+    const none=metadata?.videoId===record.videoId&&!tracks.length;
+    if(record.session.state.noTracks!==none){record.session.state.noTracks=none;changed();}
     record.view.setTracks(tracks,preference.languageCode?selected?.id:'');
     return selected;
   }

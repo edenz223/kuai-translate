@@ -253,6 +253,33 @@ test('a failed timeline explains itself and can be retried from the list', async
   f.controller.stop();
 });
 
+test('a video without caption tracks says so instead of loading forever', async () => {
+  const f = fixture({ count: 0 });
+  f.controller.toggle(f.session.id, true); await f.flush();
+  const root = f.panel().shadowRoot, status = root.querySelector('.panel-status');
+  assert.match(status.textContent, /Loading/);
+  f.state.noTracks = true; f.notify(); await f.flush();
+  assert.equal(status.hidden, false); assert.match(status.textContent, /no subtitles/);
+  assert.equal(root.querySelector('.retry-timeline').hidden, true); assert.equal(root.querySelector('.subtitle-list').hidden, true);
+  f.controller.stop();
+});
+
+test('an embedded player opens its list only on request, above the player controls, and closes without saving', async () => {
+  const saved = [];
+  const f = fixture({ embed: true, config: { subtitleListOpen: true }, bridge: { saveSidebarOpen: open => { saved.push(open); } } });
+  await f.flush();
+  assert.ok(!f.panel() || f.panel().hidden, 'a list preference saved on a watch page must not cover an embedded picture');
+  f.emit(f.toggleButton(), 'click'); await f.flush();
+  const panel = f.panel();
+  assert.equal(panel.hidden, false); assert.equal(panel.dataset.placement, 'drawer'); assert.equal(panel.dataset.side, 'left');
+  assert.equal(panel.parentElement, f.document.body, 'inside the player the drawer would sit beneath the control layer');
+  f.emit(panel.shadowRoot.querySelector('.close-panel'), 'click'); await f.flush();
+  assert.equal(panel.hidden, true); assert.equal(f.toggleButton().getAttribute('aria-expanded'), 'false');
+  f.notify(); await f.flush();
+  assert.equal(panel.hidden, true, 'the saved preference must not reopen it'); assert.deepEqual(saved, []);
+  f.controller.stop();
+});
+
 test('searching filters the reading list by source or translation and Escape clears it', async () => {
   const f = fixture({ count: 30 });
   f.controller.toggle(f.session.id, true); await f.flush();

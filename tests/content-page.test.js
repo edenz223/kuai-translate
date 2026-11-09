@@ -382,6 +382,22 @@ for(const mode of ['page','paragraph'])test(mode+' skips numeric-only blocks whi
   for(const [i,node] of nodes.entries()){assert.equal(node.textContent,skipped[i]);assert.equal(node.querySelector('[data-kuai-page-translation]'),null);}
 });
 
+for(const mode of ['page','paragraph'])test(mode+' skips blocks holding only web addresses while retaining sentences with addresses',async t=>{
+  const h=fixture(),skipped=['https://example.com/docs/getting-started?tab=readme#install','www.example.com','github.com/owner/repo','<https://example.com/a>.','http://localhost:3000/ https://example.org/b'];
+  const nodes=skipped.map(text=>h.paragraph(text)),normal=h.paragraph('Read https://example.com/docs first'),name=h.paragraph('Node.js'),localized=h.paragraph('https://example.com是官方网站');
+  const page=createPageTranslator(h.dependencies);t.after(()=>page.stop());
+  if(mode==='page')await page.translatePage();
+  else await page.translateBlocks([...nodes,normal,name,localized].map(element=>({element,text:element.textContent})));
+  assert.deepEqual(h.requests.flatMap(request=>request.texts),['Read https://example.com/docs first','Node.js','https://example.com是官方网站']);
+  for(const [i,node] of nodes.entries()){assert.equal(node.textContent,skipped[i]);assert.equal(node.querySelector('[data-kuai-page-translation]'),null);}
+});
+test('a link shown as its own address keeps that address inside a translated sentence',async t=>{
+  const h=fixture(),p=h.paragraph('Source: ');p.append(link(h,'https://example.org/report','https://example.org/report'),h.doc.createTextNode(' (archived)'));
+  const page=createPageTranslator(h.dependencies);t.after(()=>page.stop());await page.translatePage();
+  assert.deepEqual(h.requests.flatMap(request=>request.texts),['Source:','(archived)']);
+  assert.equal(output(p).querySelector('a').textContent,'https://example.org/report');
+});
+
 function setupBadge({top}={}){
   const h=fixture(),listeners=new Set(),subscribers=new Set(),reports=[];let persisted;
   h.env.chrome={runtime:{id:'kuai-id',onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)}}};

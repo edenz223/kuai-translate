@@ -79,6 +79,7 @@ function createHarness() {
   document.createElement = tag => new Element(tag, document);
   document.body = document.createElement('body'); document.append(document.body);
   document.querySelectorAll = selector => document.body.querySelectorAll(selector); document.querySelector = selector => document.body.querySelector(selector);
+  document.getElementById = id => document.querySelector('#' + id);
   document.selection = emptySelection(); document.getSelection = () => document.selection;
   env.document = document; env.getSelection = document.getSelection; env.Node = BoundaryNode; env.Element = Element; env.HTMLElement = Element; env.ShadowRoot = BoundaryNode;
   env.MutationObserver = class {

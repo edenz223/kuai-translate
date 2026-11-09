@@ -120,6 +120,22 @@ test('caption discovery emits only scoped track metadata for the current video',
   assert.equal(data.videoId,'abcdef12345');assert.equal(data.tracks.length,1);
   assert.equal(JSON.stringify(h.outputs).includes('must-not-be-copied'),false);
 });
+test('a player response without caption tracks is reported as an empty track list, an unloaded player as nothing',()=>{
+  const h=harness();h.outputs.length=0;
+  delete h.response.captions;h.periodic();
+  assert.equal(JSON.stringify(h.outputs.map(item=>[item.kind,item.videoId,item.tracks])),JSON.stringify([['tracks','abcdef12345',[]]]));
+  h.periodic();assert.equal(h.outputs.length,1,'an unchanged answer is not repeated');
+  // An embedded player has no response for its video until playback starts.
+  delete h.response.videoDetails;h.outputs.length=0;h.message({kind:'request-tracks'});
+  assert.equal(h.outputs.length,0);
+});
+test('a video reported without caption tracks is marked so and recovers when tracks appear',async()=>{
+  const h=setup(),[session]=h.bridge.getSessions();
+  assert.equal(session.state.noTracks,false,'unknown until the player answers');
+  h.message({kind:'tracks',videoId:'abcdef12345',selectedLanguage:'',tracks:[]});
+  assert.equal(session.state.noTracks,true);assert.equal(requests(h).length,0);
+  tracks(h,'en');assert.equal(session.state.noTracks,false);assert.equal(requests(h).length,1);h.manager.stop();
+});
 test('main-world requests cannot turn caption access into arbitrary authenticated fetches',async()=>{
   const h=harness();
   for(const url of ['https://attacker.example/api/timedtext?v=abcdef12345','https://www.youtube.com/logout','https://www.youtube.com/api/timedtext?v=other-video'])h.message({kind:'fetch-track',videoId:'abcdef12345',requestId:'test',url});
@@ -306,6 +322,10 @@ test('one timeline status drives the list, navigation and settings surfaces',asy
   assert.equal(status(undefined,{enabled:false,subtitlesEnabled:false}),'disabled');
   assert.equal(status(undefined,{enabled:false}),'captions-off');
   assert.equal(status({subtitlesList:[]}),'loading');
+  assert.equal(status({subtitlesList:[],noTracks:true}),'none');
+  assert.equal(status({subtitlesList:[],noTracks:true},{enabled:false}),'none','there is no caption track to turn on');
+  assert.equal(status({subtitlesList:[],noTracks:true},{enabled:false,subtitlesEnabled:false}),'disabled');
+  assert.equal(status({subtitlesList:[cue],noTracks:true}),'ready','fallback captions still make a timeline');
   assert.equal(status({subtitlesList:[],timelineFailed:true}),'failed');
   assert.equal(status({subtitlesList:[cue],isLiveDomCaptions:true,timelineFailed:true}),'failed');
   assert.equal(status({subtitlesList:[cue],isLiveDomCaptions:true}),'live');

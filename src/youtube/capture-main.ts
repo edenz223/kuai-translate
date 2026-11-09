@@ -52,17 +52,29 @@ interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown
       baseUrl:track.baseUrl,languageCode:String(track.languageCode||'auto').slice(0,32),kind:track.kind==='asr'?'asr':'',
       vssId:String(track.vssId||'').slice(0,100),name:String(track.name?.simpleText||track.name?.runs?.map(run=>run.text||'').join('')||track.languageCode||'').slice(0,160),
     }));
-    const live=(response as CapturePlayerResponse).videoDetails?.isLive===true,signature=JSON.stringify([id,tracks,selectedLanguage,live]);
-    if(force||signature!==lastSignature){lastSignature=signature;emit({kind:'tracks',videoId:id,tracks,selectedLanguage,live});}
+    publish(id,tracks,selectedLanguage,(response as CapturePlayerResponse).videoDetails?.isLive===true,force);
     return true;
+  }
+  function publish(id:string,tracks:unknown[],selectedLanguage:string,live:boolean,force:boolean) {
+    const signature=JSON.stringify([id,tracks,selectedLanguage,live]);
+    if(force||signature!==lastSignature){lastSignature=signature;emit({kind:'tracks',videoId:id,tracks,selectedLanguage,live});}
   }
   function discover(force=false) {
     if(document.visibilityState==='hidden'&&!force)return;
+    let bare:CapturePlayerResponse|undefined;
+    const read=(response:unknown,selectedLanguage='')=>{
+      if(tracksFrom(response,force,selectedLanguage))return true;
+      const id=(response as CapturePlayerResponse|null)?.videoDetails?.videoId;
+      if(id&&id===videoId())bare=response as CapturePlayerResponse;
+      return false;
+    };
     for(const player of document.querySelectorAll<CapturePlayer>('.html5-video-player')){
       // The live player owns the current track selection. Initial page data is only a fallback.
-      try{if(tracksFrom(player.getPlayerResponse?.(),force,String(player.getOption?.('captions','track')?.languageCode||'')))return;}catch{}
+      try{if(read(player.getPlayerResponse?.(),String(player.getOption?.('captions','track')?.languageCode||'')))return;}catch{}
     }
-    try{tracksFrom(window.ytInitialPlayerResponse,force);}catch{}
+    try{if(read(window.ytInitialPlayerResponse))return;}catch{}
+    // The player answered for this video without listing any caption track.
+    if(bare)publish(videoId(),[],'',bare.videoDetails?.isLive===true,force);
   }
   async function readBounded(response:Response,signal?:AbortSignal) {
     if(Number(response.headers?.get('content-length'))>MAX)throw new Error('Caption body too large');
