@@ -100,8 +100,24 @@ test('DeepL uses its explicit key and automatic language detection',async()=>{
 test('LLM fences are accepted but unequal output is not silently split or guessed',async()=>{
   const h=responder({choices:[{message:{content:'```json\n["你好","再见"]\n```'}}]});
   assert.deepEqual(await translateWithProvider(config('openai'),{...inputs,...h}),result);
-  const bad=responder({choices:[{message:{content:'first\nsecond'}}]});
+  const bad=responder({choices:[{message:{content:'[]'}}]});
   await assert.rejects(translateWithProvider(config('openai'),{...inputs,...bad}),{code:'INVALID_RESPONSE'});
+  assert.equal(bad.calls.length,3);
+});
+test('a model answer that merges inputs is re-requested in smaller batches',async()=>{
+  const texts=['The problem is it got','no recognition.','Then Gemini shipped.'];
+  const translations={'The problem is it got':'问题是它','no recognition.':'没有得到认可。','Then Gemini shipped.':'随后 Gemini 发布。'};
+  const h=responder(call=>{
+    const sent=JSON.parse(call.body.contents[0].parts[0].text);
+    const answer=sent.length===3?['问题是它没有得到认可。','随后 Gemini 发布。']:sent.map(text=>translations[text]);
+    return {candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(answer)}]}}]};
+  });
+  assert.deepEqual(await translateWithProvider(config('gemini'),{...inputs,texts,...h}),Object.values(translations));
+  assert.deepEqual(h.calls.map(call=>JSON.parse(call.body.contents[0].parts[0].text).length),[3,2,1]);
+  assert.deepEqual(h.calls[0].body.generationConfig.responseSchema,{type:'ARRAY',items:{type:'STRING'},minItems:3,maxItems:3});
+  const offline=responder(()=>new Response('',{status:503}));
+  await assert.rejects(translateWithProvider(config('gemini'),{...inputs,...offline}),{code:'HTTP_503'});
+  assert.equal(offline.calls.length,1);
 });
 test('empty and malformed response bodies produce safe visible errors',async()=>{
   const h=responder(new Response('not-json-private-key',{status:200}));

@@ -7,7 +7,7 @@ export interface YouTubeControllerOptions {
 }
 interface YouTubeRecord {session:SubtitleSession;videoId:string;togglePending:boolean;tracks:CaptionTrack[];track?:CaptionTrack;
  pending:{id:string;trackId:string;track:CaptionTrack;timer:ReturnType<typeof setTimeout>}|null;loadedTrack:string;capturedTrack?:CaptionTrack|null;failedTrack:string|undefined;timelineSignature:string;domText:string;view:ReturnType<typeof createCaptionView>}
-interface YouTubeDataMessage {source?:unknown;videoId?:unknown;kind?:unknown;tracks?:unknown[];selectedLanguage?:unknown;requestId?:string;trackUrl?:string;languageCode?:string;body?:unknown}
+interface YouTubeDataMessage {source?:unknown;videoId?:unknown;kind?:unknown;tracks?:unknown[];selectedLanguage?:unknown;live?:unknown;requestId?:string;trackUrl?:string;languageCode?:string;body?:unknown}
 // Runtime event names include YouTube custom events and native DOM events.
 type BrowserEventCallback=(event:any)=>void;
 import selectionAPI from './selection.js';
@@ -23,7 +23,7 @@ import {subtitleWords} from './i18n.js';
 /** Coordinates one current YouTube player, independent of the website's UI framework. */
 export function createYouTubeController({settings,subscribeSettings,translate,updatePreferences,openOptions,env=globalThis,createSidebar=sidebarAPI.createController,createSelection=selectionAPI.createController,createView=createCaptionView}:YouTubeControllerOptions) {
   const doc=env.document,records=new Map<string,YouTubeRecord>(),subscribers=new Set<()=>void>(),listeners:(()=>void)[]=[];
-  let config=settings,settingsEpoch=0,started=false,stopped=false,sequence=0,requestSequence=0,poll:ReturnType<typeof setInterval>|null=null,observer:MutationObserver|null=null,scheduled:ReturnType<typeof setTimeout>|null=null,unsubscribe:(()=>void)|undefined,noticePending=false,metadata:{videoId:string;tracks:CaptionTrack[];selectedLanguage:string}|null=null,lastVideoId='',navigateUntil=0;
+  let config=settings,settingsEpoch=0,started=false,stopped=false,sequence=0,requestSequence=0,poll:ReturnType<typeof setInterval>|null=null,observer:MutationObserver|null=null,scheduled:ReturnType<typeof setTimeout>|null=null,unsubscribe:(()=>void)|undefined,noticePending=false,metadata:{videoId:string;tracks:CaptionTrack[];selectedLanguage:string;live:boolean}|null=null,lastVideoId='',navigateUntil=0;
   let sidebar:ReturnType<typeof sidebarAPI.createController>|undefined,selection:ReturnType<typeof selectionAPI.createController>|undefined,preferenceQueue:Promise<unknown>=Promise.resolve();
   const origin=()=>new URL(env.location.href).origin;
   const post=(data:Record<string,unknown>)=>env.postMessage({source:'kuai-youtube-request',...data},origin());
@@ -35,6 +35,11 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     const left=new URL(a.baseUrl),right=new URL(b.baseUrl);
     return a.languageCode===b.languageCode&&(urlKind?left.searchParams.get('kind')===right.searchParams.get('kind'):a.kind===b.kind)&&
       ['name','vssId','tlang'].every(key=>left.searchParams.get(key)===right.searchParams.get(key));
+  }
+  // Under a preroll ad the element reports the ad's duration, so rely on the player's own flag.
+  function liveVideo(record:YouTubeRecord){
+    const video=record.session.video;
+    return video.closest?.('.ad-showing, .ad-interrupting')?metadata?.videoId===record.videoId&&metadata.live:video.duration===Infinity;
   }
   function failTimeline(record:YouTubeRecord,trackId:string|undefined,message=''){
     record.failedTrack=trackId;record.session.state.errorMessage=message;record.session.state.timelineFailed=true;changed();
@@ -100,7 +105,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   }
   function requestTrack(record:YouTubeRecord,force=false) {
     const track=chooseTrack(record);
-    if(!track||!record.session.isEnabled()||record.pending||(!force&&(record.loadedTrack===track.id||record.failedTrack===track.id)))return;
+    if(!track||!record.session.canPrepare()||record.pending||(!force&&(record.loadedTrack===track.id||record.failedTrack===track.id)))return;
     const requestId='kuai-caption-'+(++requestSequence),id=record.videoId;
     const timer=env.setTimeout(()=>{
       if(record.pending?.id!==requestId)return;
@@ -123,7 +128,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
       const tracks=Array.from(record.session.video.textTracks||[]),track=tracks.find(item=>item.mode==='showing')||tracks.find(item=>item.mode==='hidden');
       if(track?.cues?.length){
         const cues=Array.from(track.cues).map(cue=>{const text=(cue as VTTCue).text,voice=captionVoice(text);return{start:cue.startTime,end:cue.endTime,text:captionText(text),...(voice?{voice}:{})};});
-        installCues(record,record.session.video.duration===Infinity?cues:groupAuthoredCues(cues),'native:'+track.language,{live:record.session.video.duration===Infinity});return;
+        const live=liveVideo(record);installCues(record,live?cues:groupAuthoredCues(cues),'native:'+track.language,{live});return;
       }
     }catch{}
     const player=record.session.video.closest?.('.html5-video-player');
@@ -220,7 +225,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     if(data.videoId!==id||!id)return;
     if(data.kind==='tracks'){
       if(!Array.isArray(data.tracks)||data.tracks.length>100)return;
-      metadata={videoId:id,tracks:data.tracks.map(track=>validateTrack(track,id)).filter(Boolean) as CaptionTrack[],selectedLanguage:typeof data.selectedLanguage==='string'?data.selectedLanguage.slice(0,32):''};sync();return;
+      metadata={videoId:id,tracks:data.tracks.map(track=>validateTrack(track,id)).filter(Boolean) as CaptionTrack[],selectedLanguage:typeof data.selectedLanguage==='string'?data.selectedLanguage.slice(0,32):'',live:data.live===true};sync();return;
     }
     const record=currentRecord();if(!record||record.videoId!==id)return;
     if(data.requestId&&data.requestId!==record.pending?.id)return;
@@ -243,7 +248,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
       if(cues.length){
         if(!data.requestId)clearPending(record);
         if(!data.requestId&&!record.track)record.capturedTrack=responseTrack;
-        record.failedTrack='';record.session.state.errorMessage='';installCues(record,cues,trackId,{live:record.session.video.duration===Infinity});return;
+        record.failedTrack='';record.session.state.errorMessage='';installCues(record,cues,trackId,{live:liveVideo(record)});return;
       }
     }catch{}
     // Empty/unreadable caption bodies can arrive before the first caption.

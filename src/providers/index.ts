@@ -99,6 +99,20 @@ async function mapLimited<T,R>(items:T[], fn:(item:T,index:number)=>Promise<R>, 
   return values;
 }
 
+// Models sometimes merge sentence fragments (common in subtitles) or cut a long answer short.
+// Re-request such a batch in halves so one bad answer does not fail every paragraph in it.
+async function translateSplitting(p:ValidatedProvider, texts:string[], sourceLanguage:string, targetLanguage:string, fetchImpl:typeof fetch, signal:AbortSignal):Promise<string[]> {
+  try { return await translateBatch(p, texts, sourceLanguage, targetLanguage, fetchImpl, signal); }
+  catch (error) {
+    const code = (error as {code?:string})?.code;
+    if (!modelTypes.has(p.type) || texts.length < 2 || signal.aborted || (code !== 'INVALID_RESPONSE' && code !== 'INCOMPLETE_RESPONSE')) throw error;
+    const middle = Math.ceil(texts.length / 2);
+    const halves = await Promise.all([texts.slice(0, middle), texts.slice(middle)]
+      .map(part => translateSplitting(p, part, sourceLanguage, targetLanguage, fetchImpl, signal)));
+    return halves.flat();
+  }
+}
+
 async function translateBatch(p:ValidatedProvider, texts:string[], sourceLanguage:string, targetLanguage:string, fetchImpl:typeof fetch, signal:AbortSignal):Promise<string[]> {
   const from = language(p.type, sourceLanguage), to = language(p.type, targetLanguage);
   const get = (url:string|URL, headers:Record<string,string> = {}) => requestJSON(fetchImpl, url, { headers: { Accept: 'application/json', ...headers } }, signal);
@@ -181,7 +195,10 @@ async function translateBatch(p:ValidatedProvider, texts:string[], sourceLanguag
     const suffix = '/models/' + encodeURIComponent(p.model!.replace(/^models\//, '')) + ':generateContent';
     const value = await post(endpoint(p.baseUrl!, suffix, '/v1beta'), {
       systemInstruction: { parts: [{ text: instruction }] }, contents: [{ role: 'user', parts: [{ text: userText }] }],
-      generationConfig: { ...temperature, responseMimeType: 'application/json' },
+      generationConfig: {
+        ...temperature, responseMimeType: 'application/json',
+        responseSchema: { type: 'ARRAY', items: { type: 'STRING' }, minItems: texts.length, maxItems: texts.length },
+      },
     }, { 'x-goog-api-key': p.apiKey! });
     completed(value?.candidates?.[0]?.finishReason, ['STOP']);
     const text = value?.candidates?.[0]?.content?.parts?.filter((part:{thought?:boolean}) => !part.thought).map((part:{text?:string}) => part.text || '').join('');
@@ -214,7 +231,7 @@ export function modelPrompts(p:Pick<ValidatedProvider,'systemPrompt'|'userPrompt
   const from = sourceLanguage === 'auto' ? 'its detected language' : sourceLanguage, count = String(texts.length), input = JSON.stringify(texts);
   const fill = (template:string, text = '') => template.replace(/\{\{\s*(from|to|text)\s*\}\}/g, (_, key:string) =>
     ({ from, to: targetLanguage, text } as Record<string,string>)[key]);
-  const contract = `Return only a JSON array of ${count} translated strings, in exactly the same order. Preserve line breaks and do not add explanations.`;
+  const contract = `Return only a JSON array of ${count} translated strings, in exactly the same order. Each input string is one item even when it is an incomplete sentence: never merge, split or skip items. Preserve line breaks and do not add explanations.`;
   const system = p.systemPrompt?.trim();
   const instruction = system
     ? `${fill(system)}\n\n${contract}`
@@ -237,7 +254,7 @@ export async function translateWithProvider(provider:Partial<Provider>|null|unde
   sourceLanguage = sourceLanguage.replaceAll('_', '-'); targetLanguage = targetLanguage.replaceAll('_', '-');
   return withRequestLifetime(async requestSignal => {
     const translated:string[] = [];
-    for (const batch of chunks(texts)) translated.push(...await translateBatch(p, batch, sourceLanguage, targetLanguage, fetchImpl, requestSignal));
+    for (const batch of chunks(texts)) translated.push(...await translateSplitting(p, batch, sourceLanguage, targetLanguage, fetchImpl, requestSignal));
     return output(translated, texts.length);
   }, { signal, timeoutMs });
 }

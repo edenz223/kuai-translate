@@ -222,6 +222,34 @@ test('overlapping cues are shown and translated together',async t=>{
   video.currentTime=6;session.update();assert.equal(state.currentCaption.original,'Lyrics line');
 });
 
+test('the first request of a timeline is small so the opening sentences return quickly',async t=>{
+  const sizes=[];const {session,state,video}=fixture(async texts=>{sizes.push(texts.length);return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.setCues(Array.from({length:12},(_,index)=>({start:index,end:index+1,text:'Line '+index})));video.currentTime=0;
+  session.update();await settle();
+  assert.deepEqual(sizes,[3,8,1]);assert.ok(state.subtitlesList.every(cue=>cue.status==='success'));
+  session.updateSettings({...defaultSettings(),targetLanguage:'ja'});await settle();
+  assert.deepEqual(sizes.slice(3),[3,8,1]);
+});
+test('a preroll ad prepares the opening translation from the start of the video',async t=>{
+  const requests=[];let ad=true;const {session,state,video}=fixture(async texts=>{requests.push(texts);return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  video.closest=()=>ad?{}:null;video.currentTime=20;
+  session.update();await settle();
+  assert.equal(session.isEnabled(),false);assert.equal(session.canPrepare(),true);assert.equal(state.currentCaption,null);
+  assert.deepEqual(requests,[['Hello','Next']]);
+  session.update();await settle();assert.equal(requests.length,1);
+  ad=false;video.currentTime=1;session.update();
+  assert.equal(state.currentCaption.translation,'译:Hello');assert.equal(requests.length,1);
+});
+test('a preroll ad loads the timeline and keeps the video live flag from the player',async()=>{
+  const h=setup();h.player.className='html5-video-player ad-showing';
+  h.message({kind:'tracks',videoId:'abcdef12345',selectedLanguage:'en',live:true,tracks:[track('en')]});
+  const [request]=requests(h);assert.ok(request);
+  caption(h,request.requestId,'Live words');await settle();
+  const [session]=h.bridge.getSessions();
+  assert.equal(session.isEnabled(),false);assert.equal(session.state.isLiveDomCaptions,true);assert.equal(session.state.subtitlesList.length,1);
+  h.manager.stop();
+});
+
 function liveSession(translate){
   const video=new EventTarget();Object.assign(video,{isConnected:true,currentTime:1,duration:Infinity,paused:true,ended:false,seekable:{length:0},closest:()=>null});
   const session=sessionApi.createSubtitleSession({id:'live',video,settings:defaultSettings(),translate});
