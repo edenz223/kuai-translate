@@ -360,7 +360,7 @@ test('page and subtitle styles have independent safe defaults suitable for visib
   assert.equal(typeof presentation.normalizePageStyle,'function');
   assert.equal(typeof presentation.normalizeSubtitleStyle,'function');
   const page=presentation.normalizePageStyle(),subtitle=presentation.normalizeSubtitleStyle();
-  assert.deepEqual(page,{preset:'border',fontSize:100,fontWeight:400,fontFamily:'inherit',textColor:'inherit',accentColor:'#4285d4',backgroundColor:'#eef5ff',opacity:100,italic:false,lineHeight:1.6});
+  assert.deepEqual(page,{preset:'border',fontSize:100,fontWeight:0,fontFamily:'inherit',textColor:'inherit',accentColor:'#4285d4',backgroundColor:'#eef5ff',opacity:100,italic:false,lineHeight:0});
   assert.deepEqual(subtitle,{displayMode:'bilingual',displayOrder:'original_on_top',hideTranslation:false,fontSizeMode:'responsive',sourceFontSize:24,targetFontSize:24,sourceColor:'#ffffff',targetColor:'#ffffff',sourceWeight:400,targetWeight:400,sourceStroke:'soft',targetStroke:'soft',fontFamily:'system-ui, sans-serif',backgroundColor:'#000000',backgroundOpacity:50,backgroundMode:'panel',position:'bottom-center',offset:70,horizontalOffset:0,maxWidth:88});
   page.opacity=0;subtitle.targetFontSize=70;
   assert.equal(presentation.normalizePageStyle().opacity,100);
@@ -378,4 +378,13 @@ test('style normalization rejects executable CSS fragments and unknown fields wh
   const page=presentation.normalizePageStyle({textColor:'url(x)',accentColor:'red',backgroundColor:'#ABCDEF',cssText:'position:fixed',preset:'untrusted'});
   assert.equal(page.textColor,'inherit');assert.equal(page.accentColor,'#4285d4');assert.equal(page.backgroundColor,'#abcdef');
   assert.equal(page.preset,'border');assert.equal(Object.hasOwn(page,'cssText'),false);
+});
+
+test('page font defaults migrate once and preserve individually customized values',()=>{
+ for(const [weight,height,wantWeight,wantHeight] of [[400,1.6,0,0],[600,1.8,600,1.8],[400,2,0,2],[500,1.6,500,0]]){
+  const input=defaultSettings();delete input.pageStyleDefaultsVersion;input.pageStyle.fontWeight=weight;input.pageStyle.lineHeight=height;
+  const value=normalizeSettings(input);assert.equal(value.pageStyleDefaultsVersion,1);assert.equal(value.pageStyle.fontWeight,wantWeight);assert.equal(value.pageStyle.lineHeight,wantHeight);
+  value.pageStyle.fontWeight=400;value.pageStyle.lineHeight=1.6;
+  const again=normalizeSettings(value);assert.equal(again.pageStyle.fontWeight,400);assert.equal(again.pageStyle.lineHeight,1.6);
+ }
 });

@@ -41,6 +41,7 @@ class Element extends Node {
   getClientRects(){return this.hidden?[]:[this.getBoundingClientRect()];}
   focus(){this.ownerDocument.activeElement=this;}
   setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}
+  get outerHTML(){return '<'+this.tagName.toLowerCase()+' '+[...this.attrs].map(([name,value])=>name+'="'+value+'"').join(' ')+'>'+this.innerHTML+'</'+this.tagName.toLowerCase()+'>';}
   get innerHTML(){const serialize=node=>node.nodeType===3?node.nodeValue:'<'+node.tagName.toLowerCase()+' '+[...node.attrs].map(([name,value])=>name+'="'+value+'"').join(' ')+'>'+node.childNodes.map(serialize).join('')+'</'+node.tagName.toLowerCase()+'>';return this.childNodes.map(serialize).join('');}
 }
 class Range {
@@ -64,7 +65,7 @@ class Event {
 }
 function fixture(){
  const doc=new Node(9,null);doc.ownerDocument=doc;doc.createElement=tag=>new Element(tag,doc);doc.createElementNS=(_namespace,tag)=>new Element(tag,doc);doc.createTextNode=value=>{const node=new Node(3,doc);node.nodeValue=String(value);return node;};doc.createRange=()=>new Range(doc);doc.documentElement=doc.createElement('html');doc.body=doc.createElement('body');doc.append(doc.documentElement);doc.documentElement.append(doc.body);doc.getElementById=id=>doc.querySelector('#'+id);doc.visibilityState='visible';doc.activeElement=doc.body;
- const timers=new Map();let timer=0,id=0,now=0;const env=new Target();Object.assign(env,{document:doc,location:{href:'https://example.org/article'},innerWidth:1200,innerHeight:800,Event,InputEvent:Event,Node,HTMLElement:Element,navigator:{language:'zh-CN'},performance:{now:()=>now},getComputedStyle:element=>({display:element.hidden?'none':element.style.display||'block',visibility:element.style.visibility||'visible'}),getSelection:()=>doc.selection,setTimeout:(fn,delay=0)=>{timers.set(++timer,{fn,at:now+delay});return timer;},clearTimeout:key=>timers.delete(key),console});doc.defaultView=env;doc.getSelection=()=>doc.selection;
+ const timers=new Map();let timer=0,id=0,now=0;const env=new Target();Object.assign(env,{document:doc,location:{href:'https://example.org/article'},innerWidth:1200,innerHeight:800,Event,InputEvent:Event,Node,HTMLElement:Element,navigator:{language:'zh-CN'},performance:{now:()=>now},getComputedStyle:element=>({...element.style,display:element.hidden?'none':element.style.display||(element.tagName==='BUTTON'?'inline-block':/^(HTML|BODY|P|DIV|LI|UL|OL|TD|TH|H[1-6]|BLOCKQUOTE|FIGCAPTION|DT|DD|ARTICLE|SECTION|FOOTER|HEADER|NAV|PRE|CODE|TEXTAREA|INPUT|SELECT|OPTION)$/.test(element.tagName)?'block':'inline'),visibility:element.style.visibility||'visible'}),getSelection:()=>doc.selection,setTimeout:(fn,delay=0)=>{timers.set(++timer,{fn,at:now+delay});return timer;},clearTimeout:key=>timers.delete(key),console});doc.defaultView=env;doc.getSelection=()=>doc.selection;
  const paragraph=(text,tag='p')=>{const node=doc.createElement(tag);node.textContent=text;doc.body.append(node);return node;};
  const settings={activeProviderId:'microsoft',sourceLanguage:'auto',targetLanguage:'zh-Hans',selectionEnabled:true,hoverEnabled:false};
  const requests=[],cancellations=[];let responder=texts=>Promise.resolve({translations:texts.map(text=>'译：'+text)});

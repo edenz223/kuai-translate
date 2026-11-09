@@ -1,8 +1,8 @@
 import type {BrowserEnvironment} from './dom.js';
 
-interface OriginalEntry {element: HTMLElement; originals: HTMLElement[]}
+interface OriginalEntry {element: HTMLElement; originals: HTMLElement[];output?:HTMLElement|null}
 
-import {blocksWithin,isBlock,isReadable} from './dom.js';
+import {blocksWithin,isBlock,isPageReadable as isReadable} from './dom.js';
 
 /** Hide only the source belonging to this block, after a successful result. */
 export function hideOriginal(entry: OriginalEntry,document: Document,env: BrowserEnvironment): void {
@@ -16,7 +16,7 @@ export function hideOriginal(entry: OriginalEntry,document: Document,env: Browse
     for(const node of [...parent.childNodes]) {
       if(node.nodeType===3){if(node.nodeValue)wrap(node);continue;}
       if(node.nodeType!==1||isBlock(node as HTMLElement,env)||!isReadable(node as HTMLElement,env))continue;
-      if(blocksWithin(node as HTMLElement,env).length)visit(node);
+      if(entry.output&&node.contains(entry.output)||blocksWithin(node as HTMLElement,env).length)visit(node);
       else if(node.textContent||(node as HTMLElement).tagName==='BR')wrap(node);
     }
   }

@@ -34,8 +34,8 @@ export function isOwnedUI(node: unknown): boolean {
   return ancestors(node).some(element => element.hasAttribute?.('data-kuai-ui'));
 }
 
-type StyleSnapshot = Partial<Pick<CSSStyleDeclaration,'display'|'visibility'|'position'|'clip'|'clipPath'|'overflow'|'color'|'textDecorationLine'>>;
-interface LayoutCache {styles:WeakMap<Element,StyleSnapshot|undefined>;rendered:WeakMap<Element,boolean>}
+type StyleSnapshot = Partial<Pick<CSSStyleDeclaration,'display'|'visibility'|'position'|'clip'|'clipPath'|'overflow'|'color'|'textDecorationLine'|'overflowX'|'overflowY'|'transform'|'filter'|'perspective'|'contain'|'willChange'|'whiteSpace'|'textOverflow'|'webkitLineClamp'|'fontSize'|'lineHeight'|'flexDirection'|'textIndent'|'content'|'height'>>;
+interface LayoutCache {styles:WeakMap<Element,StyleSnapshot|undefined>;pseudos:Map<string,WeakMap<Element,StyleSnapshot|undefined>>;rendered:WeakMap<Element,boolean>;prose:WeakMap<Element,boolean>}
 let layoutCache: LayoutCache | null = null;
 
 /**
@@ -45,16 +45,18 @@ let layoutCache: LayoutCache | null = null;
  */
 export function withLayoutCache<T>(run: () => T): T {
   if (layoutCache) return run();
-  layoutCache = {styles:new WeakMap(),rendered:new WeakMap()};
+  layoutCache = {styles:new WeakMap(),pseudos:new Map(),rendered:new WeakMap(),prose:new WeakMap()};
   try { return run(); } finally { layoutCache = null; }
 }
 
-export function computedStyle(element: Element, env: BrowserEnvironment): StyleSnapshot | undefined {
-  if (!layoutCache) return env.getComputedStyle?.(element);
-  if (layoutCache.styles.has(element)) return layoutCache.styles.get(element);
-  const style = env.getComputedStyle?.(element);
-  const snapshot = style && {display:style.display,visibility:style.visibility,position:style.position,clip:style.clip,clipPath:style.clipPath,overflow:style.overflow,color:style.color,textDecorationLine:style.textDecorationLine};
-  layoutCache.styles.set(element,snapshot);return snapshot;
+export function computedStyle(element: Element, env: BrowserEnvironment,pseudo?:string): StyleSnapshot | undefined {
+  if (!layoutCache) return env.getComputedStyle?.(element,pseudo);
+  if(pseudo&&!layoutCache.pseudos.has(pseudo))layoutCache.pseudos.set(pseudo,new WeakMap());
+  const cache=pseudo?layoutCache.pseudos.get(pseudo)!:layoutCache.styles;
+  if (cache.has(element)) return cache.get(element);
+  const style = env.getComputedStyle?.(element,pseudo);
+  const snapshot = style && {display:style.display,visibility:style.visibility,position:style.position,clip:style.clip,clipPath:style.clipPath,overflow:style.overflow,color:style.color,textDecorationLine:style.textDecorationLine,overflowX:style.overflowX,overflowY:style.overflowY,transform:style.transform,filter:style.filter,perspective:style.perspective,contain:style.contain,willChange:style.willChange,whiteSpace:style.whiteSpace,textOverflow:style.textOverflow,webkitLineClamp:style.webkitLineClamp,fontSize:style.fontSize,lineHeight:style.lineHeight,flexDirection:style.flexDirection,textIndent:style.textIndent,content:style.content,height:style.height};
+  cache.set(element,snapshot);return snapshot;
 }
 
 // Some screen-reader labels use an empty overflow-hidden box instead of clip.
@@ -70,12 +72,12 @@ function rendered(element: HTMLElement): boolean {
   layoutCache?.rendered.set(element,value);return value;
 }
 
-export function isReadable(element: HTMLElement | null | undefined, env: BrowserEnvironment, {allowOriginal=false}: {allowOriginal?:boolean}={}): boolean {
+export function isReadable(element: HTMLElement | null | undefined, env: BrowserEnvironment, {allowOriginal=false,allowControls=false}: {allowOriginal?:boolean;allowControls?:boolean}={}): boolean {
   if (!element?.isConnected) return false;
   let hiddenByTranslation=false;
   for (const ancestor of ancestors(element)) {
     if(allowOriginal&&ancestor.hasAttribute?.('data-kuai-original')){hiddenByTranslation=true;continue;}
-    if (EXCLUDED_TAGS.has(ancestor.tagName) || ancestor.hasAttribute?.('data-kuai-owned') ||
+    if ((EXCLUDED_TAGS.has(ancestor.tagName)&&!(allowControls&&ancestor.tagName==='BUTTON')) || ancestor.hasAttribute?.('data-kuai-owned') ||
         ancestor.getAttribute?.('translate') === 'no' || ancestor.getAttribute?.('aria-hidden') === 'true' ||
         ancestor.className?.split?.(/\s+/).includes('html5-video-player') || editableElement(ancestor)) return false;
     const style = computedStyle(ancestor,env);
@@ -83,6 +85,7 @@ export function isReadable(element: HTMLElement | null | undefined, env: Browser
     const clip=style?.clip?.match(/^rect\(([^)]+)\)$/)?.[1].split(/[\s,]+/).filter(Boolean).map(value=>parseFloat(value));
     if(clip?.length===4&&['absolute','fixed'].includes(style?.position||'')&&(clip[1]<=clip[3]||clip[2]<=clip[0])||/^inset\(50%(?:\s+50%){0,3}\)$/.test(style?.clipPath||''))return false;
     if(['absolute','fixed'].includes(style?.position||'')&&/^(hidden|clip)/.test(style?.overflow||'')&&emptyBox(ancestor))return false;
+    if(parseFloat(style?.textIndent||'')<-100&&/hidden|clip/.test(style?.overflow||''))return false;
     // Inline code belongs to its sentence (`run ~/.codex`); block code without <pre> stays untranslated.
     if (ancestor.tagName === 'CODE' && style?.display && !style.display.startsWith('inline')) return false;
     if (ancestor.hidden || style?.display === 'none' || ['hidden','collapse'].includes(style?.visibility as string)) return false;
@@ -90,14 +93,50 @@ export function isReadable(element: HTMLElement | null | undefined, env: Browser
   return hiddenByTranslation || rendered(element);
 }
 
-/**
- * A tag block, or any box taken out of flow: an absolutely positioned card title or
- * banner caption is laid out apart from its ancestor's text, even when it is an <a> or <strong>.
- */
+export function isPageReadable(element: HTMLElement | null | undefined,env: BrowserEnvironment,options: {allowOriginal?:boolean}={}): boolean {
+  return isReadable(element,env,{...options,allowControls:true});
+}
+
+const blockDisplays=new Set(['block','flow-root','flex','grid','table','list-item','table-cell','table-caption','table-row']);
+const atomicDisplays=new Set(['inline-block','inline-flex','inline-grid']);
+const controlSelector='button,[role="button"],[role="tab"],[role="menuitem"]';
+function atomicControl(element: Element,env: BrowserEnvironment): boolean {
+  return element.matches?.(controlSelector)||element.tagName==='A'&&atomicDisplays.has(computedStyle(element,env)?.display||'');
+}
+
+function parentHasProse(parent: Element,env: BrowserEnvironment): boolean {
+  if(layoutCache?.prose.has(parent))return layoutCache.prose.get(parent)!;
+  const hasProse=(node: Node): boolean=>{
+    if(node.nodeType===3)return /\p{L}/u.test(node.nodeValue||'');
+    if(node.nodeType!==1||!isPageReadable(node as HTMLElement,env)||atomicControl(node as Element,env)||blockDisplays.has(computedStyle(node as Element,env)?.display||''))return false;
+    return Array.from(node.childNodes).some(hasProse);
+  };
+  const result=Array.from(parent.childNodes).some(hasProse);
+  layoutCache?.prose.set(parent,result);return result;
+}
+
+/** Atomic controls in a toolbar stand alone; a badge embedded in prose belongs to its sentence. */
 export function isBlock(element: Element, env: BrowserEnvironment): boolean {
-  if (element.matches?.(BLOCK_SELECTOR)) return true;
-  const position = computedStyle(element,env)?.position;
-  return position === 'absolute' || position === 'fixed';
+  if(element.tagName==='BR'||element.hasAttribute?.('data-kuai-owned')||element.hasAttribute?.('data-kuai-original'))return false;
+  const style=computedStyle(element,env),display=style?.display||'';
+  if(style?.position==='absolute'||style?.position==='fixed'||blockDisplays.has(display))return true;
+  if(element.matches?.('[data-as="p"],[slot="title"],[role="heading"]')||!display&&element.matches?.(BLOCK_SELECTOR))return true;
+  if(!atomicControl(element,env))return false;
+  return !element.parentElement||!parentHasProse(element.parentElement,env);
+}
+
+/** A label can be nested, but a paragraph inside a linked card is still prose. */
+export function isPageControl(element: HTMLElement,source: string,env: BrowserEnvironment): boolean {
+  const control=element.closest<HTMLElement>('a,button,label,[role="button"],[role="tab"],[role="menuitem"]');
+  if(!control)return false;
+  if(control===element)return true;
+  const read=(node: Node): string=>{
+    if(node.nodeType===3)return node.nodeValue||'';
+    if(node.nodeType!==1||!isPageReadable(node as HTMLElement,env,{allowOriginal:true}))return '';
+    if((node as Element).tagName==='BR')return ' ';
+    return Array.from(node.childNodes,read).join('');
+  };
+  return read(control).replace(/\s+/gu,' ').trim()===source;
 }
 
 export function closestBlock(element: Element | null | undefined, env: BrowserEnvironment): HTMLElement | null {
@@ -114,35 +153,62 @@ export function blockText(element: HTMLElement, env: BrowserEnvironment): string
   const read = (node: Node): string => {
     if (node.nodeType === 3) return node.nodeValue || node.textContent || '';
     if (node.nodeType !== 1) return '';
-    if (node !== element && (isBlock(node as HTMLElement, env) || !isReadable(node as HTMLElement, env,{allowOriginal:true}))) return '';
+    if (node !== element && (isBlock(node as HTMLElement, env) || !isPageReadable(node as HTMLElement, env,{allowOriginal:true}))) return '';
     if ((node as HTMLElement).tagName === 'BR') return '\n';
     return Array.from(node.childNodes || [], read).join('');
   };
   return read(element).replace(/\s+/gu, ' ').trim();
 }
 
-/** Include only pixels visible in the viewport and clipping scroll ancestors. */
-export function isInViewport(element: HTMLElement,env: BrowserEnvironment): boolean{
-  const rect=element.getBoundingClientRect?.();
-  if(!rect||![rect.top,rect.bottom,rect.left,rect.right].every(Number.isFinite))return true;
+function establishesContainingBlock(style: StyleSnapshot | undefined): boolean {
+  return ['transform','filter','perspective'].some(key=>{const value=style?.[key as keyof StyleSnapshot];return value&&value!=='none';})||
+    /layout|paint|strict|content/.test(style?.contain||'')||/transform|filter|perspective/.test(style?.willChange||'');
+}
+
+/** Positioned descendants bypass overflow boxes below their containing block. Root overflow clips at the viewport. */
+export function clippingAncestors(element: HTMLElement,env: BrowserEnvironment): HTMLElement[] {
+  const chain=ancestors(element),result: HTMLElement[]=[];let positioned=computedStyle(element,env)?.position;
+  for(const ancestor of chain.slice(1)){
+    const style=computedStyle(ancestor,env);
+    if(positioned==='fixed'||positioned==='absolute'){
+      if(establishesContainingBlock(style)||positioned==='absolute'&&style?.position&&style.position!=='static')positioned='static';
+      else continue;
+    }
+    if(ancestor.tagName==='HTML')continue;
+    if(ancestor.tagName==='BODY'){
+      const root=ancestor.ownerDocument.documentElement,rootStyle=computedStyle(root,env);
+      if(!rootStyle?.overflow||rootStyle.overflow==='visible')continue;
+    }
+    result.push(ancestor);
+    if(style?.position==='fixed'||style?.position==='absolute')positioned=style.position;
+  }
+  return result;
+}
+
+export function visibleRect(element: HTMLElement,env: BrowserEnvironment,rect=element.getBoundingClientRect(),includeSelf=false): {top:number;bottom:number;left:number;right:number} {
   let top=Math.max(0,rect.top),bottom=Math.min(env.innerHeight||800,rect.bottom),left=Math.max(0,rect.left),right=Math.min(env.innerWidth||1200,rect.right);
-  if(bottom<=top||right<=left)return false;
-  for(const ancestor of ancestors(element).slice(1)){
-    const style=env.getComputedStyle?.(ancestor),clipY=/^(auto|scroll|hidden|clip)$/.test(style?.overflowY||style?.overflow||''),clipX=/^(auto|scroll|hidden|clip)$/.test(style?.overflowX||style?.overflow||'');
+  for(const ancestor of [...(includeSelf?[element]:[]),...clippingAncestors(element,env)]){
+    const style=computedStyle(ancestor,env),paint=/paint|strict|content/.test(style?.contain||''),clipY=paint||/^(auto|scroll|hidden|clip)$/.test(style?.overflowY||style?.overflow||''),clipX=paint||/^(auto|scroll|hidden|clip)$/.test(style?.overflowX||style?.overflow||'');
     if(!clipX&&!clipY)continue;
     const bounds=ancestor.getBoundingClientRect?.();if(!bounds)continue;
     if(clipY){top=Math.max(top,bounds.top);bottom=Math.min(bottom,bounds.bottom);}
     if(clipX){left=Math.max(left,bounds.left);right=Math.min(right,bounds.right);}
-    if(bottom<=top||right<=left)return false;
   }
-  return true;
+  return {top,bottom,left,right};
+}
+
+/** Include only pixels visible in the viewport and clipping scroll ancestors. */
+export function isInViewport(element: HTMLElement,env: BrowserEnvironment): boolean {
+  const rect=element.getBoundingClientRect?.();
+  if(!rect||![rect.top,rect.bottom,rect.left,rect.right].every(Number.isFinite))return true;
+  const {top,bottom,left,right}=visibleRect(element,env,rect);return bottom>top&&right>left;
 }
 
 export function collectBlocks(document: Document, env: BrowserEnvironment, {visibleOnly=false}: {visibleOnly?:boolean}={}): PageBlock[] {
   const body = document.body;
   if (!body) return [];
   return withLayoutCache(() => [body, ...blocksWithin(body,env)]
-    .filter(element => (!visibleOnly||isInViewport(element,env))&&isReadable(element, env))
+    .filter(element => (!visibleOnly||isInViewport(element,env))&&isPageReadable(element, env))
     .map(element => ({ element, text:blockText(element, env) }))
     .filter(item => item.text && /\p{L}/u.test(item.text)));
 }
