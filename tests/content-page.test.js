@@ -43,6 +43,21 @@ test('nested blocks are not translated twice and provider markup is displayed as
  const controller=createPageTranslator(h.dependencies);await controller.translatePage();assert.deepEqual(h.requests[0].texts,['Nested']);assert.equal(output(outer),output(inner));assert.equal(output(inner).textContent,'<script>bad()</script>译文');assert.equal(output(inner).querySelector('font').children.length,0);
 });
 
+test('absolutely positioned inline boxes are translated as their own blocks', async()=>{
+ const h=fixture(),card=h.paragraph('','div'),link=h.doc.createElement('a'),title=h.doc.createElement('strong'),desc=h.doc.createElement('p');
+ link.setAttribute('href','/ai');title.textContent='AI tech';desc.textContent='The closest AI';link.append(title,desc);card.append(link);
+ const computed=h.env.getComputedStyle;h.env.getComputedStyle=node=>({...computed(node),...(node===link?{position:'absolute'}:{})});
+ const controller=createPageTranslator(h.dependencies);await controller.translatePage();
+ assert.deepEqual(h.requests.flatMap(request=>request.texts),['AI tech','The closest AI']);assert.strictEqual(output(link).parentNode,link);assert.equal(output(link).textContent,'译：AI tech');
+});
+
+test('empty overflow-hidden accessibility labels stay out of page translation', async()=>{
+ const h=fixture(),p=h.paragraph('Investor relations '),label=h.doc.createElement('span');label.textContent='opens in a new window';label._rect={top:10,left:10,right:10,bottom:10,width:0,height:0};p.append(label);
+ const computed=h.env.getComputedStyle;h.env.getComputedStyle=node=>({...computed(node),...(node===label?{position:'absolute',overflow:'hidden'}:{})});
+ const controller=createPageTranslator(h.dependencies);await controller.translatePage();
+ assert.deepEqual(h.requests.flatMap(request=>request.texts),['Investor relations']);
+});
+
 test('empty or malformed output retains the source and displays a retryable failure', async()=>{
  for(const response of [{translations:['  ']},{translations:[]},{translations:[3]}]){
   const h=fixture(), p=h.paragraph('Keep me');h.respond(async()=>response);const controller=createPageTranslator(h.dependencies);await controller.translatePage();assert.equal(p.firstChild.textContent,'Keep me');assert.equal(output(p).getAttribute('data-state'),'error');assert.ok(output(p).querySelector('button'));assert.equal(controller.status().errors,1);
@@ -128,6 +143,19 @@ test('scroll translates newly visible blocks once and leaves offscreen text unse
  await h.triggers.translate();assert.deepEqual(texts(h),['First']);
  first._rect=rect(-1000);next._rect=rect(100);await scroll(h);assert.deepEqual(texts(h),['First','Next']);
  await scroll(h);assert.deepEqual(texts(h),['First','Next']);assert.equal(later.querySelector('[data-kuai-page-translation]'),null);
+});
+test('automatic passes stop retranslating a block the page keeps rebuilding, while manual translate retries',async t=>{
+ const h=setup(t);let card=h.paragraph('Card');card._rect=rect(20);
+ await h.triggers.translate();
+ const rebuild=async()=>{const next=h.paragraph('Card');next._rect=rect(20);card.remove();h.mutate([{type:'childList',target:h.doc.body,addedNodes:[next],removedNodes:[card]}]);await settle();h.flushTimers();await settle();card=next;};
+ for(let round=0;round<4;round++)await rebuild();
+ assert.deepEqual(texts(h),['Card','Card','Card']);assert.equal(output(card),null);
+ await h.triggers.translate();assert.equal(texts(h).length,4);assert.ok(output(card));
+});
+test('a carousel transition translates the slide it brings into view',async t=>{
+ const h=setup(t),first=h.paragraph('First'),slide=h.paragraph('Slide');first._rect=rect(20);slide._rect=rect(20,1600);
+ await h.triggers.translate();assert.deepEqual(texts(h),['First']);
+ slide._rect=rect(20);h.emit(h.doc,'transitionend');h.flushTimers();await settle();assert.deepEqual(texts(h),['First','Slide']);
 });
 test('scroll does not opt an untouched page into translation',async t=>{
  const h=setup(t);h.paragraph('First');await scroll(h);assert.equal(h.requests.length,0);

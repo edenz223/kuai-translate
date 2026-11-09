@@ -98,6 +98,8 @@ export function createPageTriggers({document,env=globalThis,getSettings,page,cha
   function start(){
     if(started||stopped)return api;started=true;listen(document,'keydown',keydown,true);
     listen(document,'scroll',viewportChanged,true);listen(env,'scroll',viewportChanged);listen(env,'resize',viewportChanged);
+    // Carousels and reveal effects move text into view by CSS transition without any scroll.
+    listen(document,'transitionend',viewportChanged,true);listen(document,'animationend',viewportChanged,true);
     listen(document,'visibilitychange',()=>{if(hidden()){epoch++;clearTimers();}else{if(!activeSession&&!manualStopped)autoAttempted=false;scheduleAuto();scheduleDynamic();viewportChanged();}});
     listen(env,'pagehide',()=>{epoch++;clearTimers();});
     listen(env,'pageshow',()=>{if(!activeSession&&!manualStopped)autoAttempted=false;scheduleAuto();scheduleDynamic();viewportChanged();});
