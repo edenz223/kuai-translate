@@ -20,6 +20,15 @@ function setup(options={}){
   box.setPointerCapture=id=>captures.push(['capture',id]);box.releasePointerCapture=id=>captures.push(['release',id]);
   return{h,player,native,session,view,box,patches,trackChanges,retries,cancellations,captures};
 }
+// The settings panel is a YouTube-style menu: rows show a value or a switch, choices open a sub-menu.
+const rowValue=(shadow,selector)=>shadow.querySelector(selector).dataset.value;
+const switchedOn=(shadow,selector)=>shadow.querySelector(selector).getAttribute('aria-checked')==='true';
+const rowDisabled=(shadow,selector)=>shadow.querySelector(selector).getAttribute('aria-disabled')==='true';
+function choices(h,shadow,selector){h.emit(shadow.querySelector(selector),'click');return shadow.querySelectorAll('.option');}
+function pick(h,shadow,selector,value){
+  h.emit(shadow.querySelector(selector),'click');const option=shadow.querySelector(`.option[data-value="${value}"]`);
+  assert.ok(option,`${selector} offers ${value}`);h.emit(option,'click');
+}
 function nativeControls({h,player},parent=player){
   const controls=h.doc.createElement('div');controls.className='ytp-right-controls';
   const buttons=['settings','size','fullscreen'].map(name=>{
@@ -103,9 +112,10 @@ test('source tracks stay in settings while captions expose only text and error r
   session.state.currentCaption=null;session.isEnabled=()=>false;view.render({subtitlesEnabled:false});
   view.setTracks([{id:'en',name:'English'},{id:'fr',name:'Français',kind:'asr'}],'en');
   h.emit(view.toolbar.querySelector('[data-kuai-subtitle-settings-toggle]'),'click');
-  const panel=player.querySelector('[data-kuai-subtitle-settings]'),tracks=panel.shadowRoot.querySelector('.subtitle-track');
-  assert.equal(panel.hidden,false);assert.ok(tracks,'track choice must remain reachable when the caption overlay is hidden');assert.equal(tracks.disabled,false);assert.equal(tracks.value,'en');
-  assert.equal(tracks.children[1].textContent,'Français · 自动字幕');tracks.value='fr';h.emit(tracks,'change');
+  const panel=player.querySelector('[data-kuai-subtitle-settings]'),shadow=panel.shadowRoot;
+  assert.equal(panel.hidden,false);assert.ok(shadow.querySelector('.subtitle-track'),'track choice must remain reachable when the caption overlay is hidden');
+  assert.equal(rowDisabled(shadow,'.subtitle-track'),false);assert.equal(rowValue(shadow,'.subtitle-track'),'en');
+  assert.equal(choices(h,shadow,'.subtitle-track')[1].textContent,'Français · 自动字幕');h.emit(shadow.querySelector('.option[data-value=fr]'),'click');
   assert.deepEqual(trackChanges,['fr']);assert.deepEqual(patches,[],'track changes must retain the existing callback contract');
   session.isEnabled=()=>true;session.state.currentCaption={original:'Hello',translation:'你好',status:'success'};view.render({});
   assert.equal(box.querySelector('select'),null);assert.equal(box.querySelector('.drag'),null);assert.equal(box.querySelector('.tools'),null);
@@ -143,7 +153,7 @@ test('subtitle settings and sidebar can be opened before captions load and while
   const h=studyFixture({settings:{subtitlesEnabled:false},cc:false});t.after(()=>h.manager.stop());await h.flush();
   assert.ok(h.settingsButton()?.isConnected);h.emit(h.settingsButton(),'click');
   const panel=h.settingsPanel();assert.ok(panel?.isConnected);assert.equal(panel.hidden,false);assert.equal(h.captionHost().hidden,true);
-  const shadow=panel.shadowRoot;assert.equal(shadow.querySelector('.subtitles-enabled').checked,false);
+  const shadow=panel.shadowRoot;assert.equal(switchedOn(shadow,'.subtitles-enabled'),false);
   assert.ok(shadow.querySelector('.subtitle-provider'));assert.ok(shadow.querySelector('.subtitle-target'));assert.ok(shadow.querySelector('.subtitle-mode'));assert.ok(shadow.querySelector('.subtitle-order'));assert.ok(shadow.querySelector('.subtitle-mask'));
   assert.equal(h.manager.openSidebar(),true);await h.flush();assert.equal(h.panel().hidden,false);assert.equal(h.translations.length,0);
 });
@@ -155,9 +165,10 @@ test('player preferences save only public field patches and offer the complete s
     ['.subtitle-mode','translation_only',{subtitleStyle:{displayMode:'translation_only'}}],
     ['.subtitle-order','translation_on_top',{subtitleStyle:{displayOrder:'translation_on_top'}}],
   ]){
-    const control=shadow.querySelector(selector);control.value=value;h.emit(control,'change');await h.flush();assert.deepEqual(h.patches.at(-1),expected);
+    pick(h,shadow,selector,value);await h.flush();assert.deepEqual(h.patches.at(-1),expected);
+    assert.equal(shadow.querySelector('.sub').hidden,true,'a choice returns to the main menu');assert.equal(rowValue(shadow,selector),value);
   }
-  const mask=shadow.querySelector('.subtitle-mask');mask.checked=true;h.emit(mask,'change');await h.flush();assert.deepEqual(h.patches.at(-1),{subtitleStyle:{hideTranslation:true}});
+  h.emit(shadow.querySelector('.subtitle-mask'),'click');await h.flush();assert.deepEqual(h.patches.at(-1),{subtitleStyle:{hideTranslation:true}});
   h.emit(shadow.querySelector('.all-subtitle-settings'),'click');await h.flush();assert.deepEqual(h.options,['subtitles']);assert.equal(h.translations.length,0);
 });
 test('previous and next caption controls seek the current timeline without changing paused playback',async t=>{
@@ -212,7 +223,7 @@ for(const [format,body]of timedCaptions)test(`${format} caption breaks remain da
 const videoId='abcdef12345';
 const track=(languageCode,kind='',name=languageCode,id=videoId)=>({baseUrl:`https://www.youtube.com/api/timedtext?v=${id}&lang=${languageCode}${kind?'&kind='+kind:''}`,languageCode,kind,name});
 const trackOptions=[track('en','','English'),track('en','asr','English automatic'),track('es','','Español')];
-const selected=h=>h.settingsPanel().shadowRoot.querySelector('.subtitle-track');
+const selected=h=>rowValue(h.settingsPanel().shadowRoot,'.subtitle-track');
 function storeFixture(t,initial={},saveHook){
   let saved=normalizeSettings({...defaultSettings(),...initial}),queue=Promise.resolve();const fixtures=[],writes=[];
   t.after(()=>fixtures.forEach(h=>h.manager.stop()));
@@ -228,7 +239,7 @@ function storeFixture(t,initial={},saveHook){
 async function metadata(h,values=trackOptions,selectedLanguage='en'){
   h.message({kind:'tracks',selectedLanguage,tracks:values});await h.flush();h.emit(h.settingsButton(),'click');
 }
-async function choose(h,value){selected(h).value=value;h.emit(selected(h),'change');await h.flush();}
+async function choose(h,value){pick(h,h.settingsPanel().shadowRoot,'.subtitle-track',value);await h.flush();}
 
 test('the 译 button switches only translation, survives fresh controllers and agrees with the settings checkboxes',async t=>{
   const store=storeFixture(t),first=await store.open();
@@ -236,8 +247,9 @@ test('the 译 button switches only translation, survives fresh controllers and a
   assert.equal(store.saved.subtitleTranslationEnabled,false);assert.equal(store.saved.subtitlesEnabled,true);
   assert.equal(first.session().isEnabled(),true,'Kuai captions stay on without translation');assert.equal(first.mainButton().getAttribute('aria-pressed'),'false');
   const shadow=first.settingsPanel().shadowRoot;
-  assert.equal(shadow.querySelector('.subtitle-translate').checked,false);assert.equal(shadow.querySelector('.subtitles-enabled').checked,true);
-  assert.equal(shadow.querySelector('.subtitle-provider').disabled,true,'translation choices rest while translation is off');first.manager.stop();
+  assert.equal(switchedOn(shadow,'.subtitle-translate'),false);assert.equal(switchedOn(shadow,'.subtitles-enabled'),true);
+  assert.equal(rowDisabled(shadow,'.subtitle-provider'),true,'translation choices rest while translation is off');
+  first.emit(shadow.querySelector('.subtitle-provider'),'click');assert.equal(shadow.querySelector('.sub').hidden,true,'a resting row opens nothing');first.manager.stop();
   const second=await store.open();assert.equal(second.mainButton().getAttribute('aria-pressed'),'false');
   second.emit(second.mainButton(),'click');await second.flush();assert.equal(store.saved.subtitleTranslationEnabled,true);second.manager.stop();
   assert.deepEqual(store.writes,[{subtitleTranslationEnabled:false},{subtitleTranslationEnabled:true}]);
@@ -263,11 +275,11 @@ test('with translation off, captions keep Kuai segmentation and style, request n
 test('remembered source language and same-language automatic kind restore on fresh controllers',async t=>{
   const store=storeFixture(t),h=await store.open();await metadata(h);await choose(h,'es:');
   assert.deepEqual(store.saved.subtitleTrackPreference,{languageCode:'es',kind:'',name:'Español'});h.manager.stop();
-  const fresh=await store.open();await metadata(fresh);assert.equal(selected(fresh).value,'es:');
+  const fresh=await store.open();await metadata(fresh);assert.equal(selected(fresh),'es:');
   assert.equal(new URL(fresh.outbound.filter(x=>x.kind==='fetch-track').at(-1).url).searchParams.get('lang'),'es');
   await choose(fresh,'en:asr');fresh.manager.stop();const automatic=await store.open();await metadata(automatic);
-  assert.equal(selected(automatic).value,'en:asr');assert.equal(new URL(automatic.outbound.filter(x=>x.kind==='fetch-track').at(-1).url).searchParams.get('kind'),'asr');
-  await choose(automatic,'en:');automatic.manager.stop();const manual=await store.open();await metadata(manual);assert.equal(selected(manual).value,'en:');
+  assert.equal(selected(automatic),'en:asr');assert.equal(new URL(automatic.outbound.filter(x=>x.kind==='fetch-track').at(-1).url).searchParams.get('kind'),'asr');
+  await choose(automatic,'en:');automatic.manager.stop();const manual=await store.open();await metadata(manual);assert.equal(selected(manual),'en:');
 });
 test('sidebar open and close are saved across fresh controllers without startup or playback writes',async t=>{
   const store=storeFixture(t),h=await store.open();assert.equal(store.writes.length,0);
@@ -279,12 +291,12 @@ test('sidebar open and close are saved across fresh controllers without startup 
 test('existing quick preferences survive fresh controller construction together',async t=>{
   const store=storeFixture(t),h=await store.open();h.emit(h.settingsButton(),'click');const shadow=h.settingsPanel().shadowRoot;
   for(const [name,value]of [['.subtitle-provider','google'],['.subtitle-target','ja'],['.subtitle-mode','translation_only'],['.subtitle-order','translation_on_top']]){
-    const control=shadow.querySelector(name);control.value=value;h.emit(control,'change');await h.flush();
+    pick(h,shadow,name,value);await h.flush();
   }
-  const mask=shadow.querySelector('.subtitle-mask');mask.checked=true;h.emit(mask,'change');await h.flush();h.manager.stop();
+  h.emit(shadow.querySelector('.subtitle-mask'),'click');await h.flush();h.manager.stop();
   const fresh=await store.open(),controls=fresh.settingsPanel().shadowRoot;
-  assert.equal(controls.querySelector('.subtitle-provider').value,'google');assert.equal(controls.querySelector('.subtitle-target').value,'ja');
-  assert.equal(controls.querySelector('.subtitle-mode').value,'translation_only');assert.equal(controls.querySelector('.subtitle-order').value,'translation_on_top');assert.equal(controls.querySelector('.subtitle-mask').checked,true);
+  assert.equal(rowValue(controls,'.subtitle-provider'),'google');assert.equal(rowValue(controls,'.subtitle-target'),'ja');
+  assert.equal(rowValue(controls,'.subtitle-mode'),'translation_only');assert.equal(rowValue(controls,'.subtitle-order'),'translation_on_top');assert.equal(switchedOn(controls,'.subtitle-mask'),true);
 });
 
 test('a caption change during a drag keeps the gesture and refreshes text after release',t=>{
@@ -312,11 +324,12 @@ test('an English interface localizes the toolbar, captions, settings panel and r
   assert.equal(h.mainButton().title,'Turn subtitle translation on or off (Kuai captions and the list stay)');
   assert.equal(h.settingsButton().getAttribute('aria-label'),'Subtitle settings');
   h.emit(h.settingsButton(),'click');const shadow=h.settingsPanel().shadowRoot;
-  assert.equal(shadow.querySelector('h2').textContent,'Subtitle settings');
-  assert.equal(shadow.querySelector('.subtitle-mode').getAttribute('aria-label'),'Display');
-  assert.equal(shadow.querySelector('.subtitle-mode').children[1].textContent,'Translation only');
-  assert.equal(shadow.querySelector('.subtitle-target').children[0].textContent,'Same as page target language');
-  assert.equal(shadow.querySelector('.subtitle-track').children[0].textContent,'Auto (no captions found yet)');
+  assert.equal(h.settingsPanel().getAttribute('aria-label'),'Subtitle settings');
+  assert.equal(shadow.querySelector('.subtitle-mode').querySelector('.label').textContent,'Display');
+  assert.equal(choices(h,shadow,'.subtitle-mode')[1].textContent,'Translation only');assert.equal(shadow.querySelector('.header').textContent,'Display');
+  h.emit(shadow.querySelector('.header'),'click');assert.equal(shadow.querySelector('.sub').hidden,true);
+  assert.equal(choices(h,shadow,'.subtitle-target')[0].textContent,'Same as page target language');h.emit(shadow.querySelector('.header'),'click');
+  assert.equal(shadow.querySelector('.subtitle-track').querySelector('.value').textContent,'Auto (no captions found yet)');
   h.tracks();const request=h.outbound.filter(item=>item.kind==='fetch-track').at(-1);
   h.message({kind:'caption-error',requestId:request.requestId});await h.flush();
   assert.equal(h.session().state.errorMessage,"Couldn't load these subtitles. Switch the subtitle language or retry.");
@@ -324,7 +337,7 @@ test('an English interface localizes the toolbar, captions, settings panel and r
   assert.match(h.document.querySelector('[data-kuai-subtitle-next]').title,/^Next subtitle · /);
   h.manager.updateSettings({...h.config,interfaceLanguage:'zh-CN'});await h.flush();
   assert.equal(h.mainButton().title,'开启或关闭字幕翻译（关闭后仍保留 Kuai 字幕和列表）');
-  assert.equal(shadow.querySelector('h2').textContent,'字幕设置');assert.equal(shadow.querySelector('.subtitle-mode').children[1].textContent,'只显示译文');
+  assert.equal(h.settingsPanel().getAttribute('aria-label'),'字幕设置');assert.equal(choices(h,shadow,'.subtitle-mode')[1].textContent,'只显示译文');
   assert.equal(h.captionHost().shadowRoot.querySelector('.retry').textContent,'重试');
 });
 test('navigation explains whether Kuai captions or video captions are off',async t=>{
@@ -353,7 +366,7 @@ test('letter shortcuts navigate, replay and loop only when chosen, and never fro
   const editor=h.document.createElement('input');h.player.append(editor);h.emit(editor,'keydown',{key:'d'});assert.equal(h.video.currentTime,0);
   key('r');await h.flush();assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});
   assert.match(h.captionHost().shadowRoot.querySelector('.status').textContent,/单句循环中/);
-  h.emit(h.settingsButton(),'click');assert.equal(h.settingsPanel().shadowRoot.querySelector('.subtitle-loop').checked,true);
+  h.emit(h.settingsButton(),'click');assert.equal(switchedOn(h.settingsPanel().shadowRoot,'.subtitle-loop'),true);
   key('r');await h.flush();assert.equal(h.session().state.loopingCaption,null);
   h.manager.updateSettings({...h.config,subtitleShortcuts:'off'});await h.flush();
   assert.equal(key('d').defaultPrevented,false);assert.equal(h.video.currentTime,0);
@@ -361,12 +374,38 @@ test('letter shortcuts navigate, replay and loop only when chosen, and never fro
 test('the settings panel saves the shortcut scheme, toggles the sentence loop and closes on an outside press',async t=>{
   const h=studyFixture();t.after(()=>h.manager.stop());await h.load();
   h.emit(h.settingsButton(),'click');const panel=h.settingsPanel(),shadow=panel.shadowRoot;
-  const shortcuts=shadow.querySelector('.subtitle-shortcuts');assert.equal(shortcuts.value,'ctrl-alt');
-  shortcuts.value='letters';h.emit(shortcuts,'change');await h.flush();assert.deepEqual(h.patches.at(-1),{subtitleShortcuts:'letters'});
-  const loop=shadow.querySelector('.subtitle-loop');loop.checked=true;h.emit(loop,'change');await h.flush();
-  assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});assert.equal(loop.checked,true);
+  assert.equal(rowValue(shadow,'.subtitle-shortcuts'),'ctrl-alt');
+  pick(h,shadow,'.subtitle-shortcuts','letters');await h.flush();assert.deepEqual(h.patches.at(-1),{subtitleShortcuts:'letters'});
+  h.emit(shadow.querySelector('.subtitle-loop'),'click');await h.flush();
+  assert.deepEqual(h.session().state.loopingCaption,{start:0,end:3});assert.equal(switchedOn(shadow,'.subtitle-loop'),true);
   h.emit(shadow.querySelector('.subtitle-mode'),'pointerdown');assert.equal(panel.hidden,false,'presses inside keep it open');
   h.emit(h.video,'pointerdown');assert.equal(panel.hidden,true);
+});
+test('the settings menu follows YouTube keyboard order: arrows move, Enter opens a choice and Escape steps back before closing',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.flush();
+  h.emit(h.settingsButton(),'click');const panel=h.settingsPanel(),shadow=panel.shadowRoot,key=key=>h.emit(panel,'keydown',{key});
+  assert.equal(shadow.querySelector('.menu').getAttribute('role'),'menu');assert.equal(h.settingsButton().getAttribute('aria-haspopup'),'menu');
+  assert.strictEqual(h.document.activeElement,shadow.querySelector('.subtitles-enabled'),'opening focuses the first row');
+  assert.equal(shadow.querySelector('.subtitles-enabled').getAttribute('role'),'menuitemcheckbox');
+  key('ArrowUp');assert.strictEqual(h.document.activeElement,shadow.querySelector('.all-subtitle-settings'),'focus wraps around');
+  for(let i=0;i<6;i++)key('ArrowDown');assert.strictEqual(h.document.activeElement,shadow.querySelector('.subtitle-mode'));
+  key('Enter');assert.equal(shadow.querySelector('.main').hidden,true);assert.equal(shadow.querySelector('.sub').hidden,false);
+  const current=shadow.querySelector('.option[aria-checked=true]');assert.equal(current.dataset.value,'bilingual');assert.strictEqual(h.document.activeElement,current);
+  key('Escape');assert.equal(panel.hidden,false,'Escape first returns to the main menu');assert.equal(shadow.querySelector('.main').hidden,false);
+  assert.strictEqual(h.document.activeElement,shadow.querySelector('.subtitle-mode'));
+  key('ArrowRight');key('ArrowDown');key(' ');await h.flush();assert.deepEqual(h.patches.at(-1),{subtitleStyle:{displayMode:'translation_only'}});
+  assert.equal(shadow.querySelector('.sub').hidden,true);
+  key('Escape');assert.equal(panel.hidden,true);assert.equal(h.settingsButton().getAttribute('aria-expanded'),'false');
+});
+test('the settings menu sits above the control bar and replaces YouTube\'s own settings popup',async t=>{
+  const h=studyFixture();t.after(()=>h.manager.stop());await h.flush();
+  h.player._rect={left:0,top:100,right:960,bottom:640,width:960,height:540};
+  const bar=h.document.createElement('div');bar.className='ytp-chrome-bottom';bar._rect={left:12,top:572,right:948,bottom:640,width:936,height:68};h.player.append(bar);
+  const native=h.document.createElement('div');native.className='ytp-settings-menu';h.player.append(native);
+  const gear=h.document.createElement('button');gear.className='ytp-settings-button';gear.setAttribute('aria-expanded','true');let closed=0;gear.click=()=>{closed++;gear.setAttribute('aria-expanded','false');native.style.display='none';};h.player.append(gear);
+  h.emit(h.settingsButton(),'click');const panel=h.settingsPanel();
+  assert.equal(panel.style.bottom,'80px','12px above a 68px fullscreen control bar');assert.equal(closed,1);
+  h.emit(h.settingsButton(),'click');h.emit(h.settingsButton(),'click');assert.equal(closed,1,'a closed native popup is left alone');
 });
 test('the settings panel sits just left of an open subtitle list drawer',async t=>{
   const h=studyFixture();t.after(()=>h.manager.stop());await h.flush();
