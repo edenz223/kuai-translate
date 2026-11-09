@@ -34,7 +34,7 @@ export function isOwnedUI(node: unknown): boolean {
   return ancestors(node).some(element => element.hasAttribute?.('data-kuai-ui'));
 }
 
-type StyleSnapshot = Partial<Pick<CSSStyleDeclaration,'display'|'visibility'|'position'|'clip'|'clipPath'|'color'|'textDecorationLine'>>;
+type StyleSnapshot = Partial<Pick<CSSStyleDeclaration,'display'|'visibility'|'position'|'clip'|'clipPath'|'overflow'|'color'|'textDecorationLine'>>;
 interface LayoutCache {styles:WeakMap<Element,StyleSnapshot|undefined>;rendered:WeakMap<Element,boolean>}
 let layoutCache: LayoutCache | null = null;
 
@@ -53,8 +53,14 @@ export function computedStyle(element: Element, env: BrowserEnvironment): StyleS
   if (!layoutCache) return env.getComputedStyle?.(element);
   if (layoutCache.styles.has(element)) return layoutCache.styles.get(element);
   const style = env.getComputedStyle?.(element);
-  const snapshot = style && {display:style.display,visibility:style.visibility,position:style.position,clip:style.clip,clipPath:style.clipPath,color:style.color,textDecorationLine:style.textDecorationLine};
+  const snapshot = style && {display:style.display,visibility:style.visibility,position:style.position,clip:style.clip,clipPath:style.clipPath,overflow:style.overflow,color:style.color,textDecorationLine:style.textDecorationLine};
   layoutCache.styles.set(element,snapshot);return snapshot;
+}
+
+// Some screen-reader labels use an empty overflow-hidden box instead of clip.
+function emptyBox(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect?.();
+  return !!rect && (rect.width < 1 || rect.height < 1);
 }
 
 function rendered(element: HTMLElement): boolean {
@@ -76,6 +82,7 @@ export function isReadable(element: HTMLElement | null | undefined, env: Browser
     // Accessibility-only copies can have a layout box while all their pixels are clipped.
     const clip=style?.clip?.match(/^rect\(([^)]+)\)$/)?.[1].split(/[\s,]+/).filter(Boolean).map(value=>parseFloat(value));
     if(clip?.length===4&&['absolute','fixed'].includes(style?.position||'')&&(clip[1]<=clip[3]||clip[2]<=clip[0])||/^inset\(50%(?:\s+50%){0,3}\)$/.test(style?.clipPath||''))return false;
+    if(['absolute','fixed'].includes(style?.position||'')&&/^(hidden|clip)/.test(style?.overflow||'')&&emptyBox(ancestor))return false;
     // Inline code belongs to its sentence (`run ~/.codex`); block code without <pre> stays untranslated.
     if (ancestor.tagName === 'CODE' && style?.display && !style.display.startsWith('inline')) return false;
     if (ancestor.hidden || style?.display === 'none' || ['hidden','collapse'].includes(style?.visibility as string)) return false;
@@ -83,12 +90,31 @@ export function isReadable(element: HTMLElement | null | undefined, env: Browser
   return hiddenByTranslation || rendered(element);
 }
 
+/**
+ * A tag block, or any box taken out of flow: an absolutely positioned card title or
+ * banner caption is laid out apart from its ancestor's text, even when it is an <a> or <strong>.
+ */
+export function isBlock(element: Element, env: BrowserEnvironment): boolean {
+  if (element.matches?.(BLOCK_SELECTOR)) return true;
+  const position = computedStyle(element,env)?.position;
+  return position === 'absolute' || position === 'fixed';
+}
+
+export function closestBlock(element: Element | null | undefined, env: BrowserEnvironment): HTMLElement | null {
+  for (let node = element; node; node = node.parentElement) if (isBlock(node,env)) return node as HTMLElement;
+  return null;
+}
+
+export function blocksWithin(root: ParentNode, env: BrowserEnvironment): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>('*')).filter(element => isBlock(element,env));
+}
+
 /** Read a block without including nested blocks or our appended translation. */
 export function blockText(element: HTMLElement, env: BrowserEnvironment): string {
   const read = (node: Node): string => {
     if (node.nodeType === 3) return node.nodeValue || node.textContent || '';
     if (node.nodeType !== 1) return '';
-    if (node !== element && ((node as HTMLElement).matches?.(BLOCK_SELECTOR) || !isReadable(node as HTMLElement, env,{allowOriginal:true}))) return '';
+    if (node !== element && (isBlock(node as HTMLElement, env) || !isReadable(node as HTMLElement, env,{allowOriginal:true}))) return '';
     if ((node as HTMLElement).tagName === 'BR') return '\n';
     return Array.from(node.childNodes || [], read).join('');
   };
@@ -113,11 +139,12 @@ export function isInViewport(element: HTMLElement,env: BrowserEnvironment): bool
 }
 
 export function collectBlocks(document: Document, env: BrowserEnvironment, {visibleOnly=false}: {visibleOnly?:boolean}={}): PageBlock[] {
-  if (!document.body) return [];
-  return [document.body, ...document.body.querySelectorAll<HTMLElement>(BLOCK_SELECTOR)]
+  const body = document.body;
+  if (!body) return [];
+  return withLayoutCache(() => [body, ...blocksWithin(body,env)]
     .filter(element => (!visibleOnly||isInViewport(element,env))&&isReadable(element, env))
     .map(element => ({ element, text:blockText(element, env) }))
-    .filter(item => item.text && /\p{L}/u.test(item.text));
+    .filter(item => item.text && /\p{L}/u.test(item.text)));
 }
 
 /** Split by Unicode characters rather than cutting a surrogate pair. */

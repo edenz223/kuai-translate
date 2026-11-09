@@ -4,7 +4,7 @@ interface SourceRun {text:string; anchor:HTMLAnchorElement|null; indices?:number
 export interface PageContent {source:string; runs:SourceRun[]; linked:boolean; units:string[]}
 export interface PageLinkBinding {source:HTMLAnchorElement; node:HTMLElement; output:HTMLElement; valid:()=>boolean; document:Document; env:BrowserEnvironment}
 
-import {ancestors,BLOCK_SELECTOR,computedStyle,isReadable,splitText} from './dom.js';
+import {ancestors,computedStyle,isBlock,isReadable,splitText} from './dom.js';
 
 export const PAGE_LINK_ATTRIBUTES=['href','target','rel','download','title','aria-label','hreflang','referrerpolicy'];
 const safeProtocols=new Set(['https:','http:','mailto:','tel:']);
@@ -25,7 +25,7 @@ function sourceRuns(element: HTMLElement,env: BrowserEnvironment): SourceRun[]{
   const inherited=ancestors(element).some(node=>node.tagName==='A');
   function visit(node: Node,anchor: HTMLAnchorElement | null=null): void{
     if(node.nodeType===3){text(node.nodeValue||node.textContent||'',anchor);return;}
-    if(node.nodeType!==1||node!==element&&((node as HTMLElement).matches?.(BLOCK_SELECTOR)||!isReadable(node as HTMLElement,env,{allowOriginal:true})))return;
+    if(node.nodeType!==1||node!==element&&(isBlock(node as HTMLElement,env)||!isReadable(node as HTMLElement,env,{allowOriginal:true})))return;
     if((node as HTMLElement).tagName==='BR'){text('\n',anchor);return;}
     if(!inherited&&node!==element&&(node as HTMLElement).tagName==='A'&&(node as HTMLElement).hasAttribute('href'))anchor=node as HTMLAnchorElement;
     for(const child of node.childNodes||[])visit(child,anchor);

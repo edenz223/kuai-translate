@@ -12,7 +12,7 @@ interface Popup {host:HTMLDivElement;section:HTMLElement;header:HTMLElement;pin:
 type TextResult = {cancelled:true} | {skipped:true} | {translation:string;applied:boolean};
 
 import {appendIcon} from './icons.js';
-import {batches,BLOCK_SELECTOR,blockText,configurationKey,isChinese,isEditable,isOwnedUI,isReadable,makeId,parentElement,requestOptions,splitText,translationsOf,withLayoutCache} from './dom.js';
+import {batches,blocksWithin,blockText,closestBlock,configurationKey,isChinese,isEditable,isOwnedUI,isReadable,makeId,parentElement,requestOptions,splitText,translationsOf,withLayoutCache} from './dom.js';
 import {normalizeInteractionOptions,normalizeKey,resolveFeatureSettings,isSiteListed} from '../shared/interactions.js';
 import {isPageSiteBlocked} from './page-policy.js';
 import {createHeldKeys,matchesShortcut} from './shortcuts.js';
@@ -235,7 +235,7 @@ export function createInteractions({document,env=globalThis,translate,cancel=()=
   function gestureValidity(key: string,url: string): ()=>boolean{return ()=>started&&allowed('hover')&&featureKey('hover')===key&&route()===url;}
   function hoverRoot(): HTMLElement | null{
     const element=parentElement(lastPointer);
-    const block=element?.closest?.<HTMLElement>(BLOCK_SELECTOR);
+    const block=closestBlock(element,env);
     // Feed cards use a full-card overlay link and render content in named shadow slots.
     // Resolve that surface to the card's content, rather than its ancestor's metadata.
     const card=element?.closest<HTMLElement>('shreddit-post')||(block?.tagName==='ARTICLE'?block.querySelector<HTMLElement>('shreddit-post'):null);
@@ -248,9 +248,8 @@ export function createInteractions({document,env=globalThis,translate,cancel=()=
     // separate source units so every translation stays next to its original.
     const regions=root.tagName==='SHREDDIT-POST'
       ?Array.from(root.querySelectorAll<HTMLElement>('[slot="title"],[slot="text-body"],[slot="body"]')):[root];
-    const elements=new Set(regions.flatMap(region=>[region,...region.querySelectorAll<HTMLElement>(BLOCK_SELECTOR)]));
     // Nested blocks share ancestors; a large region otherwise re-reads each ancestor's style per block.
-    return withLayoutCache(()=>[...elements].filter(element=>isReadable(element,env)).map(element=>({element,text:blockText(element,env)}))
+    return withLayoutCache(()=>[...new Set(regions.flatMap(region=>[region,...blocksWithin(region,env)]))].filter(element=>isReadable(element,env)).map(element=>({element,text:blockText(element,env)}))
       .filter(block=>/[\p{L}\p{N}]/u.test(block.text)));
   }
 

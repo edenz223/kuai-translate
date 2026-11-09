@@ -1,7 +1,7 @@
 import type {Settings} from '../shared/settings.js';
 import type {BrowserEnvironment,PageBlock} from './dom.js';
 
-import {ancestors,BLOCK_SELECTOR,collectBlocks,configurationKey} from './dom.js';
+import {ancestors,collectBlocks,configurationKey,isBlock} from './dom.js';
 import {normalizeInteractionOptions,isSiteListed} from '../shared/interactions.js';
 
 const options=(settings: Partial<Settings>)=>normalizeInteractionOptions(settings,settings.providers).pageOptions;
@@ -45,7 +45,7 @@ export function pageTranslationKey(settings: Partial<Settings>): string{
   return JSON.stringify([configurationKey(settings),value.neverSites,value.neverLanguages,value.translateFullPage,value.excludeSelectors,value.minTextLength]);
 }
 
-function blockAllowed({element,text}: PageBlock,value: ReturnType<typeof options>): boolean{
+function blockAllowed({element,text}: PageBlock,value: ReturnType<typeof options>,env: BrowserEnvironment): boolean{
   if(!element?.isConnected||typeof text!=='string'||!/\p{L}/u.test(text)||[...text.trim()].length<value.minTextLength)return false;
   if(languageListed(declaredLanguage(element),value.neverLanguages))return false;
   if(!value.translateFullPage&&element.closest?.('footer,[role="contentinfo"]'))return false;
@@ -54,7 +54,7 @@ function blockAllowed({element,text}: PageBlock,value: ReturnType<typeof options
     for(const excluded of element.querySelectorAll?.(selector)||[]){
       if(ancestors(excluded).some(node=>node.hasAttribute?.('data-kuai-owned')))continue;
       // blockText skips nested blocks; an excluded inline region belongs to this entire source unit.
-      let owner: Element | null=excluded;while(owner&&owner!==element&&!owner.matches?.(BLOCK_SELECTOR))owner=owner.parentElement;
+      let owner: Element | null=excluded;while(owner&&owner!==element&&!isBlock(owner,env))owner=owner.parentElement;
       if(owner===element)return false;
     }
   }catch{/* Invalid selectors never become code or broad matches. */}}
@@ -62,17 +62,17 @@ function blockAllowed({element,text}: PageBlock,value: ReturnType<typeof options
 }
 
 /** Recheck current DOM policy without starting asynchronous language detection. */
-export function isPageBlockAllowed(block: PageBlock,settings: Settings,{url=globalThis.location?.href||''}: {url?:string}={}): boolean{
-  const value=options(settings);return !isSiteListed(url,value.neverSites)&&blockAllowed(block,value);
+export function isPageBlockAllowed(block: PageBlock,settings: Settings,{env=globalThis,url=env.location?.href||''}: {env?:BrowserEnvironment;url?:string}={}): boolean{
+  const value=options(settings);return !isSiteListed(url,value.neverSites)&&blockAllowed(block,value,env);
 }
 
 /** Sync for ordinary pages; async only when per-paragraph language filtering is requested. */
 export function filterPageBlocks(blocks: PageBlock[],settings: Settings,{env=globalThis,url=env.location?.href||''}: {env?:BrowserEnvironment;url?:string}={}): PageBlock[] | Promise<PageBlock[]>{
   const value=options(settings);if(isSiteListed(url,value.neverSites))return [];
-  const filtered=blocks.filter(block=>blockAllowed(block,value));
+  const filtered=blocks.filter(block=>blockAllowed(block,value,env));
   if(!value.neverLanguages.length)return filtered;
   return Promise.all(filtered.map(async block=>({block,code:await detectTextLanguage(block.text,block.element,env)})))
-    .then(items=>items.filter(item=>!languageListed(item.code,value.neverLanguages)&&isPageBlockAllowed(item.block,settings,{url})).map(item=>item.block));
+    .then(items=>items.filter(item=>!languageListed(item.code,value.neverLanguages)&&isPageBlockAllowed(item.block,settings,{env,url})).map(item=>item.block));
 }
 
 export async function shouldAutoTranslate(document: Document,settings: Settings,env: BrowserEnvironment=globalThis): Promise<boolean>{
