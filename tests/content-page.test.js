@@ -31,6 +31,13 @@ test('page translation sends only viewport paragraphs and excludes controls/code
  const controller=createPageTranslator(h.dependencies);await controller.translatePage();assert.deepEqual(h.requests.flatMap(request=>request.texts),['First']);assert.equal(controller.status().translated,1);
 });
 
+test('inline code stays in the translated sentence while block code is excluded', async()=>{
+ const h=fixture(),p=h.paragraph('Keep your first account in '),code=h.doc.createElement('code');code.textContent='~/.codex';code.style.display='inline';p.append(code,h.doc.createTextNode('. Sign in again.'));
+ const block=h.paragraph('','div'),blockCode=h.doc.createElement('code');blockCode.textContent='CODEX_HOME=~/.codex-work codex login';block.append(blockCode);
+ const controller=createPageTranslator(h.dependencies);await controller.translatePage();
+ assert.deepEqual(h.requests.flatMap(request=>request.texts),['Keep your first account in ~/.codex. Sign in again.']);assert.equal(output(p).textContent,'译：Keep your first account in ~/.codex. Sign in again.');assert.equal(output(block),null);
+});
+
 test('nested blocks are not translated twice and provider markup is displayed as plain text', async()=>{
  const h=fixture();const outer=h.paragraph('','div'), inner=h.doc.createElement('p');inner.textContent='Nested';outer.append(inner);h.respond(async()=>({translations:['<script>bad()</script>译文']}));
  const controller=createPageTranslator(h.dependencies);await controller.translatePage();assert.deepEqual(h.requests[0].texts,['Nested']);assert.equal(output(outer),output(inner));assert.equal(output(inner).textContent,'<script>bad()</script>译文');assert.equal(output(inner).querySelector('font').children.length,0);

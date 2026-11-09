@@ -8,7 +8,7 @@ export interface PageBlock {element: HTMLElement; text: string}
 /** Browser-facing helpers shared by the native page and selection controllers. */
 // Docs renderers such as Mintlify emit paragraphs as `<span data-as="p">`; without it, a whole article reads as one block.
 export const BLOCK_SELECTOR = 'p,div,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dt,dd,article,section,[slot="title"],[role="heading"],[data-as="p"]';
-const EXCLUDED_TAGS = new Set(['SCRIPT','STYLE','NOSCRIPT','PRE','CODE','TEXTAREA','INPUT','SELECT','OPTION','BUTTON','SVG','MATH','VIDEO','AUDIO','CANVAS']);
+const EXCLUDED_TAGS = new Set(['SCRIPT','STYLE','NOSCRIPT','PRE','TEXTAREA','INPUT','SELECT','OPTION','BUTTON','SVG','MATH','VIDEO','AUDIO','CANVAS']);
 
 export function parentElement(node: unknown): HTMLElement | null {
   return (node as Node | null | undefined)?.nodeType === 1 ? node as HTMLElement : (node as Node | null | undefined)?.parentElement || ((node as Node | null | undefined)?.getRootNode?.() as ShadowRoot | undefined)?.host as HTMLElement || null;
@@ -76,6 +76,8 @@ export function isReadable(element: HTMLElement | null | undefined, env: Browser
     // Accessibility-only copies can have a layout box while all their pixels are clipped.
     const clip=style?.clip?.match(/^rect\(([^)]+)\)$/)?.[1].split(/[\s,]+/).filter(Boolean).map(value=>parseFloat(value));
     if(clip?.length===4&&['absolute','fixed'].includes(style?.position||'')&&(clip[1]<=clip[3]||clip[2]<=clip[0])||/^inset\(50%(?:\s+50%){0,3}\)$/.test(style?.clipPath||''))return false;
+    // Inline code belongs to its sentence (`run ~/.codex`); block code without <pre> stays untranslated.
+    if (ancestor.tagName === 'CODE' && style?.display && !style.display.startsWith('inline')) return false;
     if (ancestor.hidden || style?.display === 'none' || ['hidden','collapse'].includes(style?.visibility as string)) return false;
   }
   return hiddenByTranslation || rendered(element);
