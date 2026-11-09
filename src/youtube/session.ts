@@ -5,14 +5,18 @@ interface TranslationJob {revision:number;controller:AbortController;promise?:Pr
 // Live DOM captions change word by word. Translate once the text settles, or at
 // least once per wait while speech keeps rolling, instead of once per change.
 const LIVE_SETTLE_MS=700,LIVE_MAX_WAIT_MS=3000,OVERLAP_SCAN=8;
+// The first request of a timeline is small so the opening sentences come back quickly.
+const BATCH=8,OPENING_BATCH=3;
 const lastLine=(text:string)=>text.split('\n').map(line=>line.trim()).filter(Boolean).at(-1)||'';
 const continuesText=(previous:string,next:string)=>{const line=lastLine(previous);return !!line&&(next.startsWith(previous)||next.includes(line));};
 /** Framework-independent subtitle state and translation scheduling. */
 export function createSubtitleSession({id,video,settings,translate,onChange=()=>{},getLanguage=()=>undefined}:{id:string;video:HTMLVideoElement;settings:Settings;translate:TranslateSubtitles;onChange?:(session:SubtitleSession)=>void;getLanguage?:()=>string|undefined}):SubtitleSession {
-  let config=settings,enabled=true,destroyed=false,running:TranslationJob|null=null,revision=0,timer:ReturnType<typeof setInterval>|null=null,queued=false;
+  let config=settings,enabled=true,destroyed=false,running:TranslationJob|null=null,revision=0,timer:ReturnType<typeof setInterval>|null=null,queued=false,opening=false;
   let loop:{start:number;end:number}|null=null,liveChangedAt=0,livePendingSince:number|null=null,liveTimer:ReturnType<typeof setTimeout>|null=null,liveSource:{text:string;translation:string}|null=null;
   const state:SubtitleState={videoId:id,subtitlesList:[],currentCaption:null,loopingCaption:null,selectionCaptionSnapshot:null,isSubtitleSelectionHeld:false,translateVersion:0,isLiveDomCaptions:false,timelineFailed:false,errorMessage:''};
-  const available=()=>!destroyed&&enabled&&config.subtitlesEnabled&&video.isConnected&&!video.closest?.('.ad-showing, .ad-interrupting');
+  // A preroll ad hides captions, but the timeline and its opening translation can be prepared meanwhile.
+  const preparable=()=>!destroyed&&enabled&&config.subtitlesEnabled&&video.isConnected;
+  const available=()=>preparable()&&!video.closest?.('.ad-showing, .ad-interrupting');
   const notify=()=>onChange(session);
   // With translation off the session still segments and shows source captions.
   const translating=()=>config.subtitleTranslationEnabled!==false;
@@ -52,7 +56,12 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
   function seeking(){followLoop(video.currentTime);}
   function update() {
     if(destroyed||state.isSubtitleSelectionHeld)return;
-    if(!available()) {if(state.currentCaption){state.currentCaption=null;notify();}return;}
+    if(!available()) {
+      if(state.currentCaption){state.currentCaption=null;notify();}
+      // The element plays the ad, so its clock is not the video's: prepare from the start.
+      if(opening&&preparable()&&!running&&translating())request(pendingFrom(0));
+      return;
+    }
     if(loop&&!video.seeking){
       if(video.currentTime<loop.start-0.25||video.currentTime>loop.end+1)followLoop(video.currentTime);
       else if(video.currentTime>=loop.end-0.05){try{video.currentTime=loop.start;}catch{}}
@@ -64,24 +73,33 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
       errorMessage:active.map(item=>item.errorMessage||'').find(Boolean)||''}:null;
     if(JSON.stringify(next)!==JSON.stringify(state.currentCaption)){state.currentCaption=next;notify();}
     if(!running && !video.seeking && translating() && !liveWaiting()) {
-      const pending=[];
-      for(let index=first;index<state.subtitlesList.length;index++){
-        const item=state.subtitlesList[index];if(item.start>time+15)break;
-        if(item.end>time&&item.status==='pending')pending.push(item);
-        if(pending.length===8)break;
-      }
+      const pending=pendingFrom(time,first);
       if(pending.length)translateCues(pending);
     }
   }
+  function pendingFrom(time:number,first=activeAt(time).first) {
+    const pending=[];
+    for(let index=first;index<state.subtitlesList.length;index++){
+      const item=state.subtitlesList[index];if(item.start>time+15)break;
+      if(item.end>time&&item.status==='pending')pending.push(item);
+      if(pending.length===BATCH)break;
+    }
+    return pending;
+  }
   function translateCues(candidates:CaptionCue[]):false|Promise<void> {
-    if(!available()||!translating()||state.isSubtitleSelectionHeld||running||!Array.isArray(candidates))return false;
+    if(!available())return false;
+    return request(candidates);
+  }
+  function request(candidates:CaptionCue[]):false|Promise<void> {
+    if(!preparable()||!translating()||state.isSubtitleSelectionHeld||running||!Array.isArray(candidates))return false;
+    const limit=opening?OPENING_BATCH:BATCH;
     const membership=new Set(state.subtitlesList),cues:CaptionCue[]=[];let size=0,rejected=false;
     for(const cue of new Set(candidates)) {
       if(!membership.has(cue)||!cue.text||cue.status!=='pending')continue;
       if(cue.text.length>40000){
         cue.status='error';cue.errorMessage=subtitleWords(getLanguage()).cueTooLong;rejected=true;continue;
       }
-      if(cues.length>=8||size+cue.text.length>40000)break;
+      if(cues.length>=limit||size+cue.text.length>40000)break;
       cues.push(cue);size+=cue.text.length;
     }
     if(rejected){notify();scheduleUpdate();}
@@ -92,7 +110,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
       for(let offset=0;offset<cue.text.length;){let end=Math.min(offset+3000,cue.text.length);if(end<cue.text.length&&/[\uD800-\uDBFF]/.test(cue.text[end-1]))end--;fragments.push(cue.text.slice(offset,end));offset=end;}
       mapping.push([start,fragments.length]);cue.status='translating';cue.errorMessage='';
     }
-    const job:TranslationJob={revision,controller:new AbortController()};running=job;if(state.isLiveDomCaptions)livePendingSince=null;notify();
+    const job:TranslationJob={revision,controller:new AbortController()};running=job;opening=false;if(state.isLiveDomCaptions)livePendingSince=null;notify();
     job.promise=Promise.resolve().then(()=>translate(fragments,{providerId:providerId(),sourceLanguage:config.sourceLanguage,targetLanguage:targetLanguage(),signal:job.controller.signal})).then(result=>{
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
       const values=result?.translations;
@@ -121,7 +139,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     // A changing live line must not abort the request for the words before it.
     const rolling=!!live&&state.isLiveDomCaptions;
     if(rolling){liveChangedAt=Date.now();livePendingSince??=liveChangedAt;}
-    else{invalidate();liveSource=null;livePendingSince=live?Date.now():null;liveChangedAt=livePendingSince||0;}
+    else{invalidate();liveSource=null;livePendingSince=live?Date.now():null;liveChangedAt=livePendingSince||0;opening=!live;}
     state.isLiveDomCaptions=!!live;
     state.subtitlesList=(cues||[]).filter(cue=>Number.isFinite(cue.start)&&Number.isFinite(cue.end)&&cue.start>=0&&cue.end>cue.start&&typeof cue.text==='string'&&cue.text.trim()).map(cue=>({...cue,translation:cue.translation||'',status:cue.status||'pending'})).sort((a,b)=>a.start-b.start);
     if(rolling)carryLive(state.subtitlesList);
@@ -141,8 +159,10 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     const after=[providerId(),config.sourceLanguage,targetLanguage(),config.providerRevision,JSON.stringify(config.providers)];
     if(before.some((value,index)=>value!==after[index])) {
       invalidate();for(const cue of state.subtitlesList){cue.translation='';cue.status='pending';cue.errorMessage='';}
+      opening=!state.isLiveDomCaptions;
     }
-    if(!available()){hold(false);invalidate();}
+    if(!preparable()){hold(false);invalidate();}
+    else if(!available())hold(false);
     notify();scheduleUpdate();
   }
   function setLoop(value:boolean) {
@@ -166,6 +186,6 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
   function start(){for(const type of ['timeupdate','seeked','loadedmetadata'])video.addEventListener(type,tick);video.addEventListener('play',play);video.addEventListener('pause',pause);video.addEventListener('ended',pause);video.addEventListener('seeking',seeking);if(!video.paused)play();else update();return session;}
   function retry(){for(const cue of state.subtitlesList)if(cue.status==='error'){cue.status='pending';cue.errorMessage='';}notify();update();}
   function destroy(){destroyed=true;invalidate();clearInterval(timer!);if(liveTimer!==null)clearTimeout(liveTimer);for(const type of ['timeupdate','seeked','loadedmetadata'])video.removeEventListener(type,tick);video.removeEventListener('play',play);video.removeEventListener('pause',pause);video.removeEventListener('ended',pause);video.removeEventListener('seeking',seeking);state.isSubtitleSelectionHeld=false;state.selectionCaptionSnapshot=null;}
-  const session:SubtitleSession={id,video,rule:{id:'youtube'},state,start,destroy,update,setCues,hold,updateSettings,setEnabled,seek,translateCues,retry,setLoop,isEnabled:available,synchronizer:{isSyncEnabled:true,update,triggerTranslation:translateCues}};
+  const session:SubtitleSession={id,video,rule:{id:'youtube'},state,start,destroy,update,setCues,hold,updateSettings,setEnabled,seek,translateCues,retry,setLoop,isEnabled:available,canPrepare:preparable,synchronizer:{isSyncEnabled:true,update,triggerTranslation:translateCues}};
   return session;
 }

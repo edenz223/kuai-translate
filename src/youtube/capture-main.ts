@@ -1,5 +1,5 @@
 interface CaptureRawTrack {baseUrl?:unknown;url?:unknown;languageCode?:unknown;kind?:unknown;vssId?:unknown;name?:{simpleText?:unknown;runs?:{text?:unknown}[]}}
-interface CapturePlayerResponse {videoDetails?:{videoId?:string};captions?:{playerCaptionsTracklistRenderer?:{captionTracks?:CaptureRawTrack[]}}}
+interface CapturePlayerResponse {videoDetails?:{videoId?:string;isLive?:boolean};captions?:{playerCaptionsTracklistRenderer?:{captionTracks?:CaptureRawTrack[]}}}
 interface CapturePlayer extends Element {getPlayerResponse?:()=>unknown;getOption?:(module:string,key:string)=>CaptureRawTrack;getAudioTrack?:()=>{captionTracks?:CaptureRawTrack[]};setOption?:(module:string,key:string,value:unknown)=>void}
 interface CaptureRequest {source?:unknown;kind?:string;requestId?:string;videoId?:string;url?:unknown}
 interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown}
@@ -52,8 +52,8 @@ interface Window {__kuaiCaptionCapture?:boolean;ytInitialPlayerResponse?:unknown
       baseUrl:track.baseUrl,languageCode:String(track.languageCode||'auto').slice(0,32),kind:track.kind==='asr'?'asr':'',
       vssId:String(track.vssId||'').slice(0,100),name:String(track.name?.simpleText||track.name?.runs?.map(run=>run.text||'').join('')||track.languageCode||'').slice(0,160),
     }));
-    const signature=JSON.stringify([id,tracks,selectedLanguage]);
-    if(force||signature!==lastSignature){lastSignature=signature;emit({kind:'tracks',videoId:id,tracks,selectedLanguage});}
+    const live=(response as CapturePlayerResponse).videoDetails?.isLive===true,signature=JSON.stringify([id,tracks,selectedLanguage,live]);
+    if(force||signature!==lastSignature){lastSignature=signature;emit({kind:'tracks',videoId:id,tracks,selectedLanguage,live});}
     return true;
   }
   function discover(force=false) {

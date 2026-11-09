@@ -12,7 +12,7 @@ export interface SubtitleSession {
  id:string;video:HTMLVideoElement;rule:{id:string};state:SubtitleState;
  start:()=>SubtitleSession;destroy:()=>void;update:()=>void;setCues:(cues:CaptionCue[],options?:{live?:boolean})=>void;
  hold:(held:boolean)=>void;updateSettings:(settings:Settings)=>void;setEnabled:(enabled:boolean)=>void;seek:(time:number)=>boolean;
- translateCues:(cues:CaptionCue[])=>false|Promise<void>;retry:()=>void;setLoop:(enabled:boolean)=>boolean;isEnabled:()=>boolean;
+ translateCues:(cues:CaptionCue[])=>false|Promise<void>;retry:()=>void;setLoop:(enabled:boolean)=>boolean;isEnabled:()=>boolean;canPrepare:()=>boolean;
  synchronizer:{isSyncEnabled:boolean;update:()=>void;triggerTranslation:(cues:CaptionCue[])=>false|Promise<void>};
 }
 export interface SubtitleBridgeConfig {isEnable?:string;hideTranslation?:string;styleConfig?:{displayOrder:string};subtitleStyle?:Partial<Settings['subtitleStyle']>;subtitleListOpen?:boolean;translationEnabled?:boolean}
