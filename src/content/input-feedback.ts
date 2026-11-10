@@ -12,20 +12,24 @@ import {batches,makeId,requestOptions,splitText,translationsOf} from './dom.js';
 import {resolveFeatureSettings} from '../shared/interactions.js';
 
 const spring='cubic-bezier(.34,1.56,.64,1)';
+const MIN_LOADING_MS=400;
 /** The dot reflects the request state even while collapsed; motion is dropped for reduced-motion users. */
 const TRIGGER_STYLE=[
   ':host{all:initial;--accent:#087e8b;--accent-2:#14b8a6;--ok:#16a34a;--bad:#dc2626}*{box-sizing:border-box}[hidden]{display:none!important}',
   'button{font:12px/1.4 system-ui,sans-serif;cursor:pointer;border:1px solid #5888c0;border-radius:5px;background:#fff;color:#173f71;padding:2px 5px;-webkit-tap-highlight-color:transparent}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}button:disabled{opacity:.5}',
-  `.trigger{position:relative;width:18px;height:18px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--accent);display:grid;place-items:center;animation:kuai-appear .32s ${spring} both}`,
-  `.trigger:not(.icon)::before{content:"";position:absolute;inset:1px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 8%,transparent);opacity:0;transform:scale(.4);transition:opacity .2s,transform .28s ${spring},border-color .2s}`,
-  `.trigger:empty::after{content:"";width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,var(--accent-2),var(--accent));box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--accent) 45%,transparent);transition:transform .28s ${spring},background .25s,box-shadow .25s}`,
+  '.trigger{position:relative;width:18px;height:18px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--accent);display:grid;place-items:center}',
+  `.trigger.entering{animation:kuai-appear .32s ${spring} both}`,
+  `.trigger:not(.icon)::before{content:"";position:absolute;inset:1px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 8%,transparent);opacity:0;transform:scale(.4);transition:opacity .2s,transform .28s ${spring},border-color .2s,background .2s}`,
+  `.trigger:not(.icon)::after{content:"";width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,var(--accent-2),var(--accent));box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--accent) 45%,transparent);transition:transform .28s ${spring},background .25s,box-shadow .25s}`,
   '.trigger:not(.icon):hover::before,.trigger:not(.icon):focus-visible::before,.trigger[aria-expanded=true]::before{opacity:1;transform:scale(1)}',
-  '.trigger:empty:hover::after{transform:scale(1.2)}.trigger[aria-expanded=true]:empty::after{transform:scale(.75)}.trigger:active::after{transform:scale(.6)}',
-  '.trigger[data-state=loading]::before{opacity:1;transform:scale(1);border-color:color-mix(in srgb,var(--accent) 18%,transparent);border-top-color:var(--accent);background:transparent;animation:kuai-spin .8s linear infinite}',
-  '.trigger[data-state=loading]:empty::after{animation:kuai-breathe 1.1s ease-in-out infinite}',
-  '.trigger[data-state=translated]::before{border-color:color-mix(in srgb,var(--ok) 40%,transparent);background:color-mix(in srgb,var(--ok) 8%,transparent)}.trigger[data-state=error]::before{border-color:color-mix(in srgb,var(--bad) 40%,transparent);background:color-mix(in srgb,var(--bad) 8%,transparent)}',
-  `.trigger[data-state=translated]:empty::after{background:var(--ok);box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--ok) 50%,transparent);animation:kuai-pop .4s ${spring}}`,
-  '.trigger[data-state=error]:empty::after{background:var(--bad);box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--bad) 50%,transparent)}.trigger[data-state=error]{animation:kuai-shake .4s ease-in-out}',
+  '.trigger:not(.icon):hover::after{transform:scale(1.2)}.trigger[aria-expanded=true]:not(.icon)::after{transform:scale(.75)}.trigger:active::after{transform:scale(.6)}',
+  '.trigger[data-state=loading]::before{opacity:1;transform:scale(1);border-color:color-mix(in srgb,var(--accent) 18%,transparent);background:transparent}',
+  '.spinner{position:absolute;inset:1px;border-radius:50%;border:1.5px solid transparent;border-top-color:var(--accent);pointer-events:none;opacity:0;animation:kuai-spin .8s linear infinite;transition:opacity .2s}.trigger[data-state=loading]>.spinner{opacity:1}',
+  '.trigger[data-state=loading]:not(.icon)::after{animation:kuai-breathe 1.1s ease-in-out infinite}.trigger.none[data-state=loading]::after{display:none}',
+  '[data-trigger-label]{display:none}.trigger.none[data-state=loading]>[data-trigger-label]{display:block}',
+  '.trigger[data-state=translated]::before{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 8%,transparent);animation:kuai-ring-done .6s ease-out}.trigger[data-state=error]::before{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent);animation:kuai-ring-done .6s ease-out}',
+  `.trigger[data-state=translated]:not(.icon)::after{background:var(--ok);box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--ok) 50%,transparent);animation:kuai-pop .4s ${spring}}`,
+  '.trigger[data-state=error]:not(.icon)::after{background:var(--bad);box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--bad) 50%,transparent)}.trigger[data-state=error]{animation:kuai-shake .4s ease-in-out}',
   '.trigger.icon{width:28px;height:28px;border-radius:8px;background:#fff;border:1px solid #e2e8f0;box-shadow:0 1px 2px rgb(15 23 42/.06),0 3px 10px rgb(15 23 42/.08);font-weight:600;transition:transform .2s,box-shadow .2s,color .2s}.trigger.icon:hover{transform:translateY(-1px);box-shadow:0 2px 4px rgb(15 23 42/.08),0 6px 16px rgb(15 23 42/.12)}',
   `.translate-action{--from:6px;position:absolute;right:calc(100% + 5px);bottom:-6px;display:grid;place-items:center;width:30px;height:30px;padding:0;background:rgb(255 255 255/.92);color:#475569;border:1px solid rgb(15 23 42/.08);border-radius:10px;box-shadow:0 1px 2px rgb(15 23 42/.06),0 6px 18px rgb(15 23 42/.14);backdrop-filter:blur(8px);transform-origin:var(--origin,right center);transition:opacity .18s,transform .3s ${spring},border-radius .3s ${spring},color .2s,background .2s,border-color .2s,box-shadow .2s,display .3s allow-discrete,overlay .3s allow-discrete}`,
   '.translate-action[data-side=right]{--from:-6px;--origin:left center}',
@@ -41,23 +45,26 @@ const TRIGGER_STYLE=[
   '@keyframes kuai-spin{to{transform:rotate(360deg)}}',
   '@keyframes kuai-appear{from{opacity:0;transform:scale(.4)}}',
   '@keyframes kuai-pop{0%{transform:scale(.3)}60%{transform:scale(1.35)}100%{transform:scale(1)}}',
+  '@keyframes kuai-ring-done{from{transform:scale(1);opacity:1}to{transform:scale(1.35);opacity:0}}',
   '@keyframes kuai-breathe{50%{transform:scale(.55);opacity:.6}}',
   '@keyframes kuai-shake{25%{transform:translateX(-2px)}50%{transform:translateX(2px)}75%{transform:translateX(-1px)}}',
-  '@media(prefers-reduced-motion:reduce){*,::before,::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.trigger[data-state=loading]::before{border-color:var(--accent)}}',
+  '@media(prefers-reduced-motion:reduce){*,::before,::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.trigger[data-state=loading]::before{border-color:var(--accent)}.trigger[data-state=loading]>.spinner{opacity:0}}',
 ].join('');
 
 /** Input requests and feedback deliberately have no selection-card ownership. */
 export function createInputFeedback({document,env,editor,translate,cancel,getSettings,options,allowed,key,labels,onState,makeRequestId=makeId}: InputFeedbackOptions){
   let generation=0,context: (InputContext & {element:EditorElement})|null=null,snapshot: InputSnapshot|null=null,pendingApply: (InputContext & {snapshot:InputSnapshot;text:string})|null=null,restoreContext: InputContext|null=null,trigger: HTMLDivElement|null=null,preview: HTMLDivElement|null=null,enabled=false,renderedElement: EditorElement|null=null,renderedConfig='',uiInteraction=false;
   let expanded=false;
+  let loadingSince: number|null=null,loadingTimer: number|null=null;
   let state={status:'idle',source:'',translation:'',message:'',reason:'input'};
   const pending=new Set<string>(),route=()=>env.location?.href||'';
   const append=<K extends keyof HTMLElementTagNameMap>(tag: K,parent: ParentNode,attribute?: string): HTMLElementTagNameMap[K]=>{const node=document.createElement(tag);if(attribute)node.setAttribute(attribute,'');parent.append(node);return node;};
   function preserve(button: HTMLButtonElement): void{for(const type of ['pointerdown','mousedown'] as const)button.addEventListener(type,event=>{if(event.button===0)event.preventDefault();});}
   function publish(){onState();render();}
   function canRestore(){return restoreContext?.url===route()&&restoreContext!.key===key()&&editor.canRestore();}
+  function clearLoading(){if(loadingTimer!==null)env.clearTimeout(loadingTimer);loadingTimer=null;loadingSince=null;}
   function reset(){
-    expanded=false;generation++;for(const id of pending){try{Promise.resolve(cancel(id)).catch(()=>{});}catch{}}pending.clear();
+    clearLoading();expanded=false;generation++;for(const id of pending){try{Promise.resolve(cancel(id)).catch(()=>{});}catch{}}pending.clear();
     editor.release(snapshot);snapshot=null;pendingApply=null;context=null;preview?.remove();preview=null;
     state={status:'idle',source:'',translation:'',message:'',reason:'input'};
   }
@@ -128,12 +135,21 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     const root=trigger.shadowRoot!,active=!context||context.element===renderedElement,button=root.querySelector<HTMLButtonElement>('[data-trigger]')!;
     const config=options(),restorable=active&&canRestore(),loading=active&&state.status==='loading',failed=active&&state.status==='error';
     const copyResult=active&&state.message===labels().changed&&!!state.translation;
-    button.textContent=config.icon==='dot'?'':loading?'…':config.icon==='icon'?'译':'';
+    const now=env.performance?.now?.()??Date.now(),reduced=env.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    let visualLoading=loading;
+    if(reduced||!active)clearLoading();
+    else if(loading){if(loadingSince===null)loadingSince=now;}
+    else if(loadingSince!==null&&(state.status==='success'||failed)&&now-loadingSince<MIN_LOADING_MS){
+      visualLoading=true;if(loadingTimer===null)loadingTimer=env.setTimeout(()=>{loadingTimer=null;sync();},MIN_LOADING_MS-(now-loadingSince));
+    }else clearLoading();
+    if(config.icon==='icon')button.textContent=visualLoading?'…':'译';
+    else{const label=button.querySelector<HTMLElement>('[data-trigger-label]');if(label)label.textContent=visualLoading?'…':'';}
     button.setAttribute('aria-expanded',String(expanded));button.title=labels().inputTrigger;
-    const translateButton=root.querySelector<HTMLButtonElement>('[data-translate]')!,mode=restorable?'translated':loading?'loading':failed?'error':copyResult?'copy':'idle';
-    button.setAttribute('data-state',mode);translateButton.hidden=!expanded;translateButton.setAttribute('data-state',mode);translateButton.setAttribute('aria-pressed',String(restorable));
-    const check=translateButton.querySelector<SVGElement>('[data-check]')!;if(restorable)check.removeAttribute('hidden');else check.setAttribute('hidden','');
-    const actionLabel=restorable?labels().restore:loading?labels().cancel:failed?labels().retry:copyResult?labels().copy:labels().inputTrigger+' ('+resolveFeatureSettings(getSettings(),'input').targetLanguage+')';
+    const translateButton=root.querySelector<HTMLButtonElement>('[data-translate]')!,mode=visualLoading?'loading':restorable?'translated':failed?'error':copyResult?'copy':'idle',showCheck=restorable&&!visualLoading;
+    if(mode==='error')button.className=button.className.replace(' entering','');
+    button.setAttribute('data-state',mode);translateButton.hidden=!expanded;translateButton.setAttribute('data-state',mode);translateButton.setAttribute('aria-pressed',String(showCheck));
+    const check=translateButton.querySelector<SVGElement>('[data-check]')!;if(showCheck)check.removeAttribute('hidden');else check.setAttribute('hidden','');
+    const actionLabel=visualLoading?labels().cancel:restorable?labels().restore:failed?labels().retry:copyResult?labels().copy:labels().inputTrigger+' ('+resolveFeatureSettings(getSettings(),'input').targetLanguage+')';
     translateButton.title=actionLabel;translateButton.setAttribute('aria-label',actionLabel);
     const box=root.querySelector<HTMLElement>('.feedback')!;box.hidden=config.icon==='dot'&&config.autoApply||!active||state.status==='idle';const status=box.querySelector<HTMLElement>('[role="status"]')!;status.title=state.message;status.textContent=state.status==='loading'?labels().loading:state.status==='error'?labels().failed:state.message===labels().changed?labels().copy:state.message;syncActions(root);
     if(preview){const output=preview.shadowRoot!.querySelector<HTMLElement>('[data-translation]')!;if(output.textContent!==state.translation)output.textContent=state.translation;preview.shadowRoot!.querySelector<HTMLElement>('[role="status"]')!.textContent=pendingApply&&!editor.valid(pendingApply.snapshot)?labels().changed:state.message;syncActions(preview.shadowRoot!);}
@@ -155,7 +171,7 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     const active=context?.element===element||!context,config=options(),configKey=JSON.stringify(config);
     if(config.icon==='none'&&(!active||state.status==='idle')&&!canRestore()){hide();return;}
     const wantsPreview=active&&!config.autoApply&&state.status!=='idle';
-    if(trigger&&renderedElement===element&&renderedConfig===configKey&&!!preview===wantsPreview){sync();return;}
+    if(trigger&&renderedElement===element&&renderedConfig===configKey){renderPreview(element!,wantsPreview);sync();return;}
     hide();renderedElement=element;renderedConfig=configKey;
     const host=document.createElement('div');host.id='kuai-input-trigger';host.setAttribute('data-kuai-owned','');host.setAttribute('data-kuai-ui','');
     const shadow=host.attachShadow({mode:'open'}),style=append('style',shadow);
@@ -167,22 +183,27 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
       if(context?.element===renderedElement&&state.message===labels().changed&&state.translation){void env.navigator?.clipboard?.writeText(state.translation).catch(()=>{});return;}
       void run().catch(()=>{});
     });translateButton.className='translate-action';translateButton.textContent='';appendIcon(document,translateButton,'translate');const check=appendIcon(document,translateButton,'check');check.setAttribute('data-check','');check.setAttribute('class','completion-check');check.setAttribute('hidden','');
-    const icon=config.icon==='icon';button.className='trigger'+(icon?' icon':'');button.textContent=state.status==='loading'&&active?'…':icon?'译':'•';button.title=active&&state.message||labels().inputTrigger;button.setAttribute('tabindex','0');
+    const icon=config.icon==='icon';button.className='trigger'+(icon?' icon':config.icon==='none'?' none':'')+' entering';button.textContent=icon?'译':'';button.title=active&&state.message||labels().inputTrigger;button.setAttribute('tabindex','0');
+    button.addEventListener('animationend',event=>{if(event.target===button&&event.animationName==='kuai-appear')button.className=button.className.replace(' entering','');});
+    if(!icon){const spinner=append('span',button);spinner.className='spinner';spinner.setAttribute('aria-hidden','true');if(config.icon==='none')append('span',button,'data-trigger-label');}
     {
       const feedback=append('div',shadow);feedback.className='feedback';const status=append('span',feedback);status.className='status';status.setAttribute('role','status');status.title=state.message;status.textContent=state.status==='loading'?labels().loading:state.status==='error'?labels().failed:state.message===labels().changed?labels().copy:state.message;actions(feedback);
     }
     const rect=element!.getBoundingClientRect(),size=Math.max(1,Math.min(icon?28:18,rect.width||rect.right-rect.left,rect.height||rect.bottom-rect.top));button.style.width=size+'px';button.style.height=size+'px';
     position(host,rect,size);document.documentElement.append(host);trigger=host;
-    if(active&&!config.autoApply&&state.status!=='idle'){
+    renderPreview(element!,wantsPreview);sync();
+  }
+  function renderPreview(element: EditorElement,wantsPreview: boolean){
+    if(!wantsPreview){preview?.remove();preview=null;return;}
+    if(!preview){
       preview=document.createElement('div');preview.id='kuai-input-preview';preview.setAttribute('data-kuai-owned','');preview.setAttribute('data-kuai-ui','');
       const root=preview.attachShadow({mode:'open'}),style=append('style',root);style.textContent='section{box-sizing:border-box;max-width:400px;max-height:50vh;overflow:auto;padding:12px;border:1px solid #bbc5d6;border-radius:10px;background:white;color:#172033;font:14px/1.6 system-ui,sans-serif;box-shadow:0 6px 30px #0003}div{white-space:pre-wrap;overflow-wrap:anywhere}button{margin:4px}';
       const section=append('section',root);section.setAttribute('role','dialog');section.setAttribute('aria-label',labels().inputTrigger);
       action(section,'close',labels().close,cancelCurrent);const output=append('div',section,'data-translation');output.textContent=state.translation;const message=append('div',section);message.setAttribute('role','status');message.textContent=state.message;actions(section);
       position(preview,element!.getBoundingClientRect(),28);preview.style.left=Math.max(4,Math.min((env.innerWidth||1200)-420,element!.getBoundingClientRect().left||4))+'px';preview.style.top=Math.max(4,Math.min((env.innerHeight||800)-200,element!.getBoundingClientRect().bottom+8))+'px';document.documentElement.append(preview);
     }
-    sync();
   }
-  function hide(){expanded=false;trigger?.remove();trigger=null;preview?.remove();preview=null;uiInteraction=false;}
+  function hide(){clearLoading();expanded=false;trigger?.remove();trigger=null;preview?.remove();preview=null;uiInteraction=false;}
   function update(){if(context&&(context.url!==route()||context.key!==key()))reset();if(restoreContext&&(restoreContext.url!==route()||restoreContext.key!==key()))restoreContext=null;render();}
-  return {run,restore,apply,canRestore,render,update,cancelCurrent,focusin(event: Event){if(!owns(event.composedPath?.()[0]||event.target))uiInteraction=false;render(true);},pointerdown(event: Event){uiInteraction=owns(event.composedPath?.()[0]||event.target);if(!uiInteraction){expanded=false;sync();}},getState:()=>({...state}),start(){enabled=true;render();},hide,stop(){enabled=false;reset();trigger?.remove();trigger=null;}};
+  return {run,restore,apply,canRestore,render,update,cancelCurrent,focusin(event: Event){if(!owns(event.composedPath?.()[0]||event.target))uiInteraction=false;render(true);},pointerdown(event: Event){uiInteraction=owns(event.composedPath?.()[0]||event.target);if(!uiInteraction){expanded=false;sync();}},getState:()=>({...state}),start(){enabled=true;render();},hide,stop(){enabled=false;reset();hide();}};
 }
