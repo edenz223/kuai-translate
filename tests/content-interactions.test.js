@@ -332,7 +332,7 @@ test('expanded icon translates, shows a check and restores without a second requ
  const root=()=>h.doc.getElementById('kuai-input-trigger').shadowRoot;
  h.emit(root().querySelector('[data-trigger]'),'click');const action=root().querySelector('[data-translate]');
  assert.equal(action.getAttribute('data-state'),'idle');h.emit(action,'pointerdown');h.emit(action,'click');await settleOptions();
- assert.equal(input.value,'Keep 你好 tail');assert.equal(action.hidden,false);assert.equal(action.getAttribute('data-state'),'translated');
+ assert.equal(input.value,'Keep 你好 tail');assert.equal(action.hidden,false);assert.equal(action.getAttribute('data-state'),'loading');assert.equal(action.querySelector('[data-check]').hasAttribute('hidden'),true);h.advance(400);assert.equal(action.getAttribute('data-state'),'translated');
  assert.equal(action.querySelector('[data-check]').hasAttribute('hidden'),false);assert.equal(root().querySelector('.feedback').hidden,true);
  h.emit(action,'pointerdown');h.emit(action,'click');await settleOptions();
  assert.equal(input.value,'Keep hello tail');assert.equal(h.requests.length,1);assert.equal(action.getAttribute('data-state'),'idle');
@@ -346,16 +346,73 @@ test('icon loading and errors remain silent and support cancel and retry',async(
  assert.equal(action.hidden,false);assert.equal(action.getAttribute('data-state'),'loading');assert.equal(root.querySelector('.feedback').hidden,true);
  h.emit(action,'click');finish({translations:['late']});await settleOptions();assert.equal(input.value,'Keep hello tail');
  h.respond(async()=>{throw Error('offline');});h.emit(root.querySelector('[data-trigger]'),'click');h.emit(action,'click');await settleOptions();
- assert.equal(action.getAttribute('data-state'),'error');assert.equal(root.querySelector('.feedback').hidden,true);
- h.respond(async()=>({translations:['done']}));h.emit(action,'click');await settleOptions();assert.equal(input.value,'Keep done tail');assert.equal(action.getAttribute('data-state'),'translated');ui.stop();
+ assert.equal(action.getAttribute('data-state'),'loading');h.advance(400);assert.equal(action.getAttribute('data-state'),'error');assert.equal(root.querySelector('.feedback').hidden,true);
+ h.respond(async()=>({translations:['done']}));h.emit(action,'click');await settleOptions();assert.equal(input.value,'Keep done tail');h.advance(400);assert.equal(action.getAttribute('data-state'),'translated');ui.stop();
 });
 
 test('the collapsed dot carries the request state so progress is visible without expanding',async()=>{
  const h=fixture(),input=field(h);h.settings.inputOptions={icon:'dot'};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));
  const ui=createInteractions(h.dependencies).start();h.emit(input,'focusin');
  const dot=()=>h.doc.getElementById('kuai-input-trigger').shadowRoot.querySelector('[data-trigger]');
- assert.equal(dot().getAttribute('data-state'),'idle');
- const task=ui.translateInput();await settleOptions();assert.equal(dot().getAttribute('data-state'),'loading');
- finish({translations:['你好']});await task;await settleOptions();assert.equal(dot().getAttribute('data-state'),'translated');
+ const spinner=dot().querySelector('.spinner');assert.ok(spinner);assert.equal(spinner.getAttribute('aria-hidden'),'true');assert.equal(dot().getAttribute('data-state'),'idle');
+ const task=ui.translateInput();await settleOptions();assert.equal(dot().getAttribute('data-state'),'loading');assert.equal(dot().querySelector('.spinner'),spinner);
+ finish({translations:['你好']});assert.equal((await task).applied,true);assert.equal(input.value,'Keep 你好 tail');assert.equal(ui.getState().status,'success');assert.equal(dot().getAttribute('data-state'),'loading');assert.equal(h.timerCount(),1);
+ h.advance(399);h.emit(h.env,'resize');assert.equal(dot().getAttribute('data-state'),'loading');assert.equal(h.timerCount(),1);h.advance(1);assert.equal(dot().getAttribute('data-state'),'translated');assert.equal(dot().querySelector('.spinner'),spinner);assert.equal(h.timerCount(),0);
  ui.stop();
+});
+
+test('slow input responses finish the visual loading state without another wait',async()=>{
+ const h=fixture();field(h);let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),dot=feedback(h,'trigger');
+ const task=ui.translateInput();assert.equal(dot.getAttribute('data-state'),'loading');h.advance(450);assert.equal(h.timerCount(),0);finish({translations:['你好']});await task;
+ assert.equal(dot.getAttribute('data-state'),'translated');assert.equal(h.timerCount(),0);ui.stop();
+});
+
+test('cancelling input loading resets the dot immediately and ignores late responses',async()=>{
+ const h=fixture(),input=field(h);let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),dot=feedback(h,'trigger');
+ const task=ui.translateInput();h.advance(100);h.emit(dot,'click');assert.equal(dot.getAttribute('data-state'),'idle');assert.equal(h.timerCount(),0);assert.deepEqual(h.cancellations,['request-1']);
+ finish({translations:['Late']});assert.deepEqual(await task,{cancelled:true});h.advance(500);assert.equal(dot.getAttribute('data-state'),'idle');assert.equal(input.value,'Keep hello tail');assert.equal(h.timerCount(),0);ui.stop();
+});
+
+test('reduced motion input feedback has no minimum loading hold',async()=>{
+ const h=fixture(),input=field(h);h.env.matchMedia=query=>({matches:query==='(prefers-reduced-motion: reduce)'});const ui=createInteractions(h.dependencies).start(),dot=feedback(h,'trigger');
+ assert.equal((await ui.translateInput()).applied,true);assert.equal(input.value,'Keep 你好 tail');assert.equal(dot.getAttribute('data-state'),'translated');assert.equal(h.timerCount(),0);
+ ui.restoreInput();h.respond(async()=>{throw Error('offline');});await assert.rejects(ui.translateInput(),/offline/);assert.equal(dot.getAttribute('data-state'),'error');assert.equal(h.timerCount(),0);ui.stop();
+});
+
+test('input preview presence changes preserve the trigger host and reveal results during the visual hold',async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={autoApply:false,icon:'dot'};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),host=h.doc.getElementById('kuai-input-trigger'),dot=feedback(h,'trigger');
+ assert.equal(h.doc.getElementById('kuai-input-preview'),null);const task=ui.translateInput();assert.equal(h.doc.getElementById('kuai-input-trigger'),host);assert.equal(dot.getAttribute('data-state'),'loading');const preview=h.doc.getElementById('kuai-input-preview');assert.ok(preview);
+ finish({translations:['你好']});assert.equal((await task).applied,false);assert.equal(h.doc.getElementById('kuai-input-trigger'),host);assert.equal(h.doc.getElementById('kuai-input-preview'),preview);assert.equal(input.value,'Keep hello tail');assert.equal(ui.getState().status,'success');assert.equal(preview.shadowRoot.querySelector('[data-translation]').textContent,'你好');assert.equal(preview.shadowRoot.querySelector('[data-apply]').hidden,false);assert.equal(dot.getAttribute('data-state'),'loading');assert.doesNotMatch(host.shadowRoot.querySelector('[role="status"]').textContent,/Translating|翻译中/);
+ h.advance(400);assert.equal(dot.getAttribute('data-state'),'idle');h.emit(preview.shadowRoot.querySelector('[data-close]'),'click');assert.equal(h.doc.getElementById('kuai-input-preview'),null);assert.equal(h.doc.getElementById('kuai-input-trigger'),host);assert.equal(dot.getAttribute('data-state'),'idle');ui.stop();
+});
+
+test('the icon trigger keeps its text and feedback updates while its visual loading state is held',async()=>{
+ const h=fixture();field(h);h.settings.inputOptions={icon:'icon'};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),button=feedback(h,'trigger'),root=h.doc.getElementById('kuai-input-trigger').shadowRoot;
+ assert.equal(button.textContent,'译');assert.equal(button.querySelector('.spinner'),null);const task=ui.translateInput();assert.equal(button.textContent,'…');finish({translations:['你好']});await task;assert.equal(button.textContent,'…');assert.equal(button.getAttribute('data-state'),'loading');assert.equal(feedback(h,'restore').hidden,false);assert.doesNotMatch(root.querySelector('[role="status"]').textContent,/Translating|翻译中/);
+ h.advance(400);assert.equal(button.textContent,'译');assert.equal(button.getAttribute('data-state'),'translated');ui.stop();
+});
+
+test('the none option keeps its loading ellipsis and spinner without an idle trigger',async()=>{
+ const h=fixture();field(h);h.settings.inputOptions={icon:'none'};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start();assert.equal(h.doc.getElementById('kuai-input-trigger'),null);
+ const task=ui.translateInput(),button=feedback(h,'trigger'),spinner=button.querySelector('.spinner');assert.ok(spinner);assert.equal(button.textContent,'…');finish({translations:['你好']});await task;assert.equal(button.textContent,'…');h.advance(400);assert.equal(button.textContent,'');assert.equal(button.querySelector('.spinner'),spinner);assert.equal(button.getAttribute('data-state'),'translated');ui.stop();
+});
+
+for(const cause of ['cancel','route','provider','hide','stop'])test('a pending input visual loading timer is cleared on '+cause,async()=>{
+ const h=fixture();field(h);const ui=createInteractions(h.dependencies).start(),button=feedback(h,'trigger');await ui.translateInput();assert.equal(button.getAttribute('data-state'),'loading');assert.equal(h.timerCount(),1);
+ if(cause==='cancel')ui.cancelCurrent();
+ if(cause==='route'){h.env.location.href='https://example.org/next';ui.updateSettings();}
+ if(cause==='provider'){h.settings.activeProviderId='google';ui.updateSettings();}
+ if(cause==='hide')h.emit(h.env,'blur');
+ if(cause==='stop')ui.stop();
+ assert.equal(h.timerCount(),0);const state=button.getAttribute('data-state');h.advance(500);assert.equal(button.getAttribute('data-state'),state);if(['cancel','route','provider'].includes(cause)){assert.equal(ui.getState().status,'idle');assert.equal(feedback(h,'trigger').getAttribute('data-state'),cause==='cancel'?'translated':'idle');}ui.stop();
+});
+
+test('input errors clear the entrance class so it cannot replay when the shake ends',async()=>{
+ const h=fixture();field(h);const ui=createInteractions(h.dependencies).start(),button=feedback(h,'trigger');assert.match(button.className,/ entering/);
+ h.respond(async()=>{throw Error('offline');});await assert.rejects(ui.translateInput(),/offline/);assert.equal(ui.getState().status,'error');assert.equal(button.getAttribute('data-state'),'loading');assert.equal(feedback(h,'retry').hidden,false);h.advance(400);assert.equal(button.getAttribute('data-state'),'error');assert.doesNotMatch(button.className,/ entering/);
+ ui.cancelCurrent();assert.equal(button.getAttribute('data-state'),'idle');assert.doesNotMatch(button.className,/ entering/);ui.stop();
+});
+
+test('the trigger entrance class is removed when its entrance animation ends',()=>{
+ const h=fixture();field(h);const ui=createInteractions(h.dependencies).start(),button=feedback(h,'trigger');assert.match(button.className,/ entering/);h.emit(button,'animationend',{animationName:'kuai-appear'});assert.doesNotMatch(button.className,/ entering/);h.emit(h.env,'resize');assert.doesNotMatch(button.className,/ entering/);ui.stop();
 });
