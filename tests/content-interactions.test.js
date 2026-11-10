@@ -416,3 +416,121 @@ test('input errors clear the entrance class so it cannot replay when the shake e
 test('the trigger entrance class is removed when its entrance animation ends',()=>{
  const h=fixture();field(h);const ui=createInteractions(h.dependencies).start(),button=feedback(h,'trigger');assert.match(button.className,/ entering/);h.emit(button,'animationend',{animationName:'kuai-appear'});assert.doesNotMatch(button.className,/ entering/);h.emit(h.env,'resize');assert.doesNotMatch(button.className,/ entering/);ui.stop();
 });
+
+const bounds=(left,top,width,height)=>({left,top,right:left+width,bottom:top+height,width,height});
+function trackingFixture(){
+ const h=fixture(),observers=[];h.env.ResizeObserver=class{constructor(callback){this.callback=callback;this.targets=new Set();observers.push(this);}observe(node){this.targets.add(node);}disconnect(){this.targets.clear();}};
+ h.env.visualViewport=new h.env.constructor();Object.assign(h.env.visualViewport,{offsetLeft:0,offsetTop:0,width:1200,height:800});
+ return Object.assign(h,{observers,host:()=>h.doc.getElementById('kuai-input-trigger')});
+}
+
+test('input tracking observes editor and clipping containers and coalesces resize callbacks',()=>{
+ const h=trackingFixture(),input=field(h),wrapper=h.paragraph('','div');wrapper.style.overflow='auto';wrapper._rect=bounds(50,20,500,300);wrapper.append(input);input._rect=bounds(100,50,300,100);
+ const ui=createInteractions(h.dependencies).start(),observer=h.observers[0];assert.deepEqual([...observer.targets],[input,wrapper]);h.advance(1008);assert.equal(h.frameCount(),0);
+ input._rect=bounds(100,50,400,200);observer.callback();observer.callback();assert.equal(h.frameCount(),1);assert.equal(h.host().style.left,'358px');h.advance(16);assert.equal(h.host().style.left,'458px');assert.equal(h.host().style.top,'224px');ui.stop();
+});
+
+test('the focus frame check follows moving rects and stops after one second',()=>{
+ const h=fixture(),input=field(h);input._rect=bounds(100,50,150,60);const ui=createInteractions(h.dependencies).start(),host=h.doc.getElementById('kuai-input-trigger');h.advance(16);
+ let layouts=0;const measure=host.getBoundingClientRect.bind(host);host.getBoundingClientRect=()=>{layouts++;return measure();};h.advance(32);assert.equal(layouts,0);
+ input._rect=bounds(120,50,400,60);h.advance(16);assert.equal(host.style.left,'478px');assert.equal(layouts,1);h.advance(1000);assert.equal(h.frameCount(),0);
+ input._rect=bounds(140,50,400,60);h.emit(input,'transitionend');h.emit(input,'animationend');assert.equal(h.frameCount(),1);h.advance(16);assert.equal(host.style.left,'498px');ui.stop();
+});
+
+test('input capture schedules a measurement after the page autosizes the textarea',()=>{
+ const h=fixture(),input=field(h);input._rect=bounds(100,50,300,60);const ui=createInteractions(h.dependencies).start(),host=h.doc.getElementById('kuai-input-trigger');h.advance(1008);
+ input.addEventListener('input',()=>{input._rect=bounds(100,50,300,180);});h.emit(input,'input');assert.equal(host.style.top,'84px');h.advance(16);assert.equal(host.style.top,'204px');ui.stop();
+});
+
+test('a tall rich editor anchors inside its visible scroll container',()=>{
+ const h=trackingFixture(),wrapper=h.paragraph('','div'),input=h.doc.createElement('div');wrapper._rect=bounds(100,50,300,120);wrapper.style.overflow='auto';input.setAttribute('contenteditable','true');input._rect=bounds(100,50,300,900);wrapper.append(input);input.focus();
+ const ui=createInteractions(h.dependencies).start();assert.equal(h.host().style.left,'358px');assert.equal(h.host().style.top,'144px');assert.equal(h.host().style.visibility,'visible');assert.ok(h.observers[0].targets.has(wrapper));ui.stop();
+});
+
+test('clipping excludes container borders and scrollbars at the rendered scale',()=>{
+ for(const scale of [1,1.25]){
+  const h=trackingFixture(),input=field(h),wrapper=h.paragraph('','div');wrapper.style.overflow='scroll';wrapper._rect=bounds(100,50,400*scale,120*scale);Object.assign(wrapper,{offsetWidth:400,offsetHeight:120,clientLeft:2,clientTop:2,clientWidth:381,clientHeight:101});wrapper.append(input);input._rect=bounds(100,50,400*scale,900*scale);
+  const ui=createInteractions(h.dependencies).start();assert.equal(h.host().style.visibility,'visible');assert.equal(h.host().style.left,(100+383*scale-42)+'px');assert.equal(h.host().style.top,(50+103*scale-26)+'px');assert.deepEqual([...h.observers[0].targets],[input,wrapper]);ui.stop();
+ }
+});
+
+test('clipped inputs hide without losing their host and reappear after scrolling back',()=>{
+ const h=trackingFixture(),input=field(h),wrapper=h.paragraph('','div');wrapper._rect=bounds(100,50,300,120);wrapper.style.overflow='auto';wrapper.append(input);input._rect=bounds(100,140,300,60);
+ const ui=createInteractions(h.dependencies).start(),host=h.host();assert.equal(host.style.top,'144px');assert.equal(host.style.visibility,'visible');
+ for(const rect of [bounds(100,160,300,60),bounds(100,180,300,60),bounds(100,-100,300,60)]){input._rect=rect;h.emit(wrapper,'scroll');h.advance(16);assert.equal(host.style.visibility,'hidden');assert.equal(h.host(),host);}
+ input._rect=bounds(100,50,300,60);h.emit(wrapper,'scroll');h.advance(16);assert.equal(host.style.visibility,'visible');assert.equal(host.style.top,'84px');ui.stop();
+});
+
+test('viewport clipping hides fully offscreen inputs and uses visual viewport offsets',()=>{
+ const h=trackingFixture(),input=field(h);input._rect=bounds(100,200,300,60);const ui=createInteractions(h.dependencies).start(),host=h.host();h.advance(1008);
+ Object.assign(h.env.visualViewport,{offsetLeft:120,offsetTop:210,width:250,height:40});h.emit(h.env.visualViewport,'resize');h.emit(h.env.visualViewport,'scroll');assert.equal(h.frameCount(),1);h.advance(16);assert.equal(host.style.left,'328px');assert.equal(host.style.top,'224px');
+ input._rect=bounds(100,900,300,60);h.emit(h.doc,'scroll');assert.equal(host.style.visibility,'hidden');input._rect=bounds(100,200,300,60);h.emit(h.doc,'scroll');assert.equal(host.style.visibility,'visible');ui.stop();
+});
+
+test('clipping follows ancestors across shadow roots and respects each overflow axis',()=>{
+ const h=fixture(),wrapper=h.paragraph('','div'),shadow=wrapper.attachShadow({mode:'open'}),input=h.doc.createElement('textarea');wrapper.style.overflowY='hidden';wrapper.style.overflowX='visible';wrapper._rect=bounds(100,50,100,120);input._rect=bounds(80,50,300,900);shadow.append(input);input.focus();
+ const ui=createInteractions(h.dependencies).start(),host=h.doc.getElementById('kuai-input-trigger');assert.equal(host.style.left,'338px');assert.equal(host.style.top,'144px');ui.stop();
+});
+
+for(const overflow of ['visible','hidden'])test('fixed bottom composers escape body overflow when html overflow is '+overflow,()=>{
+ const h=trackingFixture(),input=field(h);h.doc.documentElement.style.overflow=overflow;h.doc.body.style.overflowX='hidden';h.doc.body.style.overflowY='auto';h.doc.body._rect=bounds(0,0,1200,200);input.style.position='fixed';input._rect=bounds(100,720,400,40);
+ const ui=createInteractions(h.dependencies).start();assert.equal(h.host().style.visibility,'visible');assert.equal(h.host().style.left,'458px');assert.equal(h.host().style.top,'734px');assert.deepEqual([...h.observers[0].targets],[input]);ui.stop();
+});
+
+for(const overflow of ['visible','hidden'])test('body overflow '+(overflow==='visible'?'propagates to the viewport':'clips in-flow inputs')+' with html overflow '+overflow,()=>{
+ const h=trackingFixture(),input=field(h);h.doc.documentElement.style.overflow=overflow;h.doc.documentElement._rect=bounds(0,0,10,10);h.doc.body.style.overflowX='hidden';h.doc.body.style.overflowY='auto';h.doc.body._rect=bounds(0,0,1200,200);input._rect=bounds(100,720,400,40);
+ const ui=createInteractions(h.dependencies).start();assert.equal(h.host().style.visibility,overflow==='visible'?'visible':'hidden');assert.deepEqual([...h.observers[0].targets],overflow==='visible'?[input]:[input,h.doc.body]);ui.stop();
+});
+
+test('fixed inputs escape tiny overflow ancestors that do not establish a containing block',()=>{
+ const h=trackingFixture(),input=field(h),wrapper=h.paragraph('','div');wrapper.style.overflow='hidden';wrapper.style.position='relative';wrapper._rect=bounds(0,0,10,10);wrapper.append(input);input.style.position='fixed';input._rect=bounds(100,300,400,40);
+ const ui=createInteractions(h.dependencies).start();assert.equal(h.host().style.visibility,'visible');assert.equal(h.host().style.left,'458px');assert.equal(h.host().style.top,'314px');assert.deepEqual([...h.observers[0].targets],[input]);ui.stop();
+});
+
+for(const [property,value]of [['transform','translateX(0)'],['perspective','100px'],['filter','blur(0)'],['backdropFilter','blur(0)'],['contain','paint'],['contain','layout'],['contain','strict'],['contain','content'],['willChange','transform'],['willChange','perspective'],['willChange','filter']])test('fixed inputs are clipped by their '+property+':'+value+' containing block',()=>{
+ const h=trackingFixture(),input=field(h),wrapper=h.paragraph('','div');wrapper.style.overflow='hidden';wrapper.style[property]=value;wrapper._rect=bounds(0,0,10,10);wrapper.append(input);input.style.position='fixed';input._rect=bounds(100,300,400,40);
+ const ui=createInteractions(h.dependencies).start();assert.equal(h.host().style.visibility,'hidden');assert.deepEqual([...h.observers[0].targets],[input,wrapper]);ui.stop();
+});
+
+test('absolute inputs escape non-positioned overflow wrappers before their containing block',()=>{
+ const h=trackingFixture(),input=field(h),outer=h.paragraph('','div'),wrapper=h.doc.createElement('div');outer.style.position='relative';outer.style.overflow='auto';outer._rect=bounds(50,200,600,200);wrapper.style.overflow='hidden';wrapper._rect=bounds(0,0,10,10);outer.append(wrapper);wrapper.append(input);input.style.position='absolute';input._rect=bounds(100,300,400,40);
+ const ui=createInteractions(h.dependencies).start();assert.equal(h.host().style.visibility,'visible');assert.equal(h.host().style.left,'458px');assert.equal(h.host().style.top,'314px');assert.deepEqual([...h.observers[0].targets],[input,outer]);outer._rect=bounds(0,0,10,10);h.observers[0].callback();h.advance(16);assert.equal(h.host().style.visibility,'hidden');ui.stop();
+});
+
+test('clipping resumes with the containing block position and observes only active containers',()=>{
+ const h=trackingFixture(),input=field(h),outer=h.paragraph('','div'),wrapper=h.doc.createElement('div');outer.style.overflow='clip';outer._rect=bounds(0,0,10,10);wrapper.style.transform='translateX(0)';wrapper._rect=bounds(50,200,600,200);outer.append(wrapper);wrapper.append(input);input.style.position='fixed';input._rect=bounds(100,300,400,40);
+ const ui=createInteractions(h.dependencies).start();assert.equal(h.host().style.visibility,'hidden');assert.deepEqual([...h.observers[0].targets],[input,outer]);wrapper.style.position='fixed';h.emit(h.env,'resize');assert.equal(h.host().style.visibility,'visible');assert.deepEqual([...h.observers[0].targets],[input]);ui.stop();
+});
+
+test('display contents ancestors provide neither clipping boxes nor containing blocks',()=>{
+ for(const position of ['static','absolute','fixed']){
+  const h=trackingFixture(),input=field(h),wrapper=h.paragraph('','div');wrapper.style.display='contents';wrapper.style.overflow='hidden';wrapper.style.position='relative';wrapper.style.transform='translateX(0)';wrapper._rect=bounds(0,0,0,0);wrapper.append(input);input.style.position=position;input._rect=bounds(100,300,400,40);
+  const ui=createInteractions(h.dependencies).start();assert.equal(h.host().style.visibility,'visible');assert.equal(h.host().style.left,'458px');assert.deepEqual([...h.observers[0].targets],[input]);ui.stop();
+ }
+});
+
+test('fixed host compensation corrects offsets and zoom without changing action side',()=>{
+ for(const scale of [1,1.25]){
+  const h=fixture(),input=field(h);input._rect=bounds(10,50,300,100);const create=h.doc.createElement;h.doc.createElement=tag=>{const node=create(tag),measure=node.getBoundingClientRect.bind(node);node.getBoundingClientRect=()=>{const rect=measure();return node.id==='kuai-input-trigger'?bounds(rect.left*scale+400,rect.top*scale-70,rect.width*scale,rect.height*scale):rect;};Object.defineProperties(node,{offsetWidth:{get:()=>parseFloat(node.style.width)||300},offsetHeight:{get:()=>parseFloat(node.style.height)||30}});return node;};
+  const ui=createInteractions(h.dependencies).start(),host=h.doc.getElementById('kuai-input-trigger'),rect=host.getBoundingClientRect();assert.equal(rect.left,268);assert.equal(rect.top,124);assert.equal(feedback(h,'translate').getAttribute('data-side'),'left');ui.stop();
+ }
+});
+
+test('preview and feedback follow the visible anchor and compensate fixed offsets',async()=>{
+ const h=trackingFixture(),input=field(h);h.settings.inputOptions={autoApply:false,icon:'icon'};input._rect=bounds(100,150,300,100);
+ const create=h.doc.createElement;h.doc.createElement=tag=>{const node=create(tag),measure=node.getBoundingClientRect.bind(node);node.getBoundingClientRect=()=>{const rect=measure();return node.id==='kuai-input-preview'||node.className==='feedback'?bounds(rect.left+80,rect.top-40,rect.width,rect.height):rect;};return node;};
+ const ui=createInteractions(h.dependencies).start();await ui.translateInput();const preview=h.doc.getElementById('kuai-input-preview'),box=h.host().shadowRoot.querySelector('.feedback');assert.equal(preview.getBoundingClientRect().left,100);assert.equal(preview.getBoundingClientRect().top,258);assert.equal(box.getBoundingClientRect().top,180);
+ input._rect=bounds(150,200,300,200);h.observers[0].callback();h.advance(16);assert.equal(preview.getBoundingClientRect().left,150);assert.equal(preview.getBoundingClientRect().top,408);assert.equal(box.getBoundingClientRect().top,330);ui.stop();
+});
+
+for(const cause of ['hide','stop'])test('input tracking tears down observers, listeners and queued frames on '+cause,()=>{
+ const h=trackingFixture(),input=field(h);input._rect=bounds(100,50,300,100);const callbacks=[],request=h.env.requestAnimationFrame;h.env.requestAnimationFrame=fn=>{callbacks.push(fn);return request(fn);};
+ const ui=createInteractions(h.dependencies).start(),host=h.host(),observer=h.observers[0];observer.callback();assert.equal(h.frameCount(),1);
+ if(cause==='hide')h.emit(h.env,'blur');else ui.stop();const previous=host.style.left;assert.equal(h.host(),null);assert.equal(observer.targets.size,0);assert.equal(h.frameCount(),0);assert.equal(h.timerCount(),0);
+ for(const [target,types]of [[h.doc,['transitionend','animationend']],[h.env.visualViewport,['resize','scroll']]])for(const type of types)assert.equal(target.listeners.get(type)?.length||0,0);
+ input._rect=bounds(200,50,300,100);observer.callback();for(const callback of callbacks)callback();h.emit(input,'transitionend');h.emit(h.env.visualViewport,'resize');h.advance(2000);assert.equal(host.style.left,previous);assert.equal(h.frameCount(),0);assert.equal(h.timerCount(),0);ui.stop();
+});
+
+test('input tracking falls back to a cancellable timer without optional browser APIs',()=>{
+ const h=fixture();field(h);delete h.env.requestAnimationFrame;delete h.env.cancelAnimationFrame;const ui=createInteractions(h.dependencies).start();assert.equal(h.timerCount(),1);h.advance(16);assert.equal(h.timerCount(),1);h.emit(h.env,'blur');assert.equal(h.timerCount(),0);h.advance(2000);assert.equal(h.doc.getElementById('kuai-input-trigger'),null);ui.stop();
+});
