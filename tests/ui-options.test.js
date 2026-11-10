@@ -497,6 +497,11 @@ test('provider add, edit and remove preserve independent instances', async () =>
   const editor=createSettingsEditor({load:async()=>initial(),save:async value=>value,idFactory:()=>`instance-${++index}`});
   await editor.load();
   const id=await editor.addProvider('openai');
+  assert.equal(editor.get().providers[1].model,'gpt-4.1-mini');
+  const gemini=await editor.addProvider('gemini'),ollama=await editor.addProvider('ollama');
+  assert.equal(editor.get().providers.find(item=>item.id===gemini).model,'gemini-flash-lite-latest');
+  assert.equal(editor.get().providers.find(item=>item.id===ollama).model,'');
+  await editor.removeProvider(gemini);await editor.removeProvider(ollama);
   await editor.patchProvider(id,{name:'Second',model:'custom-second'});
   assert.equal(editor.get().providers[0].model,'old');
   assert.equal(editor.get().providers[1].model,'custom-second');

@@ -18,6 +18,8 @@ export const APP_NAME = 'Kuai translate';
 export const PROMPT_LIMIT = 8000;
 export const SETTINGS_KEY = 'kuai.settings.v1';
 export const PROVIDER_TYPES = Object.freeze(['microsoft','google','transmart','yandex','openai','gemini','anthropic','azure','deepl','deeplx','ollama']);
+/** Prefilled when a provider is added: fast, inexpensive models that suit translation. Aliases track the newest release. */
+export const DEFAULT_MODELS: Readonly<Record<string,string>> = Object.freeze({openai:'gpt-4.1-mini',gemini:'gemini-flash-lite-latest',anthropic:'claude-haiku-5-5'});
 export const FREE_PROVIDERS = Object.freeze([
   ['microsoft','微软翻译'], ['google','谷歌翻译'], ['transmart','腾讯 Transmart'], ['yandex','Yandex'],
 ].map(([id,name]) => Object.freeze({id,name,type:id,enabled:true,baseUrl:'',apiKey:'',model:'',region:'',temperature:0.2,systemPrompt:'',userPrompt:''})));

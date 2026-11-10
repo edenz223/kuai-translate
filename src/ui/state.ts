@@ -1,4 +1,4 @@
-import type {Provider, Settings} from '../shared/settings.js';
+import {DEFAULT_MODELS, type Provider, type Settings} from '../shared/settings.js';
 
 export interface EditorStatus { revision: number; saving: boolean; error: unknown; }
 export type SettingsChange = (settings: Settings) => void;
@@ -86,7 +86,7 @@ export function createSettingsEditor({load, save, normalize = structuredClone as
     async addProvider(type, name) {
       if (!['openai','gemini','anthropic','azure','deepl','deeplx','ollama'].includes(type)) throw new Error('不支持的自配服务。');
       const id = idFactory();
-      await this.update(next => next.providers.push({id,type,name:name || type + ' API',enabled:true,baseUrl:'',apiKey:'',model:'',region:'',temperature:null,systemPrompt:'',userPrompt:''}));
+      await this.update(next => next.providers.push({id,type,name:name || type + ' API',enabled:true,baseUrl:'',apiKey:'',model:DEFAULT_MODELS[type] || '',region:'',temperature:null,systemPrompt:'',userPrompt:''}));
       return id;
     },
     removeProvider(id) { return this.update(next => { next.providers = next.providers.filter(item => item.id !== id); }); },
