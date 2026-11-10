@@ -9,8 +9,9 @@ export interface PageStatus {active:boolean;translated:number;errors:number;tota
 export interface PageTranslatorOptions {document:Document;env?:BrowserEnvironment;translate:Translate;cancel?:(id:string)=>unknown;getSettings:()=>Settings;makeRequestId?:()=>string;onBeforeTranslate?:()=>void;onRestore?:()=>void;onChange?:(status:PageStatus)=>void}
 export interface TranslateBlocksOptions {validate?:()=>boolean;retryErrors?:boolean;viewportOnly?:boolean}
 type PageEntryStatus = 'pending'|'success'|'error'|'cancelled';
-interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>boolean;viewportOnly:boolean;url:string;status:PageEntryStatus;output:HTMLElement|null;inner?:HTMLElement;sourceLayout?:string|null;overflowLayout?:string|null;parts:(string|undefined)[];originals:HTMLElement[];content:PageContent;links:PageLinkBinding[];resolve:(()=>void)|null;done?:Promise<void>;titleLayout?:string|null;layout:SourceLayout;forcedBlock?:boolean;forcedWidth?:number;flexLayout?:string|null;inlineLayout?:string|null;duplicatePseudo?:string|null;loadingHost?:HTMLElement|null;loadingNode?:Text|null;expected?:number;shownAt?:number}
+interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>boolean;viewportOnly:boolean;url:string;status:PageEntryStatus;output:HTMLElement|null;inner?:HTMLElement;sourceLayout?:string|null;overflowLayout?:string|null;parts:(string|undefined)[];originals:HTMLElement[];content:PageContent;links:PageLinkBinding[];resolve:(()=>void)|null;done?:Promise<void>;titleLayout?:string|null;layout:SourceLayout;forcedBlock?:boolean;forcedWidth?:number;flexLayout?:string|null;inlineLayout?:string|null;duplicatePseudo?:string|null;loadingHost?:HTMLElement|null;loadingNode?:Text|null;expected?:number;startedAt:number;shownAt?:number;repairs?:{at:number;count:number}}
 interface PageRequest {owners:Set<PageEntry>;release:(()=>void)|null}
+interface SourceChanges {source:string;changedAt?:number;wasted:number}
 
 import { ancestors, batches, blockText, collectBlocks, computedStyle, isPageControl, isBlock, isChinese, isPageReadable as isReadable, isInViewport, visibleRect, makeId, requestOptions, translationsOf, withLayoutCache } from './dom.js';
 import {filterPageBlocks,isPageBlockAllowed,isPageSiteBlocked,pageTranslationKey} from './page-policy.js';
@@ -25,14 +26,25 @@ const words = {
 const alwaysAllowed=()=>true;
 // Some widgets rebuild themselves when a translation changes their height; stop feeding that loop.
 const WIPE_WINDOW=1000,WIPE_LIMIT=3;
+// A 1 Hz timer never settles; wasted recent work lengthens the next quiet window.
+const SETTLE_MS=1200,SETTLE_MAX=30000,WASTE_WINDOW=10000;
 
 /** Append translations to existing blocks. Original nodes and listeners never move. */
 export function createPageTranslator({ document, env = globalThis, translate, cancel = () => {}, getSettings, makeRequestId = makeId,onBeforeTranslate=()=>{},onRestore=()=>{},onChange }: PageTranslatorOptions) {
   const entries = new Map<HTMLElement,PageEntry>(), requests = new Map<string,PageRequest>(),loadingEntries=new Set<PageEntry>(),loadingDisposers: (()=>void)[]=[];
-  const requestCancelled=Symbol('cancelled request'),wipes=new Map<string,number>();
+  const requestCancelled=Symbol('cancelled request'),wipes=new Map<string,number>(),translations=new Map<string,string[]>();
+  let sources=new WeakMap<HTMLElement,SourceChanges>();
+  const deferred=new Map<HTMLElement,{validate:()=>boolean;url:string;key:string}>(),repairTargets=new Set<Node>(),repairAdded=new Set<Node>();
+  let settleTimer: number|null=null,settleAt=0,repairAll=false;
   let cancelled = false,observer: MutationObserver|null=null,repairQueued=false,positionQueued=false,squeezeQueued=false,titleLayoutStyle: HTMLStyleElement|null=null,pageSheet: HTMLStyleElement|null=null,lastError='';
   const labels = () => words[isChinese(getSettings(), env) ? 'zh' : 'en'];
   const route = () => env.location?.href || '';
+  const now = () => env.performance?.now?.() ?? Date.now();
+  const translationKey=(key: string,content: PageContent)=>JSON.stringify([key,content.units]);
+  function cachedParts(key: string,content: PageContent): string[] | undefined{
+    const id=translationKey(key,content),parts=translations.get(id);
+    if(parts){translations.delete(id);translations.set(id,parts);}return parts;
+  }
   const status = (): PageStatus => {
     const all = [...entries.values()], translated = all.filter(entry => entry.status === 'success').length;
     return { active:all.some(entry=>entry.status==='pending'), translated, errors:all.filter(entry => entry.status === 'error').length, total:all.length, cancelled, isTranslated:translated > 0,...(lastError?{error:lastError}:{}) };
@@ -53,8 +65,41 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     for(const [id,request] of requests){request.owners.delete(entry);if(!request.owners.size)abortRequest(id);}
   }
   function finish(entry: PageEntry): void {entry.resolve?.();entry.resolve=null;}
+  function sourceChanged(element: HTMLElement,source: string,entry?: PageEntry): SourceChanges | undefined{
+    if(!element.isConnected)return;
+    const previous=sources.get(element);if(!previous&&!entry)return;
+    const state=previous||{source,wasted:0};
+    if(entry||state.source!==source){
+      state.source=source;state.changedAt=now();
+      if(entry&&['pending','success'].includes(entry.status)&&now()-(entry.shownAt??entry.startedAt)<WASTE_WINDOW)state.wasted=Math.min(state.wasted+1,5);
+    }
+    sources.set(element,state);return state;
+  }
+  const quietUntil=(element: HTMLElement)=>{const state=sources.get(element)!;return state.changedAt!+Math.min(SETTLE_MAX,SETTLE_MS*2**state.wasted);};
+  function clearDeferred(): void{
+    if(settleTimer!==null)env.clearTimeout(settleTimer);settleTimer=null;deferred.clear();
+    if(!entries.size){observer?.disconnect();observer=null;}
+  }
+  function scheduleDeferred(): void{
+    const at=Math.min(...[...deferred.keys()].map(quietUntil));
+    if(settleTimer!==null&&settleAt===at)return;
+    if(settleTimer!==null)env.clearTimeout(settleTimer);settleTimer=null;
+    if(!deferred.size){if(!entries.size){observer?.disconnect();observer=null;}return;}
+    observe();settleAt=at;settleTimer=env.setTimeout(()=>{
+      settleTimer=null;
+      const groups=new Map<()=>boolean,PageBlock[]>();
+      for(const [element,{validate,url,key}] of deferred){
+        if(quietUntil(element)>now())continue;
+        deferred.delete(element);
+        if(url!==route()||key!==pageTranslationKey(getSettings())||document.visibilityState==='hidden'||isPageSiteBlocked(getSettings(),route())||!element.isConnected||!validate()||!isReadable(element,env)||!isInViewport(element,env))continue;
+        const group=groups.get(validate)||[];group.push({element,text:blockText(element,env)});groups.set(validate,group);
+      }
+      for(const [validate,blocks] of groups)void translateBlocks(blocks,{validate,retryErrors:false,viewportOnly:true}).catch(reportError);
+      scheduleDeferred();
+    },Math.max(0,at-now()));
+  }
   function remove(entry: PageEntry): void {
-    if(entry.status==='success'&&!entry.element.isConnected&&Date.now()-entry.shownAt!<WIPE_WINDOW)wipes.set(entry.source,(wipes.get(entry.source)||0)+1);
+    if(entry.status==='success'&&!entry.element.isConnected&&now()-entry.shownAt!<WIPE_WINDOW)wipes.set(entry.source,(wipes.get(entry.source)||0)+1);
     releaseRequests(entry);removeLoading(entry);restoreOriginal(entry);entry.output?.remove();finish(entry);
     if(entry.sourceLayout!==undefined&&entry.element.getAttribute('data-kuai-page-source')==='expanded'){
       if(entry.sourceLayout===null)entry.element.removeAttribute('data-kuai-page-source');
@@ -67,22 +112,58 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     if(entry.titleLayout!==undefined&&entry.element.getAttribute('data-kuai-title-layout')==='stacked'){if(entry.titleLayout===null)entry.element.removeAttribute('data-kuai-title-layout');else entry.element.setAttribute('data-kuai-title-layout',entry.titleLayout);}
     if(entries.get(entry.element)===entry)entries.delete(entry.element);
     changed();
-    if(!entries.size){observer?.disconnect();observer=null;titleLayoutStyle?.remove();titleLayoutStyle=null;pageSheet?.remove();pageSheet=null;}
+    if(!entries.size){if(!deferred.size){observer?.disconnect();observer=null;}titleLayoutStyle?.remove();titleLayoutStyle=null;pageSheet?.remove();pageSheet=null;}
   }
   function observe() {
     if(observer||!env.MutationObserver)return;
     observer=new env.MutationObserver(records=>{
-      if(repairQueued||!records.some(record=>{
-        if(record.removedNodes?.length)return true;
-        if(ancestors(record.target).some(node=>node.hasAttribute?.('data-kuai-owned')||node.hasAttribute?.('data-kuai-ui')))return false;
-        return record.type==='characterData'||record.addedNodes?.length||isPageLinkMutation(record);
-      }))return;
-      repairQueued=true;queueMicrotask(()=>{repairQueued=false;refreshPresentation();});
+      for(const record of records){
+        if(!record.removedNodes?.length){
+          if(ancestors(record.target).some(node=>node.hasAttribute?.('data-kuai-owned')||node.hasAttribute?.('data-kuai-ui')))continue;
+          if(record.type!=='characterData'&&!record.addedNodes?.length&&!isPageLinkMutation(record))continue;
+        }
+        for(const node of record.addedNodes||[])repairAdded.add(node);
+        if(!record.target||(record.target as Element).tagName==='BASE'||[...record.addedNodes||[],...record.removedNodes||[]].some(node=>(node as Element).tagName==='BASE'||(node as Element).querySelector?.('base')))repairAll=true;
+        else repairTargets.add(record.target);
+      }
+      if(repairQueued||!repairAll&&!repairTargets.size)return;
+      repairQueued=true;queueMicrotask(()=>{
+        repairQueued=false;
+        const targets=[...repairTargets],added=[...repairAdded],full=repairAll;repairTargets.clear();repairAdded.clear();repairAll=false;
+        const affected=new Set<PageEntry>(),waiting=new Set<HTMLElement>();
+        for(const target of targets)for(const element of ancestors(target)){
+          const entry=entries.get(element);if(entry)affected.add(entry);
+          if(deferred.has(element))waiting.add(element);
+        }
+        for(const entry of entries.values())if(!entry.element.isConnected||entry.output&&!entry.output.isConnected)affected.add(entry);
+        const replaced=[...affected].filter(entry=>entry.status==='success'&&!entry.element.isConnected);
+        withLayoutCache(()=>{
+          for(const entry of [...(full?entries.values():affected)].filter(current))present(entry);
+          for(const element of full?deferred.keys():waiting)sourceChanged(element,blockText(element,env));
+          if(replaced.length&&document.visibilityState!=='hidden'){
+            const blocks=addedBlocks(added),key=pageTranslationKey(getSettings());
+            for(const validate of new Set(replaced.filter(entry=>entry.url===route()&&entry.key===key).map(entry=>entry.validate)))void startBlocks(blocks,{validate,retryErrors:false,viewportOnly:true},true).catch(reportError);
+          }
+        });
+        for(const element of deferred.keys())if(!element.isConnected)deferred.delete(element);
+        scheduleDeferred();
+      });
     });
     observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:PAGE_LINK_ATTRIBUTES});
   }
-  function makeEntry(element: HTMLElement, source: string, key: string, validate: ()=>boolean, viewportOnly: boolean): PageEntry {
-    const entry: PageEntry={element,source,key,validate,viewportOnly,url:route(),status:'pending',layout:measureSourceLayout(element,env),output:null,parts:[],originals:[],content:capturePageContent(element,env),links:[],resolve:null};
+  function addedBlocks(roots: readonly Node[]): PageBlock[]{
+    const blocks: PageBlock[]=[],seen=new Set<Node>();let budget=2000;
+    function visit(node: Node): void{
+      if(budget--<=0||seen.has(node))return;seen.add(node);
+      if(node.nodeType!==1||!isReadable(node as HTMLElement,env))return;
+      const element=node as HTMLElement;if(isBlock(element,env))blocks.push({element,text:blockText(element,env)});
+      for(const child of node.childNodes){if(budget<=0)break;visit(child);}
+    }
+    for(const root of roots){if(budget<=0)break;visit(root);}return blocks;
+  }
+  function makeEntry(element: HTMLElement, source: string, key: string, validate: ()=>boolean, viewportOnly: boolean,content: PageContent,parts?: string[]): PageEntry {
+    if(!sources.has(element))sources.set(element,{source,wasted:0});
+    const entry: PageEntry={element,source,key,validate,viewportOnly,url:route(),status:parts?'success':'pending',startedAt:now(),layout:measureSourceLayout(element,env),output:null,parts:parts?.slice()||[],originals:[],content,links:[],resolve:null};
     entry.done=new Promise<void>(resolve=>{entry.resolve=resolve;});entries.set(element,entry);observe();changed();return entry;
   }
   function stackYouTubeTitle(entry: PageEntry): void{
@@ -288,18 +369,34 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     }
     if(entry.status==='success')refreshPageLinks(entry.links,document,env);
     if(theme.preset==='blur'&&layout.layout==='block')entry.inner.setAttribute('tabindex','0');else entry.inner.removeAttribute('tabindex');
-    if(translationOnly){entry.output.setAttribute('data-kuai-only','');hideOriginal(entry,document,env);}
+    if(translationOnly){
+      if(entry.originals.some(host=>!entry.element.contains(host)))restoreOriginal(entry);
+      entry.output.setAttribute('data-kuai-only','');hideOriginal(entry,document,env);
+    }
     else{entry.output.removeAttribute('data-kuai-only');restoreOriginal(entry);}
     if(layout.layout==='inline'&&entry.status==='success')queueSqueezeCheck();
   }
 
   function current(entry: PageEntry): boolean {
     if(entries.get(entry.element)!==entry)return false;
-    if(entry.url!==route()||entry.key!==pageTranslationKey(getSettings())||!entry.validate()||
-      !isReadable(entry.element,env)||blockText(entry.element,env)!==entry.source||!pageContentMatches(entry.content,entry.element,env)||
-      entry.output&&(!entry.output.isConnected||!entry.element.contains(entry.output))||
-      !isPageBlockAllowed({element:entry.element,text:entry.source},getSettings(),{env,url:route()})){
+    if(entry.url!==route()||entry.key!==pageTranslationKey(getSettings())||!entry.validate()||!isReadable(entry.element,env)){
       remove(entry);return false;
+    }
+    const source=blockText(entry.element,env);
+    if(source!==entry.source||!pageContentMatches(entry.content,entry.element,env,entry.links)){
+      sourceChanged(entry.element,source,entry);remove(entry);return false;
+    }
+    if(!isPageBlockAllowed({element:entry.element,text:entry.source},getSettings(),{env,url:route()})){
+      remove(entry);return false;
+    }
+    if(entry.output&&(!entry.output.isConnected||!entry.element.contains(entry.output))){
+      if(!entry.repairs||now()-entry.repairs.at>=WIPE_WINDOW)entry.repairs={at:now(),count:0};
+      if(++entry.repairs.count>WIPE_LIMIT){
+        if(entry.status==='success')wipes.set(entry.source,Math.max(WIPE_LIMIT,(wipes.get(entry.source)||0)+1));
+        remove(entry);return false;
+      }
+      restoreOriginal(entry);present(entry);
+      if(!entry.output.isConnected||!entry.element.contains(entry.output)){remove(entry);return false;}
     }
     return true;
   }
@@ -316,11 +413,15 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     if(state==='success'&&text.trim()===entry.source.trim()){
       removeLoading(entry);entry.output?.remove();entry.output=null;entry.inner=undefined;entry.status=state;finish(entry);changed();return;
     }
+    if(state==='success'&&entry.parts.length===entry.content.units.length&&entry.parts.filter(part=>typeof part==='string').length===entry.content.units.length){
+      const key=translationKey(entry.key,entry.content);translations.delete(key);translations.set(key,entry.parts.slice() as string[]);
+      if(translations.size>500)translations.delete(translations.keys().next().value!);
+    }
     ensureOutput(entry);entry.status = state;entry.output.setAttribute('data-state',state);entry.output.setAttribute('aria-busy',String(state==='pending'));entry.inner!.replaceChildren();
     entry.links=[];
     if(state!=='pending')positionOutput(entry);
     if(state==='pending')appendLoading(entry);
-    else if(state==='success'){entry.shownAt=Date.now();entry.links=renderPageContent(entry.inner!,entry.content,entry.parts,{document,env,valid:()=>current(entry)});}
+    else if(state==='success'){entry.shownAt=now();entry.links=renderPageContent(entry.inner!,entry.content,entry.parts,{document,env,valid:()=>current(entry)});}
     else entry.inner!.append(document.createTextNode(text));
     if (state === 'error' || state === 'cancelled') {
       const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = labels().retry;
@@ -334,7 +435,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     changed();
   }
   function cancelCurrent() {
-    cancelled = true;
+    cancelled = true;clearDeferred();
     for(const id of [...requests.keys()])abortRequest(id);
     withLayoutCache(()=>{
       const pending=[...entries.values()].filter(entry=>entry.status==='pending'),live=pending.filter(entry=>entry.output&&current(entry));
@@ -343,8 +444,9 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     return status();
   }
   function restore() {
-    onRestore();cancelled = false;lastError='';wipes.clear();
+    onRestore();cancelled = false;lastError='';wipes.clear();clearDeferred();
     for(const entry of [...entries.values()])remove(entry);
+    sources=new WeakMap();translations.clear();repairTargets.clear();repairAdded.clear();repairAll=false;
     observer?.disconnect();observer=null;return status();
   }
   function candidatesOf(blocks: readonly PageBlock[] | null | undefined): PageBlock[] {
@@ -417,12 +519,14 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
   function translateBlocks(blocks: readonly PageBlock[],options: TranslateBlocksOptions={}): Promise<PageStatus> {
     return withLayoutCache(()=>startBlocks(blocks,options));
   }
-  function startBlocks(blocks: readonly PageBlock[],{validate=alwaysAllowed,retryErrors=true,viewportOnly=false}: TranslateBlocksOptions): Promise<PageStatus> {
-    refreshPresentation();if(!validate())return Promise.resolve(status());
+  function startBlocks(blocks: readonly PageBlock[],{validate=alwaysAllowed,retryErrors=true,viewportOnly=false}: TranslateBlocksOptions,cacheOnly=false): Promise<PageStatus> {
+    if(!cacheOnly)refreshPresentation();if(!validate())return Promise.resolve(status());
     const settings=getSettings(),key=pageTranslationKey(settings),created: PageEntry[]=[],selected: PageEntry[]=[];
     for(const {element,text} of candidatesOf(blocks)){
       let entry: PageEntry | null | undefined=entries.get(element);
-      if(entry&&entry.source!==text){remove(entry);entry=null;}
+      if(entry&&entry.source!==text){sourceChanged(element,text,entry);remove(entry);entry=null;}
+      const state=sourceChanged(element,text);
+      if(retryErrors)deferred.delete(element);
       if(entry&&['pending','success'].includes(entry.status)){
         // A whole-page pass adopts existing work; disabling its former gesture cannot remove a page-owned row.
         if(validate===alwaysAllowed)entry.validate=alwaysAllowed;
@@ -432,9 +536,17 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
       if(entry&&!retryErrors)continue;
       // Automatic passes leave a block alone once the page keeps discarding its fresh translation.
       if(!retryErrors&&(wipes.get(text)||0)>=WIPE_LIMIT)continue;
+      const content=capturePageContent(element,env),parts=cachedParts(key,content);
+      if(cacheOnly&&!parts||viewportOnly&&!isInViewport(element,env))continue;
+      if(!parts&&!retryErrors&&state?.changedAt!==undefined&&quietUntil(element)>now()){
+        deferred.set(element,{validate,url:route(),key});continue;
+      }
+      deferred.delete(element);
       if(entry)remove(entry);
-      entry=makeEntry(element,text,key,validate,viewportOnly);created.push(entry);selected.push(entry);
+      entry=makeEntry(element,text,key,validate,viewportOnly,content,parts);selected.push(entry);cancelled=false;lastError='';
+      if(parts)show(entry,parts.join(' '),'success');else created.push(entry);
     }
+    scheduleDeferred();
     if(created.length){cancelled=false;lastError='';void run(created,settings);}
     return Promise.all(selected.map(entry=>entry.done)).then(status);
   }
