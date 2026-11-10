@@ -1,7 +1,7 @@
 import type {Settings} from '../shared/settings.js';
 import type {BrowserEnvironment,PageBlock} from './dom.js';
 
-import {ancestors,collectBlocks,configurationKey,isBlock,isUrlText} from './dom.js';
+import {ancestors,collectBlocks,configurationKey,isBlock,isNonLanguageText} from './dom.js';
 import {normalizeInteractionOptions,isSiteListed} from '../shared/interactions.js';
 
 const options=(settings: Partial<Settings>)=>normalizeInteractionOptions(settings,settings.providers).pageOptions;
@@ -46,7 +46,7 @@ export function pageTranslationKey(settings: Partial<Settings>): string{
 }
 
 function blockAllowed({element,text}: PageBlock,value: ReturnType<typeof options>,env: BrowserEnvironment): boolean{
-  if(!element?.isConnected||typeof text!=='string'||!/\p{L}/u.test(text)||isUrlText(text)||[...text.trim()].length<value.minTextLength)return false;
+  if(!element?.isConnected||typeof text!=='string'||!/\p{L}/u.test(text)||isNonLanguageText(text)||[...text.trim()].length<value.minTextLength)return false;
   if(languageListed(declaredLanguage(element),value.neverLanguages))return false;
   if(!value.translateFullPage&&element.closest?.('footer,[role="contentinfo"]'))return false;
   for(const selector of value.excludeSelectors){try{

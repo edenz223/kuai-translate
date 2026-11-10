@@ -97,18 +97,23 @@ export function isPageReadable(element: HTMLElement | null | undefined,env: Brow
   return isReadable(element,env,{...options,allowControls:true});
 }
 
-const blockDisplays=new Set(['block','flow-root','flex','grid','table','list-item','table-cell','table-caption','table-row']);
-const atomicDisplays=new Set(['inline-block','inline-flex','inline-grid']);
+// Translation can release a line clamp and change computed display; live hosts stay block boundaries.
+const pinnedBlocks=new WeakSet<Element>();
+export function pinBlock(element: Element): void {pinnedBlocks.add(element);}
+export function unpinBlock(element: Element): void {pinnedBlocks.delete(element);}
+function blockDisplay(display: string): boolean {
+  return !!display&&!display.startsWith('inline')&&!display.startsWith('-webkit-inline')&&!display.startsWith('ruby')&&!['math','none','contents'].includes(display);
+}
 const controlSelector='button,[role="button"],[role="tab"],[role="menuitem"]';
 function atomicControl(element: Element,env: BrowserEnvironment): boolean {
-  return element.matches?.(controlSelector)||element.tagName==='A'&&atomicDisplays.has(computedStyle(element,env)?.display||'');
+  return element.matches?.(controlSelector)||element.tagName==='A'&&/^(inline-|-webkit-inline-)/.test(computedStyle(element,env)?.display||'');
 }
 
 function parentHasProse(parent: Element,env: BrowserEnvironment): boolean {
   if(layoutCache?.prose.has(parent))return layoutCache.prose.get(parent)!;
   const hasProse=(node: Node): boolean=>{
     if(node.nodeType===3)return /\p{L}/u.test(node.nodeValue||'');
-    if(node.nodeType!==1||!isPageReadable(node as HTMLElement,env)||atomicControl(node as Element,env)||blockDisplays.has(computedStyle(node as Element,env)?.display||''))return false;
+    if(node.nodeType!==1||!isPageReadable(node as HTMLElement,env)||atomicControl(node as Element,env)||blockDisplay(computedStyle(node as Element,env)?.display||''))return false;
     return Array.from(node.childNodes).some(hasProse);
   };
   const result=Array.from(parent.childNodes).some(hasProse);
@@ -118,8 +123,9 @@ function parentHasProse(parent: Element,env: BrowserEnvironment): boolean {
 /** Atomic controls in a toolbar stand alone; a badge embedded in prose belongs to its sentence. */
 export function isBlock(element: Element, env: BrowserEnvironment): boolean {
   if(element.tagName==='BR'||element.hasAttribute?.('data-kuai-owned')||element.hasAttribute?.('data-kuai-original'))return false;
+  if(pinnedBlocks.has(element))return true;
   const style=computedStyle(element,env),display=style?.display||'';
-  if(style?.position==='absolute'||style?.position==='fixed'||blockDisplays.has(display))return true;
+  if(style?.position==='absolute'||style?.position==='fixed'||blockDisplay(display))return true;
   if(element.matches?.('[data-as="p"],[slot="title"],[role="heading"]')||!display&&element.matches?.(BLOCK_SELECTOR))return true;
   if(!atomicControl(element,env))return false;
   return !element.parentElement||!parentHasProse(element.parentElement,env);
@@ -161,10 +167,23 @@ export function blockText(element: HTMLElement, env: BrowserEnvironment): string
 }
 
 const urlToken=/^(?:[a-z][a-z\d+.-]*:\/\/|www\.|(?:[a-z\d-]+\.)+[a-z]{2,}(?::\d+)?\/)[\w\-.~:/?#[\]@!$&'()*+,;=%]*$/i;
+const stripTextPunctuation=(token: string)=>token.replace(/^[<(（「『【"'“‘]+|[>)）」』】"'”’.,;:!?。，；：！？]+$/gu,'');
 /** A line holding only web addresses reads the same in every language. */
 export function isUrlText(text: string): boolean {
-  const tokens=text.trim().split(/\s+/u).map(token=>token.replace(/^[<(（「『【"'“‘]+|[>)）」』】"'”’.,;:!?。，；：！？]+$/gu,''));
+  const tokens=text.trim().split(/\s+/u).map(stripTextPunctuation);
   return tokens.every(token=>urlToken.test(token));
+}
+
+/** Handles and compact counts, like web addresses, do not need a language service. */
+export function isNonLanguageText(text: string): boolean {
+  const tokens=text.trim().split(/(\s+)/u).map(stripTextPunctuation),count=/^[+-]?\d+(?:[.,]\d+)*[ \u00a0]?[kmbt]\+?$/i;
+  for(let index=0;index<tokens.length;index+=2){
+    const token=tokens[index];if(urlToken.test(token)||/^@[\p{L}\p{Nd}_.·-]+$/u.test(token)||count.test(token))continue;
+    // Preserve the one optional space before a magnitude without accepting standalone numbers.
+    if(/^[ \u00a0]$/.test(tokens[index+1]||'')&&count.test(token+tokens[index+1]+(tokens[index+2]||''))){index+=2;continue;}
+    return false;
+  }
+  return true;
 }
 
 function establishesContainingBlock(style: StyleSnapshot | undefined): boolean {

@@ -4,7 +4,7 @@ interface SourceRun {text:string; anchor:HTMLAnchorElement|null; indices?:number
 export interface PageContent {source:string; runs:SourceRun[]; linked:boolean; units:string[]}
 export interface PageLinkBinding {source:HTMLAnchorElement; node:HTMLElement; output:HTMLElement; valid:()=>boolean; document:Document; env:BrowserEnvironment}
 
-import {ancestors,computedStyle,isBlock,isPageReadable as isReadable,isUrlText,splitText} from './dom.js';
+import {ancestors,computedStyle,isBlock,isPageReadable as isReadable,isNonLanguageText,splitText} from './dom.js';
 
 export const PAGE_LINK_ATTRIBUTES=['href','target','rel','download','title','aria-label','hreflang','referrerpolicy'];
 const safeProtocols=new Set(['https:','http:','mailto:','tel:']);
@@ -38,7 +38,7 @@ export function capturePageContent(element: HTMLElement,env: BrowserEnvironment)
   if(!linked)return {source,runs,linked,units:splitText(source)};
   for(const run of runs){
     run.indices=[];
-    if(!/\p{L}/u.test(run.text)||isUrlText(run.text))continue;
+    if(!/\p{L}/u.test(run.text)||isNonLanguageText(run.text))continue;
     run.before=run.text.startsWith(' ')?' ':'';run.after=run.text.endsWith(' ')?' ':'';
     for(const part of splitText(run.text.trim())){run.indices!.push(units.length);units.push(part);}
   }

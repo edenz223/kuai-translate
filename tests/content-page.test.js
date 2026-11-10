@@ -4,13 +4,95 @@ import dom,{fixture} from './helpers/content-dom.cjs';
 import {createPageTranslator} from '../dist/src/content/page-translator.js';
 import {createPageTriggers} from '../dist/src/content/page-triggers.js';
 import {createInteractions} from '../dist/src/content/interactions.js';
-import {blockText,collectBlocks} from '../dist/src/content/dom.js';
+import {blockText,collectBlocks,isBlock} from '../dist/src/content/dom.js';
 import {createContentRuntime} from '../dist/src/content/index.js';
 import * as api from '../dist/src/shared/styles.js';
 
 const sheet=h=>h.doc.querySelector('[data-kuai-page-style]')?.textContent||'';
 
 const output = node => node.querySelector('[data-kuai-page-translation]');
+
+test('dominant inline text supplies the wrapper font in both layouts and display modes',async()=>{
+ for(const mode of ['bilingual','translation_only'])for(const text of ['Great video','A comment with enough text to need a block translation.']){
+  const h=fixture(),host=h.paragraph('','div'),attributed=h.doc.createElement('yt-attributed-string'),span=h.doc.createElement('span');
+  Object.assign(host.style,{fontSize:'10px',lineHeight:'normal'});Object.assign(span.style,{fontSize:'14px',lineHeight:'20px'});span.textContent=text;attributed.append(span);host.append(attributed);h.settings.pageDisplayMode=mode;
+  const before=host.outerHTML,page=createPageTranslator(h.dependencies);await page.translatePage();const result=output(host);
+  assert.equal(result.getAttribute('data-kuai-layout'),text==='Great video'?'inline':'block');
+  for(const [property,value]of [['font-size','14px'],['line-height','20px']]){assert.equal(result.style.getPropertyValue(property),value);assert.equal(result.style.getPropertyPriority(property),'important');}
+  page.refreshPresentation();assert.equal(result.style.getPropertyValue('font-size'),'14px');assert.equal(result.style.getPropertyValue('line-height'),'20px');
+  assert.equal(h.doc.querySelectorAll('[data-kuai-page-style]').length,1);assert.equal(host.style.fontSize,'10px');assert.equal(span.style.fontSize,'14px');
+  page.restore();assert.equal(host.outerHTML,before);
+ }
+});
+
+test('direct, equal-size and host-dominant text add no wrapper font override',async()=>{
+ for(const mode of ['bilingual','translation_only'])for(const kind of ['direct','equal','host-dominant']){
+  const h=fixture(),host=h.paragraph(kind==='equal'?'':'Long heading text ');Object.assign(host.style,{fontSize:'16px',lineHeight:'24px'});
+  if(kind!=='direct'){const child=h.doc.createElement(kind==='equal'?'span':'small');child.textContent='beta';Object.assign(child.style,{fontSize:kind==='equal'?'16px':'11px',lineHeight:'18px'});host.append(child);}
+  const before=host.outerHTML;h.settings.pageDisplayMode=mode;const page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.equal(output(host).style.getPropertyValue('font-size'),'');assert.equal(output(host).style.getPropertyValue('line-height'),'');
+  page.restore();assert.equal(host.outerHTML,before);
+ }
+});
+
+test('dominant text sums each parent, breaks ties by first text and skips nested or unreadable text',async()=>{
+ const {measureSourceLayout,pageLayout}=await import('../dist/src/content/page-layout.js');
+ const h=fixture(),host=h.paragraph('Hi ','div'),first=h.doc.createElement('span'),second=h.doc.createElement('small');host.style.fontSize='16px';
+ Object.assign(first.style,{fontSize:'14px',lineHeight:'20px'});Object.assign(second.style,{fontSize:'11px',lineHeight:'18px'});
+ first.append('ab','cd');second.textContent='beta';host.append(first,second);
+ for(const kind of ['nested','hidden']){const node=h.doc.createElement(kind==='nested'?'div':'span');node.textContent='Ignored text with many more characters';node.style.fontSize='30px';node.hidden=kind==='hidden';host.append(node);}
+ let metrics=measureSourceLayout(host,h.env);assert.equal(metrics.fontSize,14);assert.equal(metrics.lineHeight,'20px');
+ assert.equal(pageLayout(host,'Short','译',{...metrics,width:35,textWidth:20},h.env).layout,'block');
+ second.append('x');metrics=measureSourceLayout(host,h.env);assert.equal(metrics.fontSize,11);assert.equal(metrics.lineHeight,'18px');
+ const before=host.outerHTML,page=createPageTranslator(h.dependencies);await page.translatePage();assert.equal(output(host).style.getPropertyValue('font-size'),'11px');assert.equal(output(host).style.getPropertyValue('line-height'),'18px');page.restore();assert.equal(host.outerHTML,before);
+});
+
+test('wrapper source font snapshots keep normal line-height unset and user percentages on the inner font',async()=>{
+ for(const lineHeight of ['normal','20px']){
+  const h=fixture(),host=h.paragraph('','div'),span=h.doc.createElement('span');host.style.fontSize='10px';Object.assign(span.style,{fontSize:'14px',lineHeight});span.textContent='Great video';host.append(span);
+  h.settings.pageStyle={fontSize:125,lineHeight:1.5};const before=host.outerHTML,page=createPageTranslator(h.dependencies);await page.translatePage();const result=output(host);
+  assert.equal(result.style.getPropertyValue('font-size'),'14px');assert.equal(result.style.getPropertyValue('line-height'),lineHeight==='normal'?'':'20px');
+  assert.match(sheet(h),/kuai-translator\[data-state=success\]>font\.kuai-translator-inner\{[^}]*font-size:125%!important/);assert.match(sheet(h),/line-height:1.5!important/);
+  span.style.fontSize='18px';span.style.lineHeight='28px';page.refreshPresentation();
+  assert.equal(result.style.getPropertyValue('font-size'),'14px');assert.equal(result.style.getPropertyValue('line-height'),lineHeight==='normal'?'':'20px');
+  span.style.fontSize='14px';span.style.lineHeight=lineHeight;page.restore();assert.equal(host.outerHTML,before);
+ }
+});
+
+test('a short inline translation at a larger source font is not mistaken for a squeezed column',async()=>{
+ const h=fixture(),host=h.paragraph('','div'),span=h.doc.createElement('span');host.style.fontSize='10px';span.style.fontSize='20px';span.textContent='Great video';host.append(span);
+ const create=h.doc.createElement;h.doc.createElement=tag=>{const element=create(tag);if(tag==='font')element.getBoundingClientRect=()=>({width:20,height:23});return element;};
+ h.respond(async texts=>({translations:texts.map(()=>'好')}));
+ const page=createPageTranslator(h.dependencies);await page.translatePage();
+ assert.equal(output(host).getAttribute('data-kuai-layout'),'inline');assert.equal(output(host).hasAttribute('data-kuai-forced-block'),false);page.restore();
+});
+
+test('non-language text matches only web addresses, handles and abbreviated counts',async()=>{
+ const {isNonLanguageText}=await import('../dist/src/content/dom.js');assert.equal(typeof isNonLanguageText,'function');
+ for(const text of ['@imeanL9T','@Jeff-th5ob','@user.name @other','@用户·１２_名','4.8M','421K','25k','10K+','1,2M','https://a.example/x @bob 4.8M','https://a.example/x','www.example.com','<https://a.example/x>.','「@bob」','(4.8M).','+1,200.5B','-4.8 T+','4.8\u00a0M','https://a.example/x @bob 4.8 M'])assert.equal(isNonLanguageText(text),true,text);
+ for(const text of ['Pinned by @jawed','4.8M views','M','K+','@','email me @ noon','Model 3M tape','OK','5 months ago','986 replies','165','17:39','','   ','!!!','!!! 4.8M','@bob/foo','@bob@example.com','@¼','4.8  M','4.8\nM','4..8M'])assert.equal(isNonLanguageText(text),false,text);
+});
+
+test('page translation skips non-language blocks and leaves numbers and times untranslated',async()=>{
+ const h=fixture(),skipped=['@imeanL9T','4.8M','165','17:39'].map(text=>h.paragraph(text)),prose=h.paragraph('Great video');
+ const page=createPageTranslator(h.dependencies);await page.translatePage();assert.equal(h.requests.length,1);assert.deepEqual(h.requests[0].texts,['Great video']);
+ for(const host of skipped)assert.equal(output(host),null);assert.ok(output(prose));page.restore();
+});
+
+test('sentences containing handles or counts remain whole translation units',async()=>{
+ const h=fixture(),texts=['Pinned by @jawed','986 replies','4.8M views','5 months ago'];for(const text of texts)h.paragraph(text);
+ const page=createPageTranslator(h.dependencies);await page.translatePage();assert.deepEqual(h.requests.flatMap(request=>request.texts),texts);page.restore();
+});
+
+test('a handle-labelled link stays verbatim while its sentence runs translate',async()=>{
+ for(const mode of ['bilingual','translation_only']){
+  const h=fixture(),host=h.paragraph('Thanks '),a=h.doc.createElement('a');a.textContent='@bob';a.setAttribute('href','/@bob');host.append(a,' for this');h.settings.pageDisplayMode=mode;
+  h.respond(async texts=>({translations:texts.map(text=>text==='Thanks'?'感谢':'提供这个')}));const before=host.outerHTML,page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.deepEqual(h.requests.flatMap(request=>request.texts),['Thanks','for this']);const result=output(host),translated=result.querySelector('a');
+  assert.equal(result.textContent,'感谢 @bob 提供这个');assert.equal(translated.textContent,'@bob');assert.equal(translated.getAttribute('href'),'https://example.org/@bob');
+  page.refreshPresentation();assert.equal(translated.textContent,'@bob');page.restore();assert.equal(host.outerHTML,before);
+ }
+});
 
 test('bilingual output preserves original inline nodes/listeners and restore removes only owned output', async()=>{
  const h=fixture(), p=h.paragraph('Hello '), strong=h.doc.createElement('strong');strong.textContent='world';p.append(strong);let clicks=0;strong.addEventListener('click',()=>clicks++);
@@ -41,6 +123,60 @@ test('inline code stays in the translated sentence while block code is excluded'
 test('nested blocks are not translated twice and provider markup is displayed as plain text', async()=>{
  const h=fixture();const outer=h.paragraph('','div'), inner=h.doc.createElement('p');inner.textContent='Nested';outer.append(inner);h.respond(async()=>({translations:['<script>bad()</script>译文']}));
  const controller=createPageTranslator(h.dependencies);await controller.translatePage();assert.deepEqual(h.requests[0].texts,['Nested']);assert.equal(output(outer),output(inner));assert.equal(output(inner).textContent,'<script>bad()</script>译文');assert.equal(output(inner).querySelector('font').children.length,0);
+});
+
+function clampedBlock(h){
+ const parent=h.paragraph('','ytd-expander'),child=h.doc.createElement('div');parent.style.display='block';child.id='content';child.textContent='A clamped YouTube comment';child.style.webkitLineClamp='4';child.style.display='-webkit-box';parent.append(child);
+ const computed=h.env.getComputedStyle;h.env.getComputedStyle=node=>({...computed(node),...(node===child?{display:child.getAttribute('data-kuai-page-source')==='expanded'?'-webkit-box':'flow-root'}:{})});
+ return {parent,child};
+}
+
+for(const mode of ['bilingual','translation_only'])test(`clamped block stays the sole translation host across passes in ${mode}`,async()=>{
+ const h=fixture(),{parent,child}=clampedBlock(h);h.settings.pageDisplayMode=mode;
+ const page=createPageTranslator(h.dependencies);
+ for(let pass=0;pass<3;pass++){
+  await page.translatePage();assert.equal(child.getAttribute('data-kuai-page-source'),'expanded');
+  assert.equal(h.doc.querySelectorAll('[data-kuai-page-translation]').length,1);assert.strictEqual(output(child).parentNode,child);assert.equal(parent.children.some(node=>node.hasAttribute('data-kuai-page-translation')),false);assert.equal(h.requests.length,1);
+ }
+ page.restore();
+});
+
+test('translation-only clamped blocks keep identical markup across passes and restore exactly',async()=>{
+ const h=fixture(),{parent}=clampedBlock(h),before=parent.outerHTML;h.settings.pageDisplayMode='translation_only';
+ const page=createPageTranslator(h.dependencies);await page.translatePage();const translated=parent.outerHTML;
+ await page.translatePage();assert.equal(parent.outerHTML,translated);await page.translatePage();assert.equal(parent.outerHTML,translated);
+ page.restore();assert.equal(parent.outerHTML,before);
+});
+
+test('translated block hosts stay pinned across inline style flips until restore',async()=>{
+ for(const mode of ['bilingual','translation_only']){
+  const h=fixture(),parent=h.paragraph('','div'),child=h.doc.createElement('div');child.textContent='Nested source';parent.append(child);h.settings.pageDisplayMode=mode;
+  let display='block';const computed=h.env.getComputedStyle;h.env.getComputedStyle=node=>({...computed(node),...(node===child?{display}:{})});
+  const page=createPageTranslator(h.dependencies);await page.translatePage();const translated=output(child);display='inline';assert.equal(isBlock(child,h.env),true);
+  await page.translatePage();assert.equal(h.doc.querySelectorAll('[data-kuai-page-translation]').length,1);assert.strictEqual(output(child),translated);assert.strictEqual(translated.parentNode,child);assert.equal(h.requests.length,1);
+  page.restore();assert.equal(isBlock(child,h.env),false);
+ }
+});
+
+test('translating an inline region leaves its block identity unchanged',async()=>{
+ const h=fixture(),parent=h.paragraph('Sentence '),child=h.doc.createElement('span');child.textContent='inline region';parent.append(child);
+ const page=createPageTranslator(h.dependencies);await page.translateBlocks([{element:child,text:child.textContent}]);
+ assert.ok(output(child));assert.equal(isBlock(child,h.env),false);page.restore();assert.equal(isBlock(child,h.env),false);
+});
+
+test('display classification covers block keywords and preserves inline and transparent boxes',()=>{
+ const h=fixture(),node=h.paragraph('Label','span');
+ for(const display of ['-webkit-box','table-row-group','block flex']){node.style.display=display;assert.equal(isBlock(node,h.env),true,display);}
+ for(const display of ['-webkit-inline-box','inline','inline flow','inline-block','inline-table','inline flex','none','contents','ruby','ruby-base','math']){node.style.display=display;assert.equal(isBlock(node,h.env),false,display);}
+});
+
+test('atomic inline links stand alone outside prose and skip block siblings when detecting prose',()=>{
+ for(const display of ['-webkit-inline-box','inline-table']){
+  const h=fixture(),parent=h.paragraph('','div'),link=h.doc.createElement('a'),sibling=h.doc.createElement('span');link.style.display=display;link.textContent='Explore';parent.append(link,sibling);
+  assert.equal(isBlock(link,h.env),true,display);
+  sibling.textContent='Separate block';for(const blockDisplay of ['-webkit-box','table-row-group','block flex']){sibling.style.display=blockDisplay;assert.equal(isBlock(link,h.env),true,blockDisplay);}
+  sibling.style.display='inline';assert.equal(isBlock(link,h.env),false,display);
+ }
 });
 
 test('absolutely positioned inline boxes are translated as their own blocks', async()=>{
