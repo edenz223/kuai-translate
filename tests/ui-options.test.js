@@ -33,6 +33,106 @@ function options(t,change=()=>{},intercept=()=>{}) {
   return {...create(),requests,get stored(){return stored;},reopen:create,writes:()=>requests.filter(item=>item.type==='KUAI_SAVE_SETTINGS').length};
 }
 
+test('save feedback starts idle, expires, and restarts after a subsequent save',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const h=options(t);await h.start();
+  assert.equal(h.node('save-bar').dataset.state,'idle');assert.equal(h.node('status').textContent,'');
+  await h.edit('target-language','ja');
+  assert.equal(h.node('save-bar').dataset.state,'saved');assert.equal(h.node('status').textContent,'已保存');
+  t.mock.timers.tick(1500);
+  await h.edit('target-language','en');
+  t.mock.timers.tick(600);
+  assert.equal(h.node('save-bar').dataset.state,'saved','the first save timer must not dismiss the second save');
+  t.mock.timers.tick(1400);
+  assert.equal(h.node('save-bar').dataset.state,'idle');assert.equal(h.node('status').textContent,'');
+});
+
+for(const initial of ['saved','notice'])test(`a pending save keeps ${initial} feedback visible until completion`,async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let pending=false,finish;
+  const h=options(t,()=>{},()=>pending?new Promise(resolve=>{finish=resolve;}):undefined);await h.start();
+  if(initial==='notice'){
+    h.node('import-settings').files=[{size:2,text:async()=>JSON.stringify(h.stored)}];
+    await h.node('import-settings').fire('change');
+  }else await h.edit('target-language','ja');
+  assert.equal(h.node('save-bar').dataset.state,initial);
+  assert.equal(h.node('save-bar').dataset.visible,'true');
+  t.mock.timers.tick(600);pending=true;
+  const edit=h.edit('target-language','en');await setImmediate();
+  assert.equal(h.node('save-bar').dataset.state,'saving');
+  assert.equal(h.node('save-bar').dataset.visible,'true');
+  for(const elapsed of [1,398,1,5000]){
+    t.mock.timers.tick(elapsed);
+    assert.equal(h.node('save-bar').dataset.visible,'true','pending saves must not hide existing feedback');
+    assert.equal(h.node('save-bar').dataset.state,'saving','the prior expiry timer must be cancelled');
+  }
+  finish();await edit;
+  assert.equal(h.node('save-bar').dataset.state,'saved');
+  assert.equal(h.node('save-bar').dataset.visible,'true');
+  assert.equal(h.node('status').textContent,'已保存');
+  t.mock.timers.tick(1999);assert.equal(h.node('save-bar').dataset.state,'saved');
+  t.mock.timers.tick(1);assert.equal(h.node('save-bar').dataset.state,'idle');
+});
+
+test('pending saves expose saving and validation attention persists through other successful saves',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let finish;
+  const h=options(t,()=>{},()=>new Promise(resolve=>{finish=resolve;}));await h.start();
+  const edit=h.edit('target-language','ja');await setImmediate();
+  assert.equal(h.node('save-bar').dataset.state,'saving');assert.equal(h.node('status').textContent,'正在保存…');
+  assert.equal(h.node('save-bar').dataset.visible,'false');t.mock.timers.tick(399);
+  assert.equal(h.node('save-bar').dataset.visible,'false');t.mock.timers.tick(1);
+  assert.equal(h.node('save-bar').dataset.visible,'true');
+  finish();await edit;
+  await h.edit('page-option-shortcut','Ctrl+','input');
+  assert.equal(h.node('save-bar').dataset.state,'attention');assert.match(h.node('status').textContent,/有 1 项输入尚未保存/);
+  const another=h.edit('target-language','en');await setImmediate();finish();await another;
+  t.mock.timers.tick(10000);
+  assert.equal(h.node('save-bar').dataset.state,'attention');assert.match(h.node('status').textContent,/未保存/);
+  const corrected=h.edit('page-option-shortcut','Alt+P','input');await setImmediate();finish();await corrected;
+  await h.edit('page-option-minTextLength','','input');
+  assert.equal(h.node('save-bar').dataset.state,'attention');assert.match(h.node('status').textContent,/数字未输入完整/);
+});
+
+test('save errors stay visible across renders until a successful retry',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let failing=true;
+  const h=options(t,()=>{},()=>failing?{ok:false,error:{code:'STORAGE_ERROR',message:'Storage unavailable'}}:undefined);await h.start();
+  await h.edit('target-language','ja');
+  assert.equal(h.node('save-bar').dataset.state,'attention');assert.match(h.node('status').textContent,/Storage unavailable/);
+  assert.equal(h.node('retry-save').hidden,false);
+  t.mock.timers.tick(10000);await h.node('add-provider').fire('click');
+  assert.equal(h.node('save-bar').dataset.state,'attention');assert.match(h.node('status').textContent,/Storage unavailable/);
+  failing=false;await h.node('retry-save').fire('click');
+  assert.equal(h.node('save-bar').dataset.state,'saved');assert.equal(h.node('retry-save').hidden,true);
+});
+
+test('load and file errors remain attention across routine renders',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const h=options(t);await h.start();
+  h.node('import-settings').files=[{size:2,text:async()=>'{invalid'}];
+  await h.node('import-settings').fire('change');
+  const message=h.node('status').textContent;
+  assert.equal(h.node('save-bar').dataset.state,'attention');
+  t.mock.timers.tick(10000);await h.node('add-provider').fire('click');
+  assert.equal(h.node('status').textContent,message);assert.equal(h.node('save-bar').dataset.state,'attention');
+  globalThis.chrome.runtime.sendMessage=async()=>{throw Error('Cannot load settings');};
+  const reopened=h.reopen();await reopened.start();t.mock.timers.tick(10000);
+  assert.equal(reopened.node('save-bar').dataset.state,'attention');assert.equal(reopened.node('status').textContent,'Cannot load settings');
+});
+
+test('import notices survive routine renders and expire without becoming saved again',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const h=options(t);await h.start();
+  h.node('import-settings').files=[{size:2,text:async()=>JSON.stringify(h.stored)}];
+  await h.node('import-settings').fire('change');
+  assert.equal(h.node('save-bar').dataset.state,'notice');assert.match(h.node('status').textContent,/已导入可识别/);
+  await h.node('add-provider').fire('click');t.mock.timers.tick(2500);
+  assert.equal(h.node('save-bar').dataset.state,'notice');
+  t.mock.timers.tick(2500);await h.node('cancel-add').fire('click');
+  assert.equal(h.node('save-bar').dataset.state,'idle');assert.equal(h.node('status').textContent,'');
+});
+
 test('the actual settings controller saves every interaction option and reloads independent services without API calls',async t=>{
   const h=options(t);await h.start();
   const cases=[
@@ -161,6 +261,7 @@ test('the actual interaction form keeps conflicting save drafts until explicit r
   await h.start();await h.edit('selection-option-delay','700','input');
   assert.equal(h.stored.selectionOptions.delay,250);assert.equal(h.node('selection-option-delay').value,'700');
   assert.equal(h.node('reload-settings').hidden,false);assert.equal(h.node('retry-save').hidden,true);
+  assert.equal(h.node('save-bar').dataset.state,'attention');assert.match(h.node('status').textContent,/其他页面修改了同一配置/);
   const before=h.writes();await h.edit('input-option-icon','none');assert.equal(h.writes(),before,'a conflict must stop queued overwrites');
   assert.equal(h.node('selection-option-delay').value,'700');
   conflict=false;await h.node('reload-settings').fire('click');
