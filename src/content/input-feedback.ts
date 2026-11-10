@@ -8,7 +8,7 @@ interface InputContext {url:string;key:string}
 export interface InputFeedbackOptions {document:Document;env:BrowserEnvironment;editor:ReturnType<typeof createInputEditor>;translate:Translate;cancel:(id:string)=>unknown;getSettings:()=>Settings;options:()=>InteractionOptions['inputOptions'];allowed:()=>boolean;key:()=>string;labels:()=>Record<string,string>;onState:()=>void;makeRequestId?:()=>string}
 
 import {appendIcon} from './icons.js';
-import {batches,makeId,requestOptions,splitText,translationsOf} from './dom.js';
+import {ancestors,batches,makeId,requestOptions,splitText,translationsOf} from './dom.js';
 import {resolveFeatureSettings} from '../shared/interactions.js';
 
 const spring='cubic-bezier(.34,1.56,.64,1)';
@@ -55,6 +55,58 @@ const TRIGGER_STYLE=[
 export function createInputFeedback({document,env,editor,translate,cancel,getSettings,options,allowed,key,labels,onState,makeRequestId=makeId}: InputFeedbackOptions){
   let generation=0,context: (InputContext & {element:EditorElement})|null=null,snapshot: InputSnapshot|null=null,pendingApply: (InputContext & {snapshot:InputSnapshot;text:string})|null=null,restoreContext: InputContext|null=null,trigger: HTMLDivElement|null=null,preview: HTMLDivElement|null=null,enabled=false,renderedElement: EditorElement|null=null,renderedConfig='',uiInteraction=false;
   let expanded=false;
+  let frame: number|null=null,frameTimer=false,dirty=false,watchUntil=0,tracking=0,lastRect='',observer: ResizeObserver|null=null,observed: HTMLElement[]=[];
+  const trackingListeners: (()=>void)[]=[],now=()=>env.performance?.now?.()??Date.now();
+  const rectKey=(rect: DOMRect)=>[rect.left,rect.top,rect.right,rect.bottom].join(',');
+  function viewport(){const view=env.visualViewport;return {left:view?.offsetLeft||0,top:view?.offsetTop||0,right:(view?.offsetLeft||0)+(view?.width||env.innerWidth||1200),bottom:(view?.offsetTop||0)+(view?.height||env.innerHeight||800)};}
+  function visibleRect(element: HTMLElement,rect: DOMRect){
+    const view=viewport(),visible={left:Math.max(view.left,rect.left),top:Math.max(view.top,rect.top),right:Math.min(view.right,rect.right),bottom:Math.min(view.bottom,rect.bottom)},containers: HTMLElement[]=[];
+    const root=env.getComputedStyle?.(document.documentElement),propagated=(root?.overflowX||root?.overflow||'visible')==='visible'&&(root?.overflowY||root?.overflow||'visible')==='visible';
+    let position=env.getComputedStyle?.(element)?.position||'static';
+    for(const parent of ancestors(element).slice(1)){
+      const style=env.getComputedStyle?.(parent);if(style?.display==='contents')continue;
+      const block=!!style&&([style.transform,style.perspective,style.filter,style.backdropFilter].some(value=>value&&value!=='none')||/\b(paint|layout|strict|content)\b/.test(style.contain)||/\b(transform|perspective|filter)\b/.test(style.willChange));
+      if((position==='fixed'||position==='absolute')&&!block&&(position==='fixed'||(style?.position||'static')==='static'))continue;
+      position=style?.position||'static';
+      if(parent===document.documentElement||parent===document.body&&propagated||style?.display==='inline')continue;
+      const clipX=(style?.overflowX||style?.overflow||'visible')!=='visible',clipY=(style?.overflowY||style?.overflow||'visible')!=='visible';
+      if(!clipX&&!clipY)continue;containers.push(parent);const bounds=parent.getBoundingClientRect(),scaleX=bounds.width/(parent.offsetWidth||bounds.width)||1,scaleY=bounds.height/(parent.offsetHeight||bounds.height)||1;
+      const left=bounds.left+(parent.clientLeft||0)*scaleX,top=bounds.top+(parent.clientTop||0)*scaleY;
+      if(clipX){visible.left=Math.max(visible.left,left);visible.right=Math.min(visible.right,left+(parent.clientWidth??bounds.width/scaleX)*scaleX);}
+      if(clipY){visible.top=Math.max(visible.top,top);visible.bottom=Math.min(visible.bottom,top+(parent.clientHeight??bounds.height/scaleY)*scaleY);}
+    }
+    if(observer&&(observed.length!==containers.length+1||observed.some((node,index)=>node!==[element,...containers][index]))){observer.disconnect();observed=[element,...containers];for(const node of observed)observer.observe(node);}
+    return visible;
+  }
+  function queue(){
+    if(frame!==null||!trigger)return;
+    const version=tracking,run=()=>{
+      if(version!==tracking)return;frame=null;
+      if(!trigger||!renderedElement?.isConnected){hide();return;}
+      if(dirty||rectKey(renderedElement.getBoundingClientRect())!==lastRect){dirty=false;layout();}
+      if(now()<watchUntil)queue();
+    };
+    frameTimer=!env.requestAnimationFrame;frame=frameTimer?env.setTimeout(run,16):env.requestAnimationFrame(run);
+  }
+  function schedule(){if(trigger){dirty=true;queue();}}
+  function track(){
+    const version=tracking,changed=()=>{if(version===tracking)schedule();};
+    if(env.ResizeObserver)observer=new env.ResizeObserver(changed);
+    const listen=(target: EventTarget,type: string)=>{target.addEventListener(type,changed,true);trackingListeners.push(()=>target.removeEventListener(type,changed,true));};
+    for(const type of ['input','transitionend','animationend'])listen(document,type);
+    if(env.visualViewport)for(const type of ['resize','scroll'])listen(env.visualViewport,type);
+    watchUntil=now()+1000;queue();
+  }
+  function untrack(){
+    tracking++;observer?.disconnect();observer=null;observed=[];trackingListeners.splice(0).forEach(off=>off());
+    if(frame!==null){if(frameTimer)env.clearTimeout(frame);else env.cancelAnimationFrame?.(frame);}frame=null;dirty=false;watchUntil=0;lastRect='';
+  }
+  function place(host: HTMLElement,left: number,top: number){
+    host.style.left=left+'px';host.style.top=top+'px';
+    const rect=host.getBoundingClientRect(),scaleX=rect.width/host.offsetWidth||1,scaleY=rect.height/host.offsetHeight||1;
+    if(Math.abs(rect.left-left)>.5)host.style.left=left+(left-rect.left)/scaleX+'px';
+    if(Math.abs(rect.top-top)>.5)host.style.top=top+(top-rect.top)/scaleY+'px';
+  }
   let loadingSince: number|null=null,loadingTimer: number|null=null;
   let state={status:'idle',source:'',translation:'',message:'',reason:'input'};
   const pending=new Set<string>(),route=()=>env.location?.href||'';
@@ -119,16 +171,23 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
   }
   function layout(){
     if(!trigger||!renderedElement?.isConnected)return;
-    const rect=renderedElement.getBoundingClientRect(),button=trigger.shadowRoot!.querySelector<HTMLButtonElement>('[data-trigger]')!,icon=options().icon==='icon';
-    const size=Math.max(1,Math.min(icon?28:18,rect.width||rect.right-rect.left,rect.height||rect.bottom-rect.top));button.style.width=size+'px';button.style.height=size+'px';position(trigger,rect,size);
-    const actionButton=trigger.shadowRoot!.querySelector<HTMLButtonElement>('[data-translate]')!;actionButton.style.right=parseFloat(trigger.style.left)>=37?'calc(100% + 5px)':'auto';actionButton.style.left=parseFloat(trigger.style.left)>=37?'auto':'calc(100% + 5px)';actionButton.setAttribute('data-side',parseFloat(trigger.style.left)>=37?'left':'right');
+    const raw=renderedElement.getBoundingClientRect(),rect=visibleRect(renderedElement,raw),button=trigger.shadowRoot!.querySelector<HTMLButtonElement>('[data-trigger]')!,icon=options().icon==='icon';lastRect=rectKey(raw);
+    const width=rect.right-rect.left,height=rect.bottom-rect.top,minimum=Math.min(icon?28:18,raw.width,raw.height),hidden=width<minimum||height<minimum||width<=0||height<=0;
+    trigger.style.visibility=hidden?'hidden':'visible';if(preview)preview.style.visibility=hidden?'hidden':'visible';if(hidden)return;
+    const size=Math.max(1,Math.min(icon?28:18,width,height)),left=Math.max(rect.left,rect.right-24-size),top=Math.max(rect.top,rect.bottom-8-size);
+    button.style.width=size+'px';button.style.height=size+'px';trigger.style.width=size+'px';trigger.style.height=size+'px';place(trigger,left,top);
+    const actionButton=trigger.shadowRoot!.querySelector<HTMLButtonElement>('[data-translate]')!;actionButton.style.right=left>=37?'calc(100% + 5px)':'auto';actionButton.style.left=left>=37?'auto':'calc(100% + 5px)';actionButton.setAttribute('data-side',left>=37?'left':'right');
+    const view=viewport(),viewportWidth=view.right-view.left,viewportHeight=view.bottom-view.top;
+    if(preview){
+      preview.style.maxWidth=Math.max(0,Math.min(400,viewportWidth-8))+'px';
+      const measured=preview.getBoundingClientRect();
+      place(preview,Math.max(view.left+4,Math.min(view.right-measured.width-4,rect.left)),Math.max(view.top+4,Math.min(view.bottom-measured.height-4,rect.bottom+8)));
+    }
     const box=trigger.shadowRoot!.querySelector<HTMLElement>('.feedback')!;if(!box||box.hidden)return;
-    const viewportWidth=env.innerWidth||1200,viewportHeight=env.innerHeight||800;
     box.style.position='fixed';box.style.right='auto';box.style.bottom='auto';box.style.maxWidth=Math.max(0,Math.min(300,viewportWidth-8))+'px';box.style.maxHeight=Math.max(0,viewportHeight-8)+'px';box.style.overflow='auto';
-    const measured=box.getBoundingClientRect(),width=Math.min(measured.width,300,viewportWidth-8),height=Math.min(measured.height,viewportHeight-8),anchorLeft=parseFloat(trigger.style.left),anchorTop=parseFloat(trigger.style.top);
-    const left=Math.max(4,Math.min(viewportWidth-width-4,anchorLeft+size-width));
-    const above=anchorTop-height-4,below=anchorTop+size+4;
-    const top=Math.max(4,Math.min(viewportHeight-height-4,above>=4?above:below));box.style.left=left+'px';box.style.top=top+'px';
+    const measured=box.getBoundingClientRect(),boxWidth=Math.min(measured.width,300,viewportWidth-8),boxHeight=Math.min(measured.height,viewportHeight-8);
+    const boxLeft=Math.max(view.left+4,Math.min(view.right-boxWidth-4,left+size-boxWidth)),above=top-boxHeight-4,below=top+size+4;
+    const boxTop=Math.max(view.top+4,Math.min(view.bottom-boxHeight-4,above>=view.top+4?above:below));place(box,boxLeft,boxTop);
   }
   function sync(){
     if(!trigger)return;
@@ -155,12 +214,7 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     if(preview){const output=preview.shadowRoot!.querySelector<HTMLElement>('[data-translation]')!;if(output.textContent!==state.translation)output.textContent=state.translation;preview.shadowRoot!.querySelector<HTMLElement>('[role="status"]')!.textContent=pendingApply&&!editor.valid(pendingApply.snapshot)?labels().changed:state.message;syncActions(preview.shadowRoot!);}
     layout();
   }
-  function position(host: HTMLElement,rect: DOMRect,size: number): void{
-    const width=env.innerWidth||1200,height=env.innerHeight||800;
-    const left=Math.max(4,Math.min(width-size-4,Math.max(Number(rect.left)||0,(Number(rect.right)||0)-24-size)));
-    const top=Math.max(4,Math.min(height-size-4,Math.max(Number(rect.top)||0,(Number(rect.bottom)||0)-8-size)));
-    host.style.cssText='all:initial;position:fixed;z-index:2147483647;';host.style.left=left+'px';host.style.top=top+'px';
-  }
+  function position(host: HTMLElement): void{host.style.cssText='all:initial;position:fixed;z-index:2147483647;';host.style.position='fixed';}
   function render(settled=false){
     const focused=editor.activeElement(),inside=owns(focused)||uiInteraction;
     if(!enabled||!allowed()||editor.isComposing()){hide();return;}
@@ -171,7 +225,7 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     const active=context?.element===element||!context,config=options(),configKey=JSON.stringify(config);
     if(config.icon==='none'&&(!active||state.status==='idle')&&!canRestore()){hide();return;}
     const wantsPreview=active&&!config.autoApply&&state.status!=='idle';
-    if(trigger&&renderedElement===element&&renderedConfig===configKey){renderPreview(element!,wantsPreview);sync();return;}
+    if(trigger&&renderedElement===element&&renderedConfig===configKey){renderPreview(wantsPreview);sync();schedule();return;}
     hide();renderedElement=element;renderedConfig=configKey;
     const host=document.createElement('div');host.id='kuai-input-trigger';host.setAttribute('data-kuai-owned','');host.setAttribute('data-kuai-ui','');
     const shadow=host.attachShadow({mode:'open'}),style=append('style',shadow);
@@ -189,21 +243,20 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     {
       const feedback=append('div',shadow);feedback.className='feedback';const status=append('span',feedback);status.className='status';status.setAttribute('role','status');status.title=state.message;status.textContent=state.status==='loading'?labels().loading:state.status==='error'?labels().failed:state.message===labels().changed?labels().copy:state.message;actions(feedback);
     }
-    const rect=element!.getBoundingClientRect(),size=Math.max(1,Math.min(icon?28:18,rect.width||rect.right-rect.left,rect.height||rect.bottom-rect.top));button.style.width=size+'px';button.style.height=size+'px';
-    position(host,rect,size);document.documentElement.append(host);trigger=host;
-    renderPreview(element!,wantsPreview);sync();
+    position(host);document.documentElement.append(host);trigger=host;track();
+    renderPreview(wantsPreview);sync();
   }
-  function renderPreview(element: EditorElement,wantsPreview: boolean){
+  function renderPreview(wantsPreview: boolean){
     if(!wantsPreview){preview?.remove();preview=null;return;}
     if(!preview){
       preview=document.createElement('div');preview.id='kuai-input-preview';preview.setAttribute('data-kuai-owned','');preview.setAttribute('data-kuai-ui','');
-      const root=preview.attachShadow({mode:'open'}),style=append('style',root);style.textContent='section{box-sizing:border-box;max-width:400px;max-height:50vh;overflow:auto;padding:12px;border:1px solid #bbc5d6;border-radius:10px;background:white;color:#172033;font:14px/1.6 system-ui,sans-serif;box-shadow:0 6px 30px #0003}div{white-space:pre-wrap;overflow-wrap:anywhere}button{margin:4px}';
+      const root=preview.attachShadow({mode:'open'}),style=append('style',root);style.textContent='section{box-sizing:border-box;max-width:min(400px,100%);max-height:50vh;overflow:auto;padding:12px;border:1px solid #bbc5d6;border-radius:10px;background:white;color:#172033;font:14px/1.6 system-ui,sans-serif;box-shadow:0 6px 30px #0003}div{white-space:pre-wrap;overflow-wrap:anywhere}button{margin:4px}';
       const section=append('section',root);section.setAttribute('role','dialog');section.setAttribute('aria-label',labels().inputTrigger);
       action(section,'close',labels().close,cancelCurrent);const output=append('div',section,'data-translation');output.textContent=state.translation;const message=append('div',section);message.setAttribute('role','status');message.textContent=state.message;actions(section);
-      position(preview,element!.getBoundingClientRect(),28);preview.style.left=Math.max(4,Math.min((env.innerWidth||1200)-420,element!.getBoundingClientRect().left||4))+'px';preview.style.top=Math.max(4,Math.min((env.innerHeight||800)-200,element!.getBoundingClientRect().bottom+8))+'px';document.documentElement.append(preview);
+      position(preview);document.documentElement.append(preview);
     }
   }
-  function hide(){clearLoading();expanded=false;trigger?.remove();trigger=null;preview?.remove();preview=null;uiInteraction=false;}
+  function hide(){untrack();clearLoading();expanded=false;trigger?.remove();trigger=null;preview?.remove();preview=null;uiInteraction=false;}
   function update(){if(context&&(context.url!==route()||context.key!==key()))reset();if(restoreContext&&(restoreContext.url!==route()||restoreContext.key!==key()))restoreContext=null;render();}
-  return {run,restore,apply,canRestore,render,update,cancelCurrent,focusin(event: Event){if(!owns(event.composedPath?.()[0]||event.target))uiInteraction=false;render(true);},pointerdown(event: Event){uiInteraction=owns(event.composedPath?.()[0]||event.target);if(!uiInteraction){expanded=false;sync();}},getState:()=>({...state}),start(){enabled=true;render();},hide,stop(){enabled=false;reset();hide();}};
+  return {run,restore,apply,canRestore,render,update,cancelCurrent,focusin(event: Event){if(!owns(event.composedPath?.()[0]||event.target))uiInteraction=false;render(true);if(trigger){watchUntil=now()+1000;queue();}},pointerdown(event: Event){uiInteraction=owns(event.composedPath?.()[0]||event.target);if(!uiInteraction){expanded=false;sync();}},getState:()=>({...state}),start(){enabled=true;render();},hide,stop(){enabled=false;reset();hide();}};
 }
