@@ -45,9 +45,18 @@ export function capturePageContent(element: HTMLElement,env: BrowserEnvironment)
   return {source,runs,linked,units};
 }
 
-export function pageContentMatches(content: PageContent,element: HTMLElement,env: BrowserEnvironment): boolean{
+export function pageContentMatches(content: PageContent,element: HTMLElement,env: BrowserEnvironment,bindings: readonly PageLinkBinding[]=[]): boolean{
   const current=sourceRuns(element,env);
-  return current.length===content.runs.length&&current.every((run,index)=>run.anchor===content.runs[index].anchor&&run.text===content.runs[index].text);
+  if(current.length!==content.runs.length||!current.every((run,index)=>!!run.anchor===!!content.runs[index].anchor&&run.text===content.runs[index].text))return false;
+  // A framework can replace anchors without changing any translation units.
+  let link=0,rebound=false;
+  current.forEach((run,index)=>{
+    if(run.anchor!==content.runs[index].anchor)rebound=true;
+    content.runs[index].anchor=run.anchor;
+    if(run.anchor){const binding=bindings[link++];if(binding)binding.source=run.anchor;}
+  });
+  if(rebound)refreshPageLinks(bindings,element.ownerDocument,env);
+  return true;
 }
 
 function linkAttributes(source: HTMLAnchorElement,document: Document,env: BrowserEnvironment): Record<string,string|null> | null{

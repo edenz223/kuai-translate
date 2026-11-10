@@ -84,7 +84,7 @@ test('changing page style preserves a successful translation and does not send a
  const translated=output(p),text=translated.firstChild;
  h.settings.pageStyle={preset:'highlight',textColor:'#123456',fontSize:125};
  assert.equal(typeof controller.refreshPresentation,'function');controller.refreshPresentation();
- assert.strictEqual(output(p),translated);assert.strictEqual(translated.firstChild,text);assert.ok(sheet(h).includes('color:#123456!important'));assert.ok(sheet(h).includes('font-size:125%!important'));assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);
+ assert.ok(output(p)===translated);assert.strictEqual(translated.firstChild,text);assert.ok(sheet(h).includes('color:#123456!important'));assert.ok(sheet(h).includes('font-size:125%!important'));assert.equal(h.requests.length,1);assert.equal(h.cancellations.length,0);
 });
 test('translation-only waits for success, preserves source node identity and restores inline listeners',async()=>{
  const h=fixture(),p=h.paragraph('Hello '),source=p.firstChild,strong=h.doc.createElement('strong');strong.textContent='world';p.append(strong);let clicks=0;strong.addEventListener('click',()=>clicks++);
@@ -103,12 +103,16 @@ test('translation-only failure leaves original readable and nested translations 
  controller.restore();assert.equal(outer.textContent,'Heading Nested');assert.strictEqual(inner.parentNode,outer);
  h.respond(async()=>({translations:[]}));await controller.translatePage();assert.equal(outer.querySelector('[data-kuai-original]'),null);assert.equal(inner.querySelector('[data-kuai-original]'),null);assert.equal(output(inner).getAttribute('data-state'),'error');
 });
-test('removed translation nodes restore originals from a DOM mutation without another user action',async()=>{
- const h=fixture(),p=h.paragraph('Original');h.settings.pageDisplayMode='translation_only';let observe;
- h.env.MutationObserver=class{constructor(callback){observe=callback;}observe(){}disconnect(){}};
- const controller=createPageTranslator(h.dependencies);await controller.translatePage();const translated=output(p);translated.remove();
- assert.equal(typeof observe,'function');observe([{removedNodes:[translated]}]);await Promise.resolve();
- assert.equal(p.querySelector('[data-kuai-original]'),null);assert.equal(p.textContent,'Original');assert.equal(h.requests.length,1);controller.stop();
+test('removed translation nodes reattach once and restore originals when repeated wipes trip the guard',async t=>{
+ const h=setup(t),p=h.paragraph('Original');h.settings.pageDisplayMode='translation_only';
+ await h.triggers.translate();const translated=output(p);
+ for(let wipe=1;wipe<=4;wipe++){
+  translated.remove();h.mutate([{type:'childList',target:p,removedNodes:[translated],addedNodes:[]}]);await settle();
+  if(wipe<=3){assert.ok(output(p)===translated);assert.equal(p.querySelector('[data-kuai-original]').hidden,true);}
+ }
+ assert.equal(output(p),null);assert.equal(p.querySelector('[data-kuai-original]'),null);assert.equal(p.textContent,'Original');assert.deepEqual(texts(h),['Original']);
+ h.flushTimers();await settle();assert.equal(output(p),null);assert.deepEqual(texts(h),['Original']);
+ await h.triggers.translate();assert.ok(output(p));assert.deepEqual(texts(h),['Original']);
 });
 
 
@@ -149,8 +153,178 @@ test('automatic passes stop retranslating a block the page keeps rebuilding, whi
  await h.triggers.translate();
  const rebuild=async()=>{const next=h.paragraph('Card');next._rect=rect(20);card.remove();h.mutate([{type:'childList',target:h.doc.body,addedNodes:[next],removedNodes:[card]}]);await settle();h.flushTimers();await settle();card=next;};
  for(let round=0;round<4;round++)await rebuild();
- assert.deepEqual(texts(h),['Card','Card','Card']);assert.equal(output(card),null);
- await h.triggers.translate();assert.equal(texts(h).length,4);assert.ok(output(card));
+ assert.deepEqual(texts(h),['Card']);assert.equal(output(card),null);
+ await h.triggers.translate();assert.deepEqual(texts(h),['Card']);assert.ok(output(card));
+});
+const elapse=async(h,ms)=>{h.advance(ms);await settle();};
+test('a source returning to translated text reuses cached parts without waiting to settle',async t=>{
+ const h=setup(t),p=h.paragraph('Original');h.settings.pageOptions={translateDynamic:true};await h.triggers.translate();
+ p.firstChild.textContent='Changed';h.mutate([{type:'characterData',target:p.firstChild}]);await settle();await elapse(h,2400);
+ assert.equal(output(p).textContent,'译：Changed');assert.deepEqual(texts(h),['Original','Changed']);
+ p.firstChild.textContent='Original';h.mutate([{type:'characterData',target:p.firstChild}]);await settle();await elapse(h,250);
+ assert.equal(output(p).getAttribute('data-state'),'success');assert.equal(output(p).textContent,'译：Original');assert.equal(h.page.status().active,false);assert.equal(h.doc.querySelector('[data-kuai-page-loading]'),null);
+ await elapse(h,30000);assert.deepEqual(texts(h),['Original','Changed']);assert.equal(h.timerCount(),0);
+});
+function watchNeighbour(h){
+ const stable=h.doc.body.children.find(node=>blockText(node,h.env)==='Stable'),translated=output(stable),source=stable.firstChild.nodeType===3?stable.firstChild:stable.firstChild.firstChild,value=source.nodeValue;let reads=0,writes=0;
+ Object.defineProperty(source,'nodeValue',{get(){reads++;return value;}});const set=translated.setAttribute.bind(translated);translated.setAttribute=(...args)=>{writes++;set(...args);};
+ return ()=>{assert.equal(reads,0,'an unrelated source is never read by mutation repair');assert.equal(writes,0,'an unrelated output is never presented by mutation repair');assert.strictEqual(output(stable),translated);};
+}
+test('same-text replacement reattaches cached translation in the mutation microtask',async t=>{
+ const h=setup(t),old=h.paragraph('Original');h.paragraph('Stable');await h.triggers.translate();const unchanged=watchNeighbour(h),wrapper=h.doc.createElement('section'),p=h.doc.createElement('p');p.textContent='Original';wrapper.append(p);h.doc.body.append(wrapper);old.remove();
+ h.mutate([{type:'childList',target:h.doc.body,removedNodes:[old],addedNodes:[wrapper]}]);await settle();
+ assert.equal(output(p)?.getAttribute('data-state'),'success');assert.equal(output(p).textContent,'译：Original');assert.deepEqual(texts(h),['Original','Stable']);assert.equal(h.doc.querySelector('[data-kuai-page-loading]'),null);assert.equal(h.page.status().active,false);unchanged();
+});
+test('cached replacement repair stops self-rebuilding widgets before any trigger timer',async t=>{
+ const h=setup(t);let p=h.paragraph('Original');h.paragraph('Stable');await h.triggers.translate();const unchanged=watchNeighbour(h);
+ for(let wipe=1;wipe<=5;wipe++){
+  const next=h.paragraph('Original');p.remove();h.mutate([{type:'childList',target:h.doc.body,removedNodes:[p],addedNodes:[next]}]);await settle();p=next;
+  assert.equal(!!output(p),wipe<3);
+ }
+ assert.deepEqual(texts(h),['Original','Stable']);unchanged();
+ await h.triggers.translate();assert.equal(output(p).textContent,'译：Original');assert.deepEqual(texts(h),['Original','Stable']);
+});
+test('same-text anchor replacement rebinds translated navigation without replacing the output',async t=>{
+ const h=setup(t),p=h.paragraph('Read '),old=link(h,'guide','/guide');p.append(old);h.paragraph('Stable');await h.triggers.translate();const translated=output(p),a=translated.querySelector('a'),unchanged=watchNeighbour(h),next=link(h,'guide','/guide');
+ p.insertBefore(next,old);old.remove();h.mutate([{type:'childList',target:p,removedNodes:[old],addedNodes:[next]}]);await settle();
+ assert.ok(output(p)===translated);assert.ok(translated.querySelector('a')===a);assert.equal(h.emit(a,'click').defaultPrevented,false);unchanged();
+ next.setAttribute('href','/updated');h.mutate([{type:'attributes',target:next,attributeName:'href'}]);await settle();
+ assert.equal(a.getAttribute('href'),'https://example.org/updated');assert.equal(h.emit(a,'click').defaultPrevented,false);assert.deepEqual(texts(h),['Read','guide','Stable']);unchanged();
+});
+for(const mode of ['bilingual','translation_only'])test(`same-text child replacement repairs wiped output and bounds repeated repair in ${mode}`,async t=>{
+ const h=setup(t),p=h.paragraph('Original');h.paragraph('Stable');h.settings.pageDisplayMode=mode;await h.triggers.translate();const translated=output(p),unchanged=watchNeighbour(h);
+ for(let wipe=1;wipe<=5;wipe++){
+  const removed=[...p.childNodes];p.replaceChildren(h.doc.createTextNode('Original'));h.mutate([{type:'childList',target:p,removedNodes:removed,addedNodes:[p.firstChild]}]);await settle();
+  if(wipe<=3){assert.ok(output(p)===translated);assert.equal(output(p).textContent,'译：Original');if(mode==='translation_only')assert.equal(p.firstChild.hidden,true);}
+  else{assert.equal(output(p),null);assert.equal(p.querySelector('[data-kuai-original]'),null);assert.equal(p.textContent,'Original');}
+ }
+ assert.deepEqual(texts(h),['Original','Stable']);assert.equal(h.page.status().active,false);unchanged();
+ h.flushTimers();await settle();assert.equal(output(p),null);assert.deepEqual(texts(h),['Original','Stable']);
+});
+test('output repair gets a new loop window after a quiet second',async t=>{
+ const h=setup(t),p=h.paragraph('Original');await h.triggers.translate();const translated=output(p);
+ for(let wipe=0;wipe<6;wipe++){
+  if(wipe===3)await elapse(h,1001);
+  translated.remove();h.mutate([{type:'childList',target:p,removedNodes:[translated],addedNodes:[]}]);await settle();assert.ok(output(p)===translated);
+ }
+ const next=h.paragraph('Original');p.remove();h.mutate([{type:'childList',target:h.doc.body,removedNodes:[p],addedNodes:[next]}]);await settle();
+ assert.equal(output(next).textContent,'译：Original');assert.deepEqual(texts(h),['Original']);
+});
+test('cached entries and replacement repair still respect viewport, readability, policy and validation',async t=>{
+ for(const change of ['viewport','readability','policy','validation','route','visibility']){
+  const h=setup(t),old=h.paragraph('Original');let valid=true;const validate=()=>valid;
+  h.settings.pageOptions={excludeSelectors:['.private']};await h.page.translateBlocks([{element:old,text:'Original'}],{validate});
+  const next=h.paragraph('Original');old.remove();
+  if(change==='viewport')next._rect=rect(2000);else if(change==='readability')next.hidden=true;
+  else if(change==='policy')next.className='private';else if(change==='validation')valid=false;
+  else if(change==='route')h.env.location.href='https://example.org/next';else h.doc.visibilityState='hidden';
+  h.mutate([{type:'childList',target:h.doc.body,removedNodes:[old],addedNodes:[next]}]);await settle();assert.equal(output(next),null,change);assert.deepEqual(texts(h),['Original']);
+  if(!['route','visibility'].includes(change)){
+   await h.page.translateBlocks([{element:next,text:'Original'}],{validate,viewportOnly:true});assert.equal(output(next),null,change);assert.deepEqual(texts(h),['Original']);
+  }
+ }
+});
+test('cached units skip repeated language detection but settings changes and restore require new translations',async t=>{
+ const h=setup(t),p=h.paragraph('Original');h.settings.pageOptions={neverLanguages:['ja']};let detections=0;
+ h.env.chrome={i18n:{detectLanguage:async()=>{detections++;return {isReliable:true,languages:[{language:'en',percentage:100}]};}}};
+ await h.page.translateBlocks([{element:p,text:'Original'}]);await h.page.toggleBlocks([{element:p,text:'Original'}]);
+ const reused=h.page.translateBlocks([{element:p,text:'Original'}]);assert.equal(output(p).getAttribute('data-state'),'success');assert.equal(h.page.status().active,false);await reused;
+ assert.equal(detections,1);assert.deepEqual(texts(h),['Original']);
+ h.settings.targetLanguage='fr';await h.page.translateBlocks([{element:p,text:'Original'}]);assert.equal(detections,2);assert.deepEqual(texts(h),['Original','Original']);
+ h.page.restore();await h.page.translateBlocks([{element:p,text:'Original'}]);assert.equal(detections,3);assert.deepEqual(texts(h),['Original','Original','Original']);
+});
+test('the translation cache evicts its least recently used entry at 500 successes',async t=>{
+ const h=setup(t),p=h.paragraph('Item 0');
+ const show=async text=>{p.textContent=text;await h.page.translateBlocks([{element:p,text}]);await h.page.toggleBlocks([{element:p,text}]);};
+ for(let item=0;item<500;item++)await show(`Item ${item}`);
+ await show('Item 0');await show('Item 500');assert.equal(texts(h).length,501);
+ await show('Item 0');assert.equal(texts(h).length,501,'a recent hit survives eviction');
+ await show('Item 1');assert.equal(texts(h).length,502,'the oldest unused entry was evicted');
+});
+for(const dynamic of [true,false])test(`a 1 Hz inline timer settles once after ticking with dynamic translation ${dynamic?'on':'off'}`,async t=>{
+ const h=setup(t),block=h.paragraph('','div'),label=h.doc.createElement('span'),timer=h.doc.createElement('span');block.style.display='flex';label.append('Working for ',timer);block.append(label);timer.textContent='1s';
+ const stable=h.paragraph('Stable sibling');h.settings.pageOptions={translateDynamic:dynamic};await h.triggers.translate();const siblingOutput=output(stable);
+ for(let tick=1;tick<=10;tick++){
+  await elapse(h,tick===1?1000:750);
+  if(dynamic){timer.firstChild.textContent=`${tick+1}s`;h.mutate([{type:'characterData',target:timer.firstChild}]);}
+  else{const removed=[...timer.childNodes];timer.textContent=`${tick+1}s`;h.mutate([{type:'childList',target:timer,addedNodes:[timer.firstChild],removedNodes:removed}]);}
+  if(tick===4){const added=h.paragraph('Brand new block');h.mutate([{type:'childList',target:h.doc.body,addedNodes:[added],removedNodes:[]}]);}
+  await settle();await elapse(h,250);
+  assert.equal(texts(h).filter(text=>text.startsWith('Working for')).length,1);
+  assert.strictEqual(output(stable),siblingOutput);assert.equal(h.page.status().active,false);assert.equal(h.doc.querySelector('[data-kuai-page-loading]'),null);
+  if(tick>=4)assert.ok(texts(h).includes('Brand new block'),'first-time blocks translate promptly');
+ }
+ assert.equal(texts(h).filter(text=>text==='Stable sibling').length,1);
+ await elapse(h,2149);assert.equal(output(block),null);
+ await elapse(h,1);assert.deepEqual(texts(h).filter(text=>text.startsWith('Working for')),['Working for 1s','Working for 11s']);assert.equal(output(block).textContent,'译：Working for 11s');
+ await elapse(h,30000);assert.equal(texts(h).filter(text=>text==='Working for 11s').length,1);
+});
+test('streaming text sends only the final paragraph after its quiet window',async t=>{
+ const h=setup(t),p=h.paragraph('Streaming');h.settings.pageOptions={translateDynamic:true};await h.triggers.translate();let text='Streaming';
+ for(let chunk=0;chunk<20;chunk++){
+  await elapse(h,100);text+=' more';p.firstChild.textContent=text;h.mutate([{type:'characterData',target:p.firstChild}]);await settle();
+  assert.deepEqual(texts(h),['Streaming']);
+ }
+ await elapse(h,2399);assert.deepEqual(texts(h),['Streaming']);
+ await elapse(h,1);assert.deepEqual(texts(h),['Streaming',text]);assert.equal(output(p).textContent,'译：'+text);
+});
+test('repeatedly wasted translations back off for a block changing every 2.5 seconds',async t=>{
+ const h=setup(t),p=h.paragraph('Version zero');h.settings.pageOptions={translateDynamic:true};await h.triggers.translate();
+ for(let version=1;version<=24;version++){
+  await elapse(h,version===1?2500:2250);p.firstChild.textContent=`Version ${version}`;h.mutate([{type:'characterData',target:p.firstChild}]);await settle();await elapse(h,250);
+ }
+ assert.ok(texts(h).length<=3,`bounded requests over 60s: ${texts(h).length}`);
+ await elapse(h,30000);assert.equal(texts(h).filter(text=>text==='Version 24').length,1);assert.equal(output(p).textContent,'译：Version 24');
+});
+test('manual page and paragraph actions bypass a just-changed source settle gate',async t=>{
+ for(const action of ['trigger','page','blocks','toggle']){
+  const h=setup(t),p=h.paragraph('Original');h.settings.pageOptions={translateDynamic:true};await h.triggers.translate();
+  p.firstChild.textContent='Changed';h.mutate([{type:'characterData',target:p.firstChild}]);await settle();await elapse(h,250);assert.deepEqual(texts(h),['Original']);
+  if(action==='trigger')await h.triggers.translate();else if(action==='page')await h.page.translatePage({retryErrors:true});
+  else await h.page[action==='blocks'?'translateBlocks':'toggleBlocks']([{element:p,text:'Changed'}]);
+  assert.deepEqual(texts(h),['Original','Changed']);assert.ok(output(p));await elapse(h,30000);assert.equal(texts(h).length,2);
+ }
+});
+test('restore, stop and cancel clear a deferred automatic translation',async t=>{
+ for(const action of ['restore','stop','cancelCurrent']){
+  const h=setup(t),p=h.paragraph('Original');h.settings.pageOptions={translateDynamic:true};await h.triggers.translate();
+  p.firstChild.textContent='Changed';h.mutate([{type:'characterData',target:p.firstChild}]);await settle();await elapse(h,250);assert.equal(h.timerCount(),1);
+  h.page[action]();await elapse(h,30000);assert.deepEqual(texts(h),['Original']);assert.equal(h.timerCount(),0);assert.equal(output(p),null);
+  if(action!=='cancelCurrent'){await h.page.translatePage({retryErrors:false});assert.deepEqual(texts(h),['Original','Changed'],'restore clears source history too');}
+ }
+});
+test('changing pending blocks share one deferred timer and ignore the wasted response',async t=>{
+ const h=setup(t),first=h.paragraph('First'),second=h.paragraph('Second');h.settings.pageOptions={translateDynamic:true};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));
+ const initial=h.triggers.translate();await settle();
+ for(const p of [first,second]){p.firstChild.textContent+=' changed';h.mutate([{type:'characterData',target:p.firstChild}]);}await settle();await initial;await elapse(h,250);
+ assert.equal(h.page.status().active,false);assert.equal(h.page.status().total,0);assert.equal(h.timerCount(),1);assert.equal(h.cancellations.length,1);
+ h.respond(async values=>({translations:values.map(text=>'译：'+text)}));await elapse(h,2150);
+ assert.deepEqual(h.requests.map(request=>request.texts),[['First','Second'],['First changed','Second changed']]);assert.equal(h.timerCount(),0);
+ finish({translations:['Stale first','Stale second']});await settle();assert.equal(output(first).textContent,'译：First changed');assert.equal(output(second).textContent,'译：Second changed');
+});
+test('a deferred retry re-reads source and waits again if an unobserved change arrived',async t=>{
+ const h=setup(t),p=h.paragraph('Original');h.settings.pageOptions={translateDynamic:true};await h.triggers.translate();
+ p.firstChild.textContent='Changed';h.mutate([{type:'characterData',target:p.firstChild}]);await settle();await elapse(h,250);
+ p.firstChild.textContent='Latest';await elapse(h,2150);assert.deepEqual(texts(h),['Original']);assert.equal(h.timerCount(),1);
+ await elapse(h,2399);assert.deepEqual(texts(h),['Original']);await elapse(h,1);assert.deepEqual(texts(h),['Original','Latest']);
+});
+test('deferred retries respect current viewport, readability, policy and route',async t=>{
+ for(const change of ['viewport','readability','policy','route','visibility','removed']){
+  const h=setup(t),p=h.paragraph('Original');h.settings.pageOptions={translateDynamic:true};await h.triggers.translate();
+  p.firstChild.textContent='Changed';h.mutate([{type:'characterData',target:p.firstChild}]);await settle();await elapse(h,250);
+  if(change==='viewport')p._rect=rect(2000);else if(change==='readability')p.hidden=true;
+  else if(change==='policy')h.settings.pageOptions.neverSites=['example.org'];else if(change==='route')h.env.location.href='https://example.org/next';
+  else if(change==='visibility')h.doc.visibilityState='hidden';else p.remove();
+  await elapse(h,30000);assert.deepEqual(texts(h),['Original'],change);assert.equal(output(p),null);assert.equal(h.timerCount(),0);
+ }
+});
+test('a source mutation validates only affected blocks and accumulates targets across a burst',async t=>{
+ const h=setup(t),first=h.paragraph('First'),second=h.paragraph('Second'),stable=h.paragraph('Stable');await h.triggers.translate();await settle();
+ const stableOutput=output(stable),source=stable.firstChild,value=source.nodeValue;let reads=0;Object.defineProperty(source,'nodeValue',{get(){reads++;return value;}});
+ first.firstChild.textContent='Updated first';h.mutate([{type:'characterData',target:first.firstChild}]);
+ second.firstChild.textContent='Updated second';h.mutate([{type:'characterData',target:second.firstChild}]);await settle();
+ assert.equal(reads,0,'an unrelated source is never read by mutation repair');assert.strictEqual(output(stable),stableOutput);assert.equal(output(first),null);assert.equal(output(second),null);assert.deepEqual(texts(h),['First','Second','Stable']);
+ h.page.refreshPresentation();assert.ok(reads>0,'explicit presentation refresh still validates every entry');
 });
 test('a carousel transition translates the slide it brings into view',async t=>{
  const h=setup(t),first=h.paragraph('First'),slide=h.paragraph('Slide');first._rect=rect(20);slide._rect=rect(20,1600);
