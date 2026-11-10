@@ -13,7 +13,7 @@ interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>b
 interface PageRequest {owners:Set<PageEntry>;release:(()=>void)|null}
 interface SourceChanges {source:string;changedAt?:number;wasted:number}
 
-import { ancestors, batches, blockText, collectBlocks, computedStyle, isPageControl, isBlock, isChinese, isPageReadable as isReadable, isInViewport, visibleRect, makeId, requestOptions, translationsOf, withLayoutCache } from './dom.js';
+import { ancestors, batches, blockText, collectBlocks, computedStyle, isPageControl, isBlock, pinBlock, unpinBlock, isChinese, isPageReadable as isReadable, isInViewport, visibleRect, makeId, requestOptions, translationsOf, withLayoutCache } from './dom.js';
 import {filterPageBlocks,isPageBlockAllowed,isPageSiteBlocked,pageTranslationKey} from './page-policy.js';
 import {pageStyleRule} from '../shared/styles.js';
 import {hideOriginal,restoreOriginal} from './originals.js';
@@ -110,7 +110,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     if(entry.inlineLayout!==undefined){if(entry.inlineLayout===null)entry.element.removeAttribute('data-kuai-inline-layout');else entry.element.setAttribute('data-kuai-inline-layout',entry.inlineLayout);}
     if(entry.flexLayout!==undefined){if(entry.flexLayout===null)entry.element.removeAttribute('data-kuai-flex-layout');else entry.element.setAttribute('data-kuai-flex-layout',entry.flexLayout);}
     if(entry.titleLayout!==undefined&&entry.element.getAttribute('data-kuai-title-layout')==='stacked'){if(entry.titleLayout===null)entry.element.removeAttribute('data-kuai-title-layout');else entry.element.setAttribute('data-kuai-title-layout',entry.titleLayout);}
-    if(entries.get(entry.element)===entry)entries.delete(entry.element);
+    if(entries.get(entry.element)===entry){entries.delete(entry.element);unpinBlock(entry.element);}
     changed();
     if(!entries.size){if(!deferred.size){observer?.disconnect();observer=null;}titleLayoutStyle?.remove();titleLayoutStyle=null;pageSheet?.remove();pageSheet=null;}
   }
@@ -162,6 +162,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     for(const root of roots){if(budget<=0)break;visit(root);}return blocks;
   }
   function makeEntry(element: HTMLElement, source: string, key: string, validate: ()=>boolean, viewportOnly: boolean,content: PageContent,parts?: string[]): PageEntry {
+    if(isBlock(element,env))pinBlock(element);
     if(!sources.has(element))sources.set(element,{source,wasted:0});
     const entry: PageEntry={element,source,key,validate,viewportOnly,url:route(),status:parts?'success':'pending',startedAt:now(),layout:measureSourceLayout(element,env),output:null,parts:parts?.slice()||[],originals:[],content,links:[],resolve:null};
     entry.done=new Promise<void>(resolve=>{entry.resolve=resolve;});entries.set(element,entry);observe();changed();return entry;
@@ -253,6 +254,11 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     output.className='kuai-translator-wrapper notranslate';
     output.setAttribute('data-kuai-owned','');output.setAttribute('data-kuai-page-translation','');
     output.setAttribute('role','status');output.setAttribute('aria-live','polite');output.setAttribute('translate','no');
+    // Inline source typography can differ from the block; inner theme percentages scale from this size.
+    if(entry.layout.fontOverride){
+      output.style.setProperty('font-size',entry.layout.fontSize+'px','important');
+      if(/^\d*\.?\d+px$/.test(entry.layout.lineHeight||''))output.style.setProperty('line-height',entry.layout.lineHeight!,'important');
+    }
     inner.className='kuai-translator-inner';
     inner.setAttribute('lang',getSettings().targetLanguage||'');
     output.append(inner);entry.element.append(output);
@@ -306,7 +312,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
         if(entry.forcedBlock||entry.status!=='success'||!entry.inner||!entry.output?.isConnected||entry.output.getAttribute('data-kuai-layout')!=='inline')return [];
         const box=entry.inner.getBoundingClientRect(),hostStyle=computedStyle(entry.element,env),innerStyle=computedStyle(entry.inner,env);
         const fontSize=parseFloat(innerStyle?.fontSize||'')||entry.layout.fontSize;
-        const lineHeight=parseFloat(hostStyle?.lineHeight||'')||(parseFloat(hostStyle?.fontSize||'')||entry.layout.fontSize)*1.2;
+        // A wrapper at the source text's size sets its own line; the smaller host's would read one line as a column.
+        const lineHeight=entry.layout.fontOverride?Math.max(parseFloat(entry.layout.lineHeight||'')||0,fontSize*1.2):parseFloat(hostStyle?.lineHeight||'')||(parseFloat(hostStyle?.fontSize||'')||entry.layout.fontSize)*1.2;
         // Mixed-width glyphs can make a three-character column slightly wider than three em.
         if(!(box.width>0&&box.width<fontSize*4&&box.height>lineHeight*1.5))return [];
         let width: number|undefined;

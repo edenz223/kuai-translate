@@ -2,16 +2,18 @@ import type {BrowserEnvironment} from './dom.js';
 import {blockText,computedStyle,isBlock,isPageReadable,isPageControl} from './dom.js';
 
 export const INLINE_CONTROL_LIMIT=40,INLINE_TEXT_LIMIT=30,INLINE_BLOCK_LIMIT=16,INLINE_NOWRAP_LIMIT=20;
-export interface SourceLayout {multiline:boolean;width:number;fontSize:number;nowrap:boolean;display:string;column:boolean;textWidth?:number;duplicatePseudo?:string;expandOverflow?:boolean}
+export interface SourceLayout {multiline:boolean;width:number;fontSize:number;lineHeight?:string;fontOverride?:boolean;nowrap:boolean;display:string;column:boolean;textWidth?:number;duplicatePseudo?:string;expandOverflow?:boolean}
 const weightedLength=(text: string)=>Array.from(text).reduce((length,character)=>length+(character.codePointAt(0)!>255?2:1),0);
 
 /** Measure source text before appending any output; later refreshes reuse this snapshot. */
 export function measureSourceLayout(element: HTMLElement,env: BrowserEnvironment): SourceLayout {
-  const style=computedStyle(element,env),rect=element.getBoundingClientRect(),fontSize=parseFloat(style?.fontSize||'')||16;
+  const style=computedStyle(element,env),rect=element.getBoundingClientRect(),hostFontSize=parseFloat(style?.fontSize||'')||16;
+  const textLengths=new Map<HTMLElement,number>();
   const tops: number[]=[],widths: number[]=[];let multiline=false;
   const visit=(node: Node): void=>{
     if(node.nodeType===3){
       if(!/\S/u.test(node.nodeValue||''))return;
+      const parent=node.parentElement!;textLengths.set(parent,(textLengths.get(parent)||0)+Array.from((node.nodeValue||'').replace(/\s/gu,'')).length);
       try{const range=element.ownerDocument.createRange();range.selectNodeContents(node);for(const box of Array.from(range.getClientRects?.()||[]))if(box.width&&box.height){tops.push((box.top+box.bottom)/2);widths.push(box.width);}}catch{}
       return;
     }
@@ -20,7 +22,9 @@ export function measureSourceLayout(element: HTMLElement,env: BrowserEnvironment
     for(const child of node.childNodes)visit(child);
   };
   visit(element);
-  const lineHeight=parseFloat(style?.lineHeight||'')||fontSize*1.2;
+  let dominant=element,longest=0;for(const [parent,length]of textLengths)if(length>longest){dominant=parent;longest=length;}
+  const textStyle=dominant===element?style:computedStyle(dominant,env),fontSize=parseFloat(textStyle?.fontSize||'')||hostFontSize;
+  const lineHeight=parseFloat(style?.lineHeight||'')||hostFontSize*1.2;
   multiline ||= tops.length>1&&Math.max(...tops)-Math.min(...tops)>lineHeight*.5;
   const column=style?.flexDirection?.startsWith('column')||false;
   const duplicatePseudo=column&&/flex/.test(style?.display||'')?['before','after'].filter(name=>{
@@ -28,7 +32,7 @@ export function measureSourceLayout(element: HTMLElement,env: BrowserEnvironment
     return pseudo?.height==='0px'&&pseudo.content?.slice(1,-1)===blockText(element,env);
   }).join(' '):'';
   const expandOverflow=parseInt(style?.webkitLineClamp||'')>0||style?.textOverflow==='ellipsis'&&/hidden|clip/.test((style?.overflowX||style?.overflow||'')+' '+(style?.overflowY||style?.overflow||''));
-  return {expandOverflow,duplicatePseudo,multiline,width:rect.width,fontSize,nowrap:/nowrap|^pre$/.test(style?.whiteSpace||'')||style?.textOverflow==='ellipsis',display:style?.display||'',textWidth:widths.reduce((sum,width)=>sum+width,0),column};
+  return {expandOverflow,duplicatePseudo,multiline,width:rect.width,fontSize,lineHeight:textStyle?.lineHeight,fontOverride:dominant!==element&&fontSize!==hostFontSize,nowrap:/nowrap|^pre$/.test(style?.whiteSpace||'')||style?.textOverflow==='ellipsis',display:style?.display||'',textWidth:widths.reduce((sum,width)=>sum+width,0),column};
 }
 
 export function pageLayout(element: HTMLElement,source: string,translation: string,metrics: SourceLayout,env: BrowserEnvironment=globalThis): {layout:'inline'|'block'} {
