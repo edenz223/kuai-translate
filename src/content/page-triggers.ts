@@ -1,3 +1,4 @@
+import {originalMutationFilter} from './source-text.js';
 import type {DisplayMode} from '../shared/messages.js';
 import type {Settings} from '../shared/settings.js';
 import type {BrowserEnvironment,CodedError} from './dom.js';
@@ -60,18 +61,20 @@ export function createPageTriggers({document,env=globalThis,getSettings,page,cha
     },120);
   }
   function viewportChanged(){if(stopped||manualStopped||!activeSession)return;viewportDirty=true;scheduleViewport();}
-  const owned=(node: unknown,wrappers=false): boolean=>ancestors(node).some(element=>element.hasAttribute?.('data-kuai-owned')||element.hasAttribute?.('data-kuai-ui')||wrappers&&element.hasAttribute?.('data-kuai-original'));
+  const owned=(node: unknown): boolean=>ancestors(node).some(element=>element.hasAttribute?.('data-kuai-owned')||element.hasAttribute?.('data-kuai-ui'));
   function sourceMutation(record: MutationRecord): boolean{
     if(record.type==='attributes')return (record.attributeName==='lang'||isPageLinkMutation(record))&&!owned(record.target);
     if(owned(record.target))return false;
     if(record.type==='characterData')return true;
-    return [...(record.addedNodes||[]),...(record.removedNodes||[])].some(node=>!owned(node,true));
+    return [...(record.addedNodes||[]),...(record.removedNodes||[])].some(node=>!owned(node));
   }
+  const originalMutations=originalMutationFilter();
   function changed(records: MutationRecord[]): void{
+    const ignored=originalMutations(records);records=records.filter(record=>!ignored.has(record));
     if(stopped||manualStopped||!records.some(sourceMutation))return;
     if(!activeSession){autoAttempted=false;scheduleAuto();return;}
     if(preferences().translateDynamic){dirty=true;scheduleDynamic();}
-    else if(records.some(record=>sourceMutation(record)&&[...(record.addedNodes||[])].some(node=>!owned(node,true))))viewportChanged();
+    else if(records.some(record=>sourceMutation(record)&&[...(record.addedNodes||[])].some(node=>!owned(node))))viewportChanged();
   }
   async function mode(){
     if(modePending||stopped)return;modePending=true;const version=epoch,url=route();
@@ -103,7 +106,7 @@ export function createPageTriggers({document,env=globalThis,getSettings,page,cha
     listen(document,'visibilitychange',()=>{if(hidden()){epoch++;clearTimers();}else{if(!activeSession&&!manualStopped)autoAttempted=false;scheduleAuto();scheduleDynamic();viewportChanged();}});
     listen(env,'pagehide',()=>{epoch++;clearTimers();});
     listen(env,'pageshow',()=>{if(!activeSession&&!manualStopped)autoAttempted=false;scheduleAuto();scheduleDynamic();viewportChanged();});
-    if(env.MutationObserver){observer=new env.MutationObserver(changed);observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['lang',...PAGE_LINK_ATTRIBUTES]});}
+    if(env.MutationObserver){observer=new env.MutationObserver(changed);observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,characterDataOldValue:true,attributes:true,attributeFilter:['lang',...PAGE_LINK_ATTRIBUTES]});}
     scheduleAuto();return api;
   }
   function stop(){if(stopped)return;stopped=true;epoch++;clearTimers();observer?.disconnect();disposers.splice(0).forEach(dispose=>dispose());}

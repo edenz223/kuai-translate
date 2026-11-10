@@ -227,14 +227,14 @@ test('translation-only waits for success, preserves source node identity and res
  h.settings.pageDisplayMode='translation_only';let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const controller=createPageTranslator(h.dependencies),pending=controller.translatePage();
  assert.equal(p.querySelector('[data-kuai-original]'),null);assert.strictEqual(source.parentNode,p);
  finish({translations:['你好世界']});await pending;
- assert.equal(p.querySelectorAll('[data-kuai-original]').length,2);assert.equal(source.parentElement.hidden,true);assert.equal(strong.parentElement.hidden,true);assert.equal(output(p).textContent,'你好世界');
+ assert.equal(p.querySelectorAll('[data-kuai-original]').length,1);assert.equal(source.nodeValue,'');assert.strictEqual(source.parentNode,p);assert.ok(strong.hasAttribute('data-kuai-original'));assert.strictEqual(strong.parentNode,p);assert.ok(sheet(h).includes('[data-kuai-original]{display:none!important}'));assert.equal(output(p).textContent,'你好世界');
  h.settings.pageDisplayMode='bilingual';controller.refreshPresentation();assert.strictEqual(p.firstChild,source);assert.strictEqual(p.children[0],strong);h.emit(strong,'click');assert.equal(clicks,1);
  controller.restore();assert.equal(p.textContent,'Hello world');assert.strictEqual(p.firstChild,source);
 });
 test('translation-only failure leaves original readable and nested translations remain independent',async()=>{
  const h=fixture(),outer=h.paragraph('Heading ','div'),inner=h.doc.createElement('p');inner.textContent='Nested';outer.append(inner);h.settings.pageDisplayMode='translation_only';
  const controller=createPageTranslator(h.dependencies);await controller.translatePage();
- assert.ok(outer.querySelector('[data-kuai-original]'));assert.strictEqual(inner.parentNode,outer);assert.equal(output(inner).textContent,'译：Nested');
+ assert.equal(outer.firstChild.nodeValue,'');assert.equal(inner.firstChild.nodeValue,'');assert.strictEqual(inner.parentNode,outer);assert.equal(output(inner).textContent,'译：Nested');
  await controller.translatePage();assert.equal(h.requests.length,1,'hidden originals remain readable to the source collector for deduplication');
  controller.restore();assert.equal(outer.textContent,'Heading Nested');assert.strictEqual(inner.parentNode,outer);
  h.respond(async()=>({translations:[]}));await controller.translatePage();assert.equal(outer.querySelector('[data-kuai-original]'),null);assert.equal(inner.querySelector('[data-kuai-original]'),null);assert.equal(output(inner).getAttribute('data-state'),'error');
@@ -244,7 +244,7 @@ test('removed translation nodes reattach once and restore originals when repeate
  await h.triggers.translate();const translated=output(p);
  for(let wipe=1;wipe<=4;wipe++){
   translated.remove();h.mutate([{type:'childList',target:p,removedNodes:[translated],addedNodes:[]}]);await settle();
-  if(wipe<=3){assert.ok(output(p)===translated);assert.equal(p.querySelector('[data-kuai-original]').hidden,true);}
+  if(wipe<=3){assert.ok(output(p)===translated);assert.equal(p.firstChild.nodeValue,'');}
  }
  assert.equal(output(p),null);assert.equal(p.querySelector('[data-kuai-original]'),null);assert.equal(p.textContent,'Original');assert.deepEqual(texts(h),['Original']);
  h.flushTimers();await settle();assert.equal(output(p),null);assert.deepEqual(texts(h),['Original']);
@@ -302,8 +302,8 @@ test('a source returning to translated text reuses cached parts without waiting 
  await elapse(h,30000);assert.deepEqual(texts(h),['Original','Changed']);assert.equal(h.timerCount(),0);
 });
 function watchNeighbour(h){
- const stable=h.doc.body.children.find(node=>blockText(node,h.env)==='Stable'),translated=output(stable),source=stable.firstChild.nodeType===3?stable.firstChild:stable.firstChild.firstChild,value=source.nodeValue;let reads=0,writes=0;
- Object.defineProperty(source,'nodeValue',{get(){reads++;return value;}});const set=translated.setAttribute.bind(translated);translated.setAttribute=(...args)=>{writes++;set(...args);};
+ const stable=h.doc.body.children.find(node=>blockText(node,h.env)==='Stable'),translated=output(stable),source=stable.firstChild.nodeType===3?stable.firstChild:stable.firstChild.firstChild;let value=source.nodeValue,reads=0,writes=0;
+ Object.defineProperty(source,'nodeValue',{get(){reads++;return value;},set(next){value=next;}});const set=translated.setAttribute.bind(translated);translated.setAttribute=(...args)=>{writes++;set(...args);};
  return ()=>{assert.equal(reads,0,'an unrelated source is never read by mutation repair');assert.equal(writes,0,'an unrelated output is never presented by mutation repair');assert.strictEqual(output(stable),translated);};
 }
 test('same-text replacement reattaches cached translation in the mutation microtask',async t=>{
@@ -331,7 +331,7 @@ for(const mode of ['bilingual','translation_only'])test(`same-text child replace
  const h=setup(t),p=h.paragraph('Original');h.paragraph('Stable');h.settings.pageDisplayMode=mode;await h.triggers.translate();const translated=output(p),unchanged=watchNeighbour(h);
  for(let wipe=1;wipe<=5;wipe++){
   const removed=[...p.childNodes];p.replaceChildren(h.doc.createTextNode('Original'));h.mutate([{type:'childList',target:p,removedNodes:removed,addedNodes:[p.firstChild]}]);await settle();
-  if(wipe<=3){assert.ok(output(p)===translated);assert.equal(output(p).textContent,'译：Original');if(mode==='translation_only')assert.equal(p.firstChild.hidden,true);}
+  if(wipe<=3){assert.ok(output(p)===translated);assert.equal(output(p).textContent,'译：Original');if(mode==='translation_only')assert.equal(p.firstChild.nodeValue,'');}
   else{assert.equal(output(p),null);assert.equal(p.querySelector('[data-kuai-original]'),null);assert.equal(p.textContent,'Original');}
  }
  assert.deepEqual(texts(h),['Original','Stable']);assert.equal(h.page.status().active,false);unchanged();
@@ -505,7 +505,7 @@ function shared(h){
 test('paragraph toggle uses page presentation and restores the same source nodes on its second action',async()=>{
   const h=fixture(),p=h.paragraph('Original'),source=p.firstChild;h.settings.pageDisplayMode='translation_only';
   const page=shared(h);await page.toggleBlocks(blocks(p));const result=outputShared(p);
-  assert.equal(result.textContent,'译：Original');assert.equal(source.parentElement.hidden,true);
+  assert.equal(result.textContent,'译：Original');assert.equal(source.nodeValue,'');assert.strictEqual(source.parentNode,p);
   assert.equal(page.status().translated,1);await page.toggleBlocks([{element:p,text:'Original'}]);
   assert.equal(outputShared(p),null);assert.equal(p.firstChild,source);assert.equal(p.textContent,'Original');assert.equal(page.status().total,0);
   assert.equal(h.doc.querySelectorAll('[data-kuai-ui]').length,0,'closing the last paragraph also dismisses the page controls');
@@ -568,7 +568,7 @@ test('translation-only waits for all link runs and restores the original nodes a
   h.settings.pageDisplayMode='translation_only';let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));
   const page=createPageTranslator(h.dependencies),pending=page.translatePage();
   assert.equal(p.querySelector('[data-kuai-original]'),null);finish({translations:['阅读','指南']});await pending;
-  assert.ok(outputLinks(p).querySelector('a'));assert.equal(a.parentNode.hidden,true);assert.equal(text.parentNode.hidden,true);
+  assert.ok(outputLinks(p).querySelector('a'));assert.ok(a.hasAttribute('data-kuai-original'));assert.strictEqual(a.parentNode,p);assert.equal(text.nodeValue,'');assert.strictEqual(text.parentNode,p);
   const translated=outputLinks(p).querySelector('a');assert.equal(h.emit(translated,'click').defaultPrevented,false);
   page.refreshPresentation();assert.equal(h.requests.length,1);assert.equal(outputLinks(p).querySelector('a'),translated);
   page.restore();assert.equal(p.firstChild,text);assert.equal(a.parentNode,p);h.emit(a,'click');assert.equal(clicks,1);assert.equal(p.textContent,'Read guide');
@@ -599,7 +599,7 @@ test('retry rebuilds link runs after a provider failure without hiding the sourc
   const h=fixture(),p=h.paragraph('Read '),a=link(h,'Guide','/guide');p.append(a);h.settings.pageDisplayMode='translation_only';h.respond(async()=>{throw Error('Temporary failure');});
   const page=createPageTranslator(h.dependencies);await page.translatePage();assert.equal(p.querySelector('[data-kuai-original]'),null);assert.equal(outputLinks(p).getAttribute('data-state'),'error');
   h.respond(async texts=>({translations:texts.map(text=>text==='Read'?'阅读':'指南')}));h.emit(outputLinks(p).querySelector('button'),'click');await settleLinks();
-  assert.equal(outputLinks(p).querySelector('a')?.textContent,'指南');assert.equal(outputLinks(p).textContent,'阅读 指南');assert.equal(a.parentNode.hidden,true);page.stop();
+  assert.equal(outputLinks(p).querySelector('a')?.textContent,'指南');assert.equal(outputLinks(p).textContent,'阅读 指南');assert.ok(a.hasAttribute('data-kuai-original'));assert.strictEqual(a.parentNode,p);page.stop();
 });
 
 const titleText='What do you think of Justin’s style?';
@@ -813,7 +813,7 @@ test('inline and button translation-only hide original text and spacing and rest
  for(const tag of ['button','a','p']){
   const h=fixture(),p=h.paragraph(tag==='p'?'A paragraph long enough to require block output.':'Explore',tag);if(tag==='a')p.style.display='inline-block';const before=p.outerHTML;h.settings.pageDisplayMode='translation_only';
   const page=createPageTranslator(h.dependencies);await page.translatePage();
-  assert.ok(output(p).hasAttribute('data-kuai-only'));assert.ok(p.querySelector('[data-kuai-original]'));
+  assert.ok(output(p).hasAttribute('data-kuai-only'));assert.equal(p.firstChild.nodeValue,'');
   assert.equal(output(p).querySelector('br'),null);assert.match(sheet(h),/\[data-kuai-only\]\{margin-inline-start:0!important\}/);
   page.restore();assert.equal(p.outerHTML,before);
  }
@@ -871,7 +871,7 @@ test('an inline translation stays beside text inside a control label, including 
   const before=button.outerHTML,page=createPageTranslator(h.dependencies);await page.translatePage();
   page.refreshPresentation();page.refreshPresentation();
   assert.strictEqual(output(button).parentNode,label);assert.equal(output(button).closest('[data-kuai-original]'),null);
-  if(mode==='translation_only')assert.ok(label.querySelector('[data-kuai-original]'));
+  if(mode==='translation_only')assert.equal(label.firstChild.nodeValue,'');
   page.restore();assert.equal(button.outerHTML,before);
  }
 });

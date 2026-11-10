@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>React streaming ownership regression</title>
+<style>body{font:17px/1.6 sans-serif;margin:24px;max-width:850px}#scroll-space{height:950px}code{display:inline}li{padding:4px}</style>
+<div id="root"></div>
+<script>
+window.__errors=[];
+const record=error=>window.__errors.push(String(error?.stack||error?.message||error));
+window.onerror=(_message,_url,_line,_column,error)=>record(error||_message);
+window.onunhandledrejection=event=>record(event.reason);
+</script>
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+<script>
+const h=React.createElement;
+class Boundary extends React.Component{
+  constructor(props){super(props);this.state={error:null};}
+  static getDerivedStateFromError(error){return {error};}
+  componentDidCatch(error){record(error);}
+  render(){return this.state.error?h('pre',{id:'crashed'},String(this.state.error)):this.props.children;}
+}
+function Chat(){
+  const [step,setStep]=React.useState(0);
+  React.useEffect(()=>{window.__start=()=>{let next=0;const timer=setInterval(()=>{setStep(++next);if(next===8){clearInterval(timer);setTimeout(()=>window.__done=true,300);}},160);};},[]);
+  const keys=step<3?['a','b','c']:step<6?['c','a','b']:['b','c'];
+  return h('main',{id:'chat','data-step':step},
+    h('p',{id:'mixed'},step>0?h('em',{key:'new'},'Inserted before the retained text. '):null,
+      'Existing message first part. ',step>1?'Updated second text child. ':'Existing second text child. ',
+      h('strong',{key:'strong'},'Important detail'),h('code',{key:'code'},' inlineCode '),
+      h('a',{key:'link',href:'#destination'},'Read the guide'),h('br',{key:'br'}),'After the break.'),
+    h('div',{id:'nested'},'Outer block text. ',h('p',null,'Nested paragraph text.')),
+    step?h('p',{id:'reply',key:'reply'},'Reply '+Array.from({length:step},(_,i)=>'stream chunk '+i+'. ').join('')):h('p',{id:'thinking',key:'thinking'},'Thinking about this response…'),
+    h('ul',null,keys.map(key=>h('li',{key,'data-key':key},'List item '+key+' with readable text.'))),
+    h('p',{id:'live'},step>2?'The framework changed this paragraph.':'A paragraph awaiting a framework update.'),
+    h('div',{id:'scroll-space'}),h('p',{id:'destination'},'A final paragraph reached by scrolling.'));
+}
+ReactDOM.createRoot(document.getElementById('root')).render(h(Boundary,null,h(Chat)));
+</script></html>

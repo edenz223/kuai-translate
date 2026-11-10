@@ -1,3 +1,4 @@
+import {sourceText,originalMutationFilter} from './source-text.js';
 import type {Settings} from '../shared/settings.js';
 import type {Translate} from '../shared/messages.js';
 import type {BrowserEnvironment,CodedError,PageBlock} from './dom.js';
@@ -9,7 +10,7 @@ export interface PageStatus {active:boolean;translated:number;errors:number;tota
 export interface PageTranslatorOptions {document:Document;env?:BrowserEnvironment;translate:Translate;cancel?:(id:string)=>unknown;getSettings:()=>Settings;makeRequestId?:()=>string;onBeforeTranslate?:()=>void;onRestore?:()=>void;onChange?:(status:PageStatus)=>void}
 export interface TranslateBlocksOptions {validate?:()=>boolean;retryErrors?:boolean;viewportOnly?:boolean}
 type PageEntryStatus = 'pending'|'success'|'error'|'cancelled';
-interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>boolean;viewportOnly:boolean;url:string;status:PageEntryStatus;output:HTMLElement|null;inner?:HTMLElement;sourceLayout?:string|null;overflowLayout?:string|null;parts:(string|undefined)[];originals:HTMLElement[];content:PageContent;links:PageLinkBinding[];resolve:(()=>void)|null;done?:Promise<void>;titleLayout?:string|null;layout:SourceLayout;forcedBlock?:boolean;forcedWidth?:number;flexLayout?:string|null;inlineLayout?:string|null;duplicatePseudo?:string|null;loadingHost?:HTMLElement|null;loadingNode?:Text|null;expected?:number;startedAt:number;shownAt?:number;repairs?:{at:number;count:number}}
+interface PageEntry {element:HTMLElement;source:string;key:string;validate:()=>boolean;viewportOnly:boolean;url:string;status:PageEntryStatus;output:HTMLElement|null;inner?:HTMLElement;sourceLayout?:string|null;overflowLayout?:string|null;parts:(string|undefined)[];originals:Node[];content:PageContent;links:PageLinkBinding[];resolve:(()=>void)|null;done?:Promise<void>;titleLayout?:string|null;layout:SourceLayout;forcedBlock?:boolean;forcedWidth?:number;flexLayout?:string|null;inlineLayout?:string|null;duplicatePseudo?:string|null;loadingHost?:HTMLElement|null;loadingNode?:Text|null;expected?:number;startedAt:number;shownAt?:number;repairs?:{at:number;count:number}}
 interface PageRequest {owners:Set<PageEntry>;release:(()=>void)|null}
 interface SourceChanges {source:string;changedAt?:number;wasted:number}
 
@@ -114,10 +115,13 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     changed();
     if(!entries.size){if(!deferred.size){observer?.disconnect();observer=null;}titleLayoutStyle?.remove();titleLayoutStyle=null;pageSheet?.remove();pageSheet=null;}
   }
+  const originalMutations=originalMutationFilter();
   function observe() {
     if(observer||!env.MutationObserver)return;
     observer=new env.MutationObserver(records=>{
+      const ignored=originalMutations(records);
       for(const record of records){
+        if(ignored.has(record))continue;
         if(!record.removedNodes?.length){
           if(ancestors(record.target).some(node=>node.hasAttribute?.('data-kuai-owned')||node.hasAttribute?.('data-kuai-ui')))continue;
           if(record.type!=='characterData'&&!record.addedNodes?.length&&!isPageLinkMutation(record))continue;
@@ -149,7 +153,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
         scheduleDeferred();
       });
     });
-    observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:PAGE_LINK_ATTRIBUTES});
+    observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true,characterDataOldValue:true,attributes:true,attributeFilter:PAGE_LINK_ATTRIBUTES});
   }
   function addedBlocks(roots: readonly Node[]): PageBlock[]{
     const blocks: PageBlock[]=[],seen=new Set<Node>();let budget=2000;
@@ -185,7 +189,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
   function lastSourceText(element: HTMLElement,allowOriginal=false): Text | null{
     let last: Text|null=null;
     const visit=(node: Node): void=>{
-      if(node.nodeType===3){if(/\S/u.test(node.nodeValue||''))last=node as Text;return;}
+      if(node.nodeType===3){if(/\S/u.test(sourceText(node)))last=node as Text;return;}
       if(node.nodeType!==1||node!==element&&(isBlock(node as HTMLElement,env)||!isReadable(node as HTMLElement,env,{allowOriginal})))return;
       for(const child of node.childNodes)visit(child);
     };
@@ -241,8 +245,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     if(!anchor)return;
     const inline=entry.output.getAttribute('data-kuai-layout')==='inline'&&isPageControl(entry.element,entry.source,env);
     // A full-width label wrapper can leave no space after itself; keep its sole text and result together.
-    const label=anchor.parentElement?.hasAttribute('data-kuai-original')?anchor.parentElement.parentNode!:anchor.parentNode!;
-    const parent=inline&&(label as HTMLElement).tagName==='SPAN'&&(anchor.nodeValue||'').replace(/\s+/gu,' ').trim()===entry.source?label:entry.element;
+    const label=anchor.parentNode!;
+    const parent=inline&&(label as HTMLElement).tagName==='SPAN'&&sourceText(anchor).replace(/\s+/gu,' ').trim()===entry.source?label:entry.element;
     while(anchor.parentNode&&anchor.parentNode!==parent)anchor=anchor.parentNode;
     if(anchor.parentNode!==parent)return;
     const next=Array.from(parent.childNodes)[Array.from(parent.childNodes).indexOf(anchor as ChildNode)+1]||null;
@@ -269,7 +273,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     const style=getSettings().pageStyle||{};
     let success=false,other=false;
     for(const entry of entries.values())if(entry.status==='success')success=true;else other=true;
-    let css='kuai-translator.kuai-translator-wrapper{font:inherit!important;letter-spacing:inherit!important;color:inherit!important;box-sizing:border-box!important;min-width:0!important;max-width:100%!important;white-space:normal;overflow-wrap:anywhere}'+
+    let css='[data-kuai-original]{display:none!important}'+
+      'kuai-translator.kuai-translator-wrapper{font:inherit!important;letter-spacing:inherit!important;color:inherit!important;box-sizing:border-box!important;min-width:0!important;max-width:100%!important;white-space:normal;overflow-wrap:anywhere}'+
       'kuai-translator[data-kuai-layout=inline]{display:inline!important;margin-inline-start:.35em!important;white-space:normal!important;overflow-wrap:anywhere!important}'+
       'kuai-translator[data-kuai-layout=inline]>.kuai-translator-inner{white-space:normal!important;overflow-wrap:anywhere!important}'+
       'kuai-translator[data-kuai-layout=block]{display:block!important;white-space:normal!important}'+
@@ -377,7 +382,6 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     if(entry.status==='success')refreshPageLinks(entry.links,document,env);
     if(theme.preset==='blur'&&layout.layout==='block')entry.inner.setAttribute('tabindex','0');else entry.inner.removeAttribute('tabindex');
     if(translationOnly){
-      if(entry.originals.some(host=>!entry.element.contains(host)))restoreOriginal(entry);
       entry.output.setAttribute('data-kuai-only','');hideOriginal(entry,document,env);
     }
     else{entry.output.removeAttribute('data-kuai-only');restoreOriginal(entry);}

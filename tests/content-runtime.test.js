@@ -72,7 +72,7 @@ test('the display-mode shortcut uses a narrow preference patch and applies the s
  h.client.updatePagePreferences=async patch=>{patches.push(patch);const next={...h.settings,...patch};h.save(next);return next;};
  await h.runtime.start();h.emit(p,'keydown',{key:'m',altKey:true});await settle();
  assert.deepEqual(patches,[{pageDisplayMode:'translation_only'}]);assert.equal(h.requests.length,1);
- assert.equal(!!p.querySelector('[data-kuai-original]'),true);h.runtime.stop();
+ assert.equal(p.firstChild.nodeValue,'');assert.equal(p.querySelector('[data-kuai-original]'),null);h.runtime.stop();
 });
 
 test('opted-in dynamic translation sends only added source and ignores owned output mutations',async()=>{
