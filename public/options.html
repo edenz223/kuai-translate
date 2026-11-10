@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kuai translate · 设置</title><link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png"><link rel="stylesheet" href="ui.css"></head>
+<html class="settings-root" lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kuai translate · 设置</title><link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png"><link rel="stylesheet" href="ui.css"></head>
 <body class="settings-page"><div class="settings-shell">
 <aside class="settings-sidebar">
   <div class="brand"><img class="brand-mark" src="icons/icon-128.png" width="36" height="36" alt="" aria-hidden="true"><div><h1>Kuai translate</h1><p>翻译扩展设置</p></div></div>
@@ -204,5 +204,5 @@
   </div>
 </section>
 </main></div>
-<footer class="save-bar"><p id="status" class="status" role="status" aria-live="polite">加载设置…</p><button id="retry-save" type="button" hidden>重试保存</button><button id="reload-settings" type="button" hidden>重新读取（放弃未保存修改）</button></footer>
+<footer id="save-bar" class="save-bar" data-state="idle"><p id="status" class="status" role="status" aria-live="polite"></p><button id="retry-save" type="button" hidden>重试保存</button><button id="reload-settings" type="button" hidden>重新读取（放弃未保存修改）</button></footer>
 <script type="module" src="src/ui/options.js"></script></body></html>

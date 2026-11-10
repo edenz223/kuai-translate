@@ -11,6 +11,7 @@ import {byId,TYPE_NAMES,FREE_TYPES,LANGUAGES,PROVIDER_INFO,fillProviders,fillSel
 import type {ProviderField} from './common.js';
 import type {Provider} from '../shared/settings.js';
 
+const CONFLICT_MESSAGE='其他页面修改了同一配置，当前草稿仍保留。请先复制需要保留的修改，再重新读取最新设置。';
 const SUBTITLE_SHORTCUT_CHOICES:[string,string][]=[
   ['ctrl-alt','Ctrl+Alt+方向键'],['letters','字母键 A / S / D / R'],['off','关闭'],
 ];
@@ -36,6 +37,12 @@ const SECTIONS=['webpage','hover','selection','input','subtitles','providers','b
 /** One section at a time; the address hash keeps links from the popup and context menu working. */
 function bindSections(document: Document): void {
   const view=document.defaultView;
+  for(const id of SECTIONS){
+    const link=byId(document,'nav-'+id);
+    link.addEventListener('focus',()=>{
+      if(view?.matchMedia?.('(max-width:760px)').matches)link.scrollIntoView({block:'nearest',inline:'nearest'});
+    });
+  }
   const show=(): void=>{
     const hash=view?.location?.hash.slice(1) || '',current=SECTIONS.includes(hash) ? hash : SECTIONS[0];
     for(const id of SECTIONS){
@@ -54,7 +61,19 @@ export async function startOptions(document: Document = globalThis.document): Pr
   bindHints(document);
   bindSections(document);
   const status=byId(document,'status'), testStatus=byId(document,'test-status');
-  const fail=(error: unknown): void=>setStatus(status,errorMessage(error),true);
+  const saveBar=byId(document,'save-bar');
+  let saveState='idle',statusTimer:ReturnType<typeof setTimeout> | undefined,wasSaving=false,lastRevision=0,failed=false;
+  // All save-pill writes pass here. Timers restart on each completed save, not on unrelated renders.
+  function saveStatus(state: 'idle' | 'saving' | 'saved' | 'attention' | 'notice',message='',error=false,duration=0): void {
+    const keepVisible=saveState!=='idle' && saveBar.dataset.visible==='true';
+    if(statusTimer!==undefined)clearTimeout(statusTimer);
+    statusTimer=undefined;saveState=state;saveBar.dataset.state=state;saveBar.dataset.visible=String(state!=='idle' && (state!=='saving' || keepVisible));
+    setStatus(status,message,error);
+    if(state==='saving' && !keepVisible)statusTimer=setTimeout(()=>{statusTimer=undefined;saveBar.dataset.visible='true';},400);
+    else if(duration)statusTimer=setTimeout(()=>saveStatus('idle'),duration);
+  }
+  const fail=(error: unknown): void=>{failed=true;saveStatus('attention',(error as {code?: string} | null)?.code==='SETTINGS_CONFLICT' ? CONFLICT_MESSAGE : errorMessage(error),true);};
+  document.defaultView?.addEventListener('pagehide',()=>{if(statusTimer!==undefined)clearTimeout(statusTimer);},{once:true});
   let selectedId: string | undefined,providerFingerprint: string | undefined='',pickerOpen=false;
   // Session-only: which fields the user has left, and the last test result per provider version.
   const touched=new Set<string>(),urlDrafts=new Map<string,string>(),testResults=new Map<string,{fingerprint:string;ok:boolean}>();
@@ -190,7 +209,19 @@ export async function startOptions(document: Document = globalThis.document): Pr
     byId(document,'retry-save').hidden=!state.error || conflicted;
     byId<HTMLButtonElement>(document,'reload-settings').hidden=!conflicted && !invalid && !incomplete;
     byId<HTMLButtonElement>(document,'reload-settings').disabled=state.saving;
-    setStatus(status,conflicted ? '其他页面修改了同一配置，当前草稿仍保留。请先复制需要保留的修改，再重新读取最新设置。' : state.error ? '保存失败：'+errorMessage(state.error) : invalid ? `有 ${invalid} 项输入尚未保存，请修正对应提示。其他设置仍会正常保存。` : incomplete ? `有 ${incomplete} 项数字未输入完整，完成输入后自动保存；留空并离开输入框会恢复已保存值。` : state.saving ? '正在保存…' : '更改已自动保存',!!state.error || !!invalid);
+    const completed=wasSaving && !state.saving && !state.error;
+    const loaded=!wasSaving && !state.saving && state.revision!==lastRevision;
+    wasSaving=state.saving;lastRevision=state.revision;
+    if(conflicted || state.error || invalid || incomplete){
+      failed=false;saveStatus('attention',conflicted ? CONFLICT_MESSAGE : state.error ? '保存失败：'+errorMessage(state.error) : invalid ? `有 ${invalid} 项输入尚未保存，请修正对应提示。其他设置仍会正常保存。` : `有 ${incomplete} 项数字未输入完整，完成输入后自动保存；留空并离开输入框会恢复已保存值。`,!!state.error || !!invalid);
+    }else if(state.saving){
+      failed=false;
+      if(saveState!=='saving')saveStatus('saving','正在保存…');
+    }else if(completed){
+      failed=false;saveStatus('saved','已保存',false,2000);
+    }else if(loaded || (saveState==='attention' && !failed)){
+      failed=false;saveStatus('idle');
+    }
   }
   editor.subscribe(render);
   try {await editor.load();}catch(error){fail(error);return;}
@@ -279,7 +310,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
   });
   byId(document,'import-settings').addEventListener('change',async event=>{
     const file=(event.target as HTMLInputElement).files?.[0];if(!file)return;
-    try {if(file.size>2*1024*1024)throw Error('配置文件超过 2 MB。');const incoming=JSON.parse(await file.text());const merged=importSettings(incoming,editor.get());await editor.replace(merged);interactions.resetDrafts();urlDrafts.clear();render(editor.get(),editor.status());setStatus(status,'已导入可识别的直连/免费配置，原平台账号信息不会导入。');}
+    try {if(file.size>2*1024*1024)throw Error('配置文件超过 2 MB。');const incoming=JSON.parse(await file.text());const merged=importSettings(incoming,editor.get());await editor.replace(merged);interactions.resetDrafts();urlDrafts.clear();render(editor.get(),editor.status());saveStatus('notice','已导入可识别的直连/免费配置，原平台账号信息不会导入。',false,5000);}
     catch(error){fail(error);}finally{(event.target as HTMLInputElement).value='';}
   });
 }
