@@ -321,6 +321,16 @@ test('safe rich text replacement preserves the existing text and inline element 
  const result=await ui.translateInput();assert.equal(result.applied,true);assert.strictEqual(strong.firstChild,text);assert.equal(text.nodeValue,'Keep 你好 tail');assert.equal(strong.childNodes.length,1);ui.stop();
 });
 
+test('a framework editor that owns the replacement applies and restores it through its own model',async()=>{
+ const h=fixture(),editor=h.paragraph('','div');editor.setAttribute('contenteditable','true');editor.setAttribute('data-lexical-editor','true');const line=h.doc.createElement('p'),span=h.doc.createElement('span');span.textContent='Keep hello tail';line.append(span);editor.append(line);editor.focus();
+ const text=span.firstChild,commands=[];h.doc.execCommand=(...args)=>{commands.push(args);return true;};h.setRange(text,5,text,10);
+ // Like Lexical: cancel the input, then render the model change after the event.
+ editor.addEventListener('beforeinput',event=>{event.preventDefault();const range=h.doc.selection.getRangeAt(0),{startOffset,endOffset}=range;queueMicrotask(()=>{text.nodeValue=text.nodeValue.slice(0,startOffset)+event.data+text.nodeValue.slice(endOffset);h.setRange(text,startOffset+event.data.length);});});
+ h.respond(async()=>({translations:['你好']}));const ui=createInteractions(h.dependencies).start();
+ const result=await ui.translateInput();assert.equal(result.applied,true);await Promise.resolve();assert.equal(text.nodeValue,'Keep 你好 tail');assert.deepEqual(commands,[]);
+ h.flushTimers();assert.equal(ui.restoreInput(),true);await Promise.resolve();assert.equal(text.nodeValue,'Keep hello tail');ui.stop();
+});
+
 test('a delegated beforeinput veto prevents both automatic and explicit preview replacement',async()=>{
  const h=fixture(),input=field(h);h.doc.addEventListener('beforeinput',event=>event.preventDefault());const ui=createInteractions(h.dependencies).start();assert.equal((await ui.translateInput()).applied,false);assert.equal(input.value,'Keep hello tail');
  h.settings.inputOptions={autoApply:false};ui.updateSettings();await ui.translateInput();assert.equal(ui.applyInput(),false);assert.equal(input.value,'Keep hello tail');ui.stop();

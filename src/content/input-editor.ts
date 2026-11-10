@@ -4,7 +4,7 @@ import type {BrowserEnvironment} from './dom.js';
 export type EditorElement = HTMLElement & Pick<HTMLInputElement,'disabled'|'readOnly'|'type'|'value'|'selectionStart'|'selectionEnd'|'setSelectionRange'|'autocomplete'>;
 export type SelectionIdentity = [] | [Node,number,Node,number];
 export type SelectionRoot = ShadowRoot & {getSelection?:()=>Selection|null};
-export interface InputSnapshot {element:EditorElement;kind:'control'|'rich';revision:number;safe:boolean;dirty:boolean;contentDirty?:boolean;type:string;editable:string|null;observer?:MutationObserver;value:string;start:number;end:number;selectionStart:number|null;selectionEnd:number|null;text:string;selection?:Selection|null;identity:SelectionIdentity;html:string;node:Text|null;nodeValue:string|null}
+export interface InputSnapshot {element:EditorElement;kind:'control'|'rich';revision:number;safe:boolean;dirty:boolean;contentDirty?:boolean;type:string;editable:string|null;observer?:MutationObserver;value:string;start:number;end:number;selectionStart:number|null;selectionEnd:number|null;text:string;selection?:Selection|null;identity:SelectionIdentity;html:string;node:Text|null;nodeValue:string|null;command?:Range;source?:string}
 
 import {ancestors,isOwnedUI} from './dom.js';
 
@@ -13,11 +13,20 @@ const identity=(selection: Selection | null | undefined): SelectionIdentity=>{
   return [];
 };
 const same=(left: SelectionIdentity,right: SelectionIdentity): boolean=>left.length===right.length&&left.every((value,index)=>value===right[index]);
+// Framework editors keep their own model: direct DOM edits desync it, so replacements go through their input handling.
+const MANAGED_EDITOR='[data-lexical-editor],.ProseMirror,[data-slate-editor],.ql-editor,.public-DraftEditor-content';
+// Editors map text positions, not root element offsets, to their own selection.
+function contentRange(document: Document,element: HTMLElement): Range{
+  const range=document.createRange(),texts: Node[]=[];
+  const visit=(node: Node): void=>{if(node.nodeType===3)texts.push(node);else node.childNodes.forEach(visit);};visit(element);
+  const last=texts.at(-1);if(last){range.setStart(texts[0],0);range.setEnd(last,last.nodeValue!.length);}else range.selectNodeContents(element);
+  return range;
+}
 
 /** Own only the latest edit, never the editor's undo stack or its internal model. */
 export function createInputEditor({document,env=globalThis,onChange=()=>{}}: {document:Document;env?:BrowserEnvironment;onChange?:()=>void}){
   const listeners: (()=>void)[]=[],snapshots=new Set<InputSnapshot>(),ownEvents=new WeakSet<Event>();
-  let revision=0,composing=false,undo: {before:InputSnapshot;guard:InputSnapshot}|null=null,started=false;
+  let revision=0,composing=false,commanding=false,undo: {before:InputSnapshot;guard:InputSnapshot}|null=null,started=false;
   function activeElement(): EditorElement | null{let element=document.activeElement;while(element?.shadowRoot?.activeElement)element=element.shadowRoot.activeElement;return element as EditorElement | null;}
   function eligible(element: EditorElement | null=activeElement()): 'control'|'rich'|false{
     if(!element?.isConnected||isOwnedUI(element)||element.disabled||element.readOnly)return false;
@@ -60,6 +69,10 @@ export function createInputEditor({document,env=globalThis,onChange=()=>{}}: {do
       const start=range?.startOffset??0,end=range?.endOffset??node?.nodeValue?.length??0;
       Object.assign(snapshot,{selection,identity:points,html:element.innerHTML,value:element.textContent,text:range?range.toString():element.textContent,
         node,nodeValue:node?.nodeValue,start,end,safe:!!node&&!locked&&(!points.length||!!inside)});
+      if(typeof document.execCommand==='function'&&(!snapshot.safe||element.closest?.(MANAGED_EDITOR))){
+        const command=range||contentRange(document,element),source=element.innerText??element.textContent;
+        Object.assign(snapshot,{command,source,node:null,nodeValue:null,text:range?selection!.toString():source,safe:!points.length||!!inside});
+      }
     }
     if(env.MutationObserver){
       snapshot.observer=new env.MutationObserver(records=>trackMutations(snapshot,records));
@@ -77,9 +90,11 @@ export function createInputEditor({document,env=globalThis,onChange=()=>{}}: {do
       ?element.value===snapshot.value&&(restoring||element.selectionStart===snapshot.selectionStart&&element.selectionEnd===snapshot.selectionEnd)
       :element.textContent===snapshot.value&&element.innerHTML===snapshot.html&&(restoring||same(identity(selectionOf(element)),snapshot.identity))&&(!snapshot.node||snapshot.node!.isConnected&&snapshot.node!.nodeValue===snapshot.nodeValue);
   }
-  function event(element: EditorElement,type: string,data: string,inputType='insertReplacementText'){
-    const EventClass=env.InputEvent||env.Event;
-    const value=new EventClass(type,{bubbles:true,cancelable:type==='beforeinput',composed:true,inputType,data});
+  function event(element: EditorElement,type: string,data: string,inputType='insertReplacementText',transfer=false){
+    const EventClass=env.InputEvent||env.Event;let dataTransfer: DataTransfer|null=null;
+    // Editors read multi-line replacements from dataTransfer; data alone loses line breaks.
+    if(transfer&&env.DataTransfer){dataTransfer=new env.DataTransfer();dataTransfer.setData('text/plain',data);}
+    const value=new EventClass(type,{bubbles:true,cancelable:type==='beforeinput',composed:true,inputType,data:dataTransfer?null:data,dataTransfer});
     ownEvents.add(value);return element.dispatchEvent(value);
   }
   function setValue(element: EditorElement,value: string): void{
@@ -90,7 +105,27 @@ export function createInputEditor({document,env=globalThis,onChange=()=>{}}: {do
     const range=document.createRange();range.setStart(snapshot.node!,start);range.setEnd(snapshot.node!,end);
     const selection=selectionOf(snapshot.element)||snapshot.selection;selection?.removeAllRanges();selection?.addRange(range);
   }
+  function command(snapshot: InputSnapshot,range: Range,text: string): boolean{
+    const selection=selectionOf(snapshot.element)||snapshot.selection;selection?.removeAllRanges();selection?.addRange(range);
+    // Native selectionchange is async; editors that mirror the selection must see the range before the command.
+    document.dispatchEvent(new env.Event('selectionchange'));
+    // An editor that cancels the replacement owns it and may render the change after this task.
+    if(!event(snapshot.element,'beforeinput',text,'insertReplacementText',true))return true;
+    commanding=true;try{document.execCommand('insertText',false,text);}catch{}finally{commanding=false;}
+    return snapshot.element.innerHTML!==snapshot.html;
+  }
+  function applyCommand(snapshot: InputSnapshot,text: string): boolean{
+    clearUndo();release(snapshot);
+    const changed=command(snapshot,snapshot.command!,text);
+    if(changed){
+      // Editors may reconcile the DOM after the command; guard the settled result.
+      const pending={before:snapshot,guard:null as InputSnapshot|null};undo=pending as typeof undo;
+      env.setTimeout(()=>{if(undo!==pending as typeof undo)return;const guard=capture();if(guard)pending.guard=guard;else undo=null;onChange();},0);
+    }
+    onChange();return changed;
+  }
   function apply(snapshot: InputSnapshot | null | undefined,text: string): boolean{
+    if(snapshot?.command)return !!snapshot.safe&&valid(snapshot)&&applyCommand(snapshot,text);
     if(!snapshot?.safe||!valid(snapshot)||!event(snapshot.element,'beforeinput',text)||!valid(snapshot))return false;
     const {element}=snapshot,epoch=revision;
     const value=(snapshot.kind==='control'?snapshot.value:snapshot.nodeValue!).slice(0,snapshot.start)+text+(snapshot.kind==='control'?snapshot.value:snapshot.nodeValue!).slice(snapshot.end);
@@ -106,10 +141,14 @@ export function createInputEditor({document,env=globalThis,onChange=()=>{}}: {do
   // Applying a pending translation must match the captured selection. Restoring
   // an unchanged result may tolerate caret movement and harmless attributes,
   // but keeps content, focus, revision, editor and original-node checks.
-  function canRestore(){return !!undo&&valid(undo.guard,{restoring:true})&&(undo.before.kind==='control'||undo.before.node?.isConnected&&undo.before.element.contains(undo.before.node));}
+  function canRestore(){return !!undo&&valid(undo.guard,{restoring:true})&&(undo.before.kind==='control'||!!undo.before.command||undo.before.node?.isConnected&&undo.before.element.contains(undo.before.node));}
   function restore(){
     if(!canRestore()){clearUndo();return false;}
     const {before}=undo!,{element}=before;
+    if(before.command){
+      const guard=undo!.guard!,range=contentRange(document,element);clearUndo();
+      command(guard,range,before.source!);onChange();return true;
+    }
     if(!event(element,'beforeinput',before.text,'historyUndo')||!canRestore())return false;
     clearUndo();
     if(before.kind==='control'){setValue(element,before.value);element.setSelectionRange?.(before.selectionStart,before.selectionEnd);}
@@ -123,7 +162,7 @@ export function createInputEditor({document,env=globalThis,onChange=()=>{}}: {do
   function listen<K extends keyof (DocumentEventMap & WindowEventMap)>(target: EventTarget,type: K,handler: (event:(DocumentEventMap & WindowEventMap)[K])=>void): void{target.addEventListener(type,handler as EventListener,true);listeners.push(()=>target.removeEventListener(type,handler as EventListener,true));}
   function start(){
     if(started)return;started=true;
-    listen(document,'input',event=>{if(!ownEvents.has(event))invalidate();});
+    listen(document,'input',event=>{if(!ownEvents.has(event)&&!commanding)invalidate();});
     listen(document,'compositionstart',()=>{composing=true;invalidate();});
     listen(document,'compositionend',()=>{composing=false;invalidate();});
     listen(document,'focusout',invalidate);
