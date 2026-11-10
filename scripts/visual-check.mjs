@@ -160,7 +160,7 @@ try {
     });
     const visible=element=>{const box=element.getBoundingClientRect();return element.checkVisibility?.()&&box.width>0&&box.height>0&&box.top<innerHeight&&box.bottom>0;};
     const untranslated=[...document.querySelectorAll('a,button,[role=button],[role=tab],[role=menuitem],label,summary,li,h1,h2,h3,h4,p,strong,span')]
-      .filter(element=>visible(element)&&/\\p{L}{2,}/u.test(element.innerText||'')&&!element.closest('[data-kuai-owned],[data-kuai-original]')&&!element.querySelector('[data-kuai-page-translation]')&&!element.closest(':has(> [data-kuai-page-translation])'))
+      .filter(element=>visible(element)&&/\\p{L}{2,}/u.test(element.innerText||'')&&!element.closest('[data-kuai-owned],[data-kuai-original]')&&!element.querySelector('[data-kuai-page-translation]')&&!element.closest(':has(> kuai-translator[data-kuai-page-translation])'))
       .filter(element=>![...element.children].some(child=>visible(child)&&(child.innerText||'').trim()===(element.innerText||'').trim()))
       .map(element=>describe(element)+': '+(element.innerText||'').trim().replace(/\\s+/g,' ').slice(0,60));
     return {url:location.href,scrollY,beforeHeaderBox:globalThis.__kuaiVisualBeforeHeader,headerBox:document.querySelector('header')?.getBoundingClientRect().toJSON(),viewport:[innerWidth,innerHeight],squeezedCount:rows.filter(row=>row.squeezed).length,rows,untranslatedInViewport:[...new Set(untranslated)]};

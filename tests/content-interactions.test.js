@@ -177,7 +177,7 @@ test('paragraph output uses the page style, translation-only mode and safe plain
   assert.equal(output.firstChild.tagName,'FONT');assert.equal(output.querySelector('font').getAttribute('lang'),'zh-Hans');
   assert.equal(output.querySelector('font').firstChild.nodeType,3);assert.equal(text(p),'<img src=x onerror=alert(1)>你好');assert.equal(output.querySelector('img'),null);
   assert.equal(output.getAttribute('data-state'),'success');assert.match(sheet(h),/font-size:125%/);assert.match(sheet(h),/color:#123456/);assert.match(sheet(h),/border-left:2px solid/);assert.equal(output.getAttribute('style'),null);
-  assert.equal(original.parentElement.hidden,true);assert.equal(link.parentElement.hidden,true);assert.ok(p.querySelector('[data-kuai-original]'));
+  assert.equal(original.nodeValue,'');assert.strictEqual(original.parentNode,p);assert.ok(link.hasAttribute('data-kuai-original'));assert.strictEqual(link.parentNode,p);
   h.emit(link,'click');assert.equal(clicks,1);assert.equal(blockText(p,h.env),'Hello world');
   assert.deepEqual(collectBlocks(h.doc,h.env).map(item=>item.text),['Hello world']);assert.equal(h.doc.getElementById('kuai-translation-popup'),null);
   await hover(h,p);assert.equal(result(p),null);assert.equal(p.firstChild,original);assert.equal(link.parentNode,p);ui.stop();

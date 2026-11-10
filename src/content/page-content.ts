@@ -1,3 +1,4 @@
+import {sourceText} from './source-text.js';
 import type {BrowserEnvironment} from './dom.js';
 
 interface SourceRun {text:string; anchor:HTMLAnchorElement|null; indices?:number[]; before?:string; after?:string}
@@ -24,7 +25,7 @@ function sourceRuns(element: HTMLElement,env: BrowserEnvironment): SourceRun[]{
   // An existing enclosing anchor already supplies this block's navigation; never nest an anchor inside it.
   const inherited=ancestors(element).some(node=>node.tagName==='A');
   function visit(node: Node,anchor: HTMLAnchorElement | null=null): void{
-    if(node.nodeType===3){text(node.nodeValue||node.textContent||'',anchor);return;}
+    if(node.nodeType===3){text(sourceText(node),anchor);return;}
     if(node.nodeType!==1||node!==element&&(isBlock(node as HTMLElement,env)||!isReadable(node as HTMLElement,env,{allowOriginal:true})))return;
     if((node as HTMLElement).tagName==='BR'){text('\n',anchor);return;}
     if(!inherited&&node!==element&&(node as HTMLElement).tagName==='A'&&(node as HTMLElement).hasAttribute('href'))anchor=node as HTMLAnchorElement;

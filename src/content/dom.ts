@@ -1,3 +1,4 @@
+import {sourceText} from './source-text.js';
 import type {Settings} from '../shared/settings.js';
 import type {TranslationOptions} from '../shared/messages.js';
 
@@ -76,7 +77,8 @@ export function isReadable(element: HTMLElement | null | undefined, env: Browser
   if (!element?.isConnected) return false;
   let hiddenByTranslation=false;
   for (const ancestor of ancestors(element)) {
-    if(allowOriginal&&ancestor.hasAttribute?.('data-kuai-original')){hiddenByTranslation=true;continue;}
+    const original=allowOriginal&&ancestor.hasAttribute?.('data-kuai-original');
+    if(original)hiddenByTranslation=true;
     if ((EXCLUDED_TAGS.has(ancestor.tagName)&&!(allowControls&&ancestor.tagName==='BUTTON')) || ancestor.hasAttribute?.('data-kuai-owned') ||
         ancestor.getAttribute?.('translate') === 'no' || ancestor.getAttribute?.('aria-hidden') === 'true' ||
         ancestor.className?.split?.(/\s+/).includes('html5-video-player') || editableElement(ancestor)) return false;
@@ -87,8 +89,8 @@ export function isReadable(element: HTMLElement | null | undefined, env: Browser
     if(['absolute','fixed'].includes(style?.position||'')&&/^(hidden|clip)/.test(style?.overflow||'')&&emptyBox(ancestor))return false;
     if(parseFloat(style?.textIndent||'')<-100&&/hidden|clip/.test(style?.overflow||''))return false;
     // Inline code belongs to its sentence (`run ~/.codex`); block code without <pre> stays untranslated.
-    if (ancestor.tagName === 'CODE' && style?.display && !style.display.startsWith('inline')) return false;
-    if (ancestor.hidden || style?.display === 'none' || ['hidden','collapse'].includes(style?.visibility as string)) return false;
+    if (!original && ancestor.tagName === 'CODE' && style?.display && !style.display.startsWith('inline')) return false;
+    if (ancestor.hidden || !original&&style?.display === 'none' || ['hidden','collapse'].includes(style?.visibility as string)) return false;
   }
   return hiddenByTranslation || rendered(element);
 }
@@ -112,8 +114,8 @@ function atomicControl(element: Element,env: BrowserEnvironment): boolean {
 function parentHasProse(parent: Element,env: BrowserEnvironment): boolean {
   if(layoutCache?.prose.has(parent))return layoutCache.prose.get(parent)!;
   const hasProse=(node: Node): boolean=>{
-    if(node.nodeType===3)return /\p{L}/u.test(node.nodeValue||'');
-    if(node.nodeType!==1||!isPageReadable(node as HTMLElement,env)||atomicControl(node as Element,env)||blockDisplay(computedStyle(node as Element,env)?.display||''))return false;
+    if(node.nodeType===3)return /\p{L}/u.test(sourceText(node));
+    if(node.nodeType!==1||!isPageReadable(node as HTMLElement,env,{allowOriginal:true})||atomicControl(node as Element,env)||blockDisplay(computedStyle(node as Element,env)?.display||''))return false;
     return Array.from(node.childNodes).some(hasProse);
   };
   const result=Array.from(parent.childNodes).some(hasProse);
@@ -137,7 +139,7 @@ export function isPageControl(element: HTMLElement,source: string,env: BrowserEn
   if(!control)return false;
   if(control===element)return true;
   const read=(node: Node): string=>{
-    if(node.nodeType===3)return node.nodeValue||'';
+    if(node.nodeType===3)return sourceText(node);
     if(node.nodeType!==1||!isPageReadable(node as HTMLElement,env,{allowOriginal:true}))return '';
     if((node as Element).tagName==='BR')return ' ';
     return Array.from(node.childNodes,read).join('');
@@ -157,7 +159,7 @@ export function blocksWithin(root: ParentNode, env: BrowserEnvironment): HTMLEle
 /** Read a block without including nested blocks or our appended translation. */
 export function blockText(element: HTMLElement, env: BrowserEnvironment): string {
   const read = (node: Node): string => {
-    if (node.nodeType === 3) return node.nodeValue || node.textContent || '';
+    if (node.nodeType === 3) return sourceText(node);
     if (node.nodeType !== 1) return '';
     if (node !== element && (isBlock(node as HTMLElement, env) || !isPageReadable(node as HTMLElement, env,{allowOriginal:true}))) return '';
     if ((node as HTMLElement).tagName === 'BR') return '\n';

@@ -1,3 +1,4 @@
+import {sourceText} from './source-text.js';
 import type {BrowserEnvironment} from './dom.js';
 import {blockText,computedStyle,isBlock,isPageReadable,isPageControl} from './dom.js';
 
@@ -12,8 +13,8 @@ export function measureSourceLayout(element: HTMLElement,env: BrowserEnvironment
   const tops: number[]=[],widths: number[]=[];let multiline=false;
   const visit=(node: Node): void=>{
     if(node.nodeType===3){
-      if(!/\S/u.test(node.nodeValue||''))return;
-      const parent=node.parentElement!;textLengths.set(parent,(textLengths.get(parent)||0)+Array.from((node.nodeValue||'').replace(/\s/gu,'')).length);
+      if(!/\S/u.test(sourceText(node)))return;
+      const parent=node.parentElement!;textLengths.set(parent,(textLengths.get(parent)||0)+Array.from(sourceText(node).replace(/\s/gu,'')).length);
       try{const range=element.ownerDocument.createRange();range.selectNodeContents(node);for(const box of Array.from(range.getClientRects?.()||[]))if(box.width&&box.height){tops.push((box.top+box.bottom)/2);widths.push(box.width);}}catch{}
       return;
     }

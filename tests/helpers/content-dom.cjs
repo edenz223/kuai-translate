@@ -15,7 +15,7 @@ class Node extends Target {
   appendChild(node){node.remove();node.parentNode=this;this.childNodes.push(node);return node;}
   insertBefore(node,reference){if(reference==null)return this.appendChild(node);if(node===reference)return node;if(reference.parentNode!==this)throw Error('Reference is not a child');node.remove();node.parentNode=this;this.childNodes.splice(this.childNodes.indexOf(reference),0,node);return node;}
   append(...nodes){for(const node of nodes)this.appendChild(typeof node==='string'?this.ownerDocument.createTextNode(node):node);}
-  removeChild(node){this.childNodes.splice(this.childNodes.indexOf(node),1);node.parentNode=null;return node;}
+  removeChild(node){if(node.parentNode!==this)throw Error('Node is not a child');this.childNodes.splice(this.childNodes.indexOf(node),1);node.parentNode=null;return node;}
   replaceChildren(...nodes){for(const node of [...this.childNodes])node.remove();this.append(...nodes);}
   remove(){this.parentNode?.removeChild(this);}
   get children(){return this.childNodes.filter(node=>node.nodeType===1);}
