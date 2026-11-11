@@ -1,6 +1,6 @@
 import type {Settings} from './settings.js';
 import type {RequestType, RequestPayload, RequestResultMap, MessageResponse, TranslationOptions,
-  TranslationResult, PreferencePatch, OptionsSection, SettingsChanged, PageBadgeState} from './messages.js';
+  TranslationResult, NetworkDiagnostics, PreferencePatch, OptionsSection, SettingsChanged, PageBadgeState} from './messages.js';
 export type {TranslationOptions, TranslationResult, Translate} from './messages.js';
 type ClientChrome = Pick<typeof chrome, 'runtime'>;
 /** The only content-to-background transport. No provider credential is sent by content. */
@@ -13,7 +13,11 @@ export async function request<T extends RequestType>(type:T, payload:RequestPayl
   if (!chromeApi?.runtime?.sendMessage) throw new Error('扩展未连接，请重新加载扩展并刷新页面');
   const response:MessageResponse<RequestResultMap[T]>|undefined=await chromeApi.runtime.sendMessage({...payload,type});
   if (!response || response.ok!==true) {
-    const error=new Error(response?.error?.message || '扩展没有返回有效结果，请重试') as Error&{code:string};
+    const error=new Error(response?.error?.message || '扩展没有返回有效结果，请重试') as Error&{code:string}&NetworkDiagnostics;
+    if(response?.network!==undefined)error.network=response.network;
+    if(response?.cacheHits!==undefined)error.cacheHits=response.cacheHits;
+    if(response?.providerId!==undefined)error.providerId=response.providerId;
+    if(response?.providerLabel!==undefined)error.providerLabel=response.providerLabel;
     error.code=response?.error?.code || 'NO_RESPONSE';throw error;
   }
   return response.value;

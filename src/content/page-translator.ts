@@ -1,3 +1,5 @@
+import {debugBatch,debugBatchError} from '../shared/network-log.js';
+import {debug,debugError} from '../shared/debug.js';
 import {sourceText,originalMutationFilter} from './source-text.js';
 import type {Settings} from '../shared/settings.js';
 import type {Translate} from '../shared/messages.js';
@@ -15,7 +17,7 @@ interface PageRequest {owners:Set<PageEntry>;release:(()=>void)|null}
 interface SourceChanges {source:string;changedAt?:number;wasted:number}
 
 import { ancestors, batches, blockText, collectBlocks, computedStyle, isPageControl, isBlock, pinBlock, unpinBlock, isChinese, isPageReadable as isReadable, isInViewport, visibleRect, makeId, requestOptions, translationsOf, withLayoutCache } from './dom.js';
-import {filterPageBlocks,isPageBlockAllowed,isPageSiteBlocked,pageTranslationKey} from './page-policy.js';
+import {pageBlockSkipReason,filterPageBlocks,isPageBlockAllowed,isPageSiteBlocked,pageTranslationKey,reportPageCollection} from './page-policy.js';
 import {pageStyleRule} from '../shared/styles.js';
 import {hideOriginal,restoreOriginal} from './originals.js';
 import {capturePageContent,pageContentMatches,renderPageContent,refreshPageLinks,isPageLinkMutation,PAGE_LINK_ATTRIBUTES} from './page-content.js';
@@ -250,7 +252,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     while(anchor.parentNode&&anchor.parentNode!==parent)anchor=anchor.parentNode;
     if(anchor.parentNode!==parent)return;
     const next=Array.from(parent.childNodes)[Array.from(parent.childNodes).indexOf(anchor as ChildNode)+1]||null;
-    if(next!==entry.output)parent.insertBefore(entry.output,next);
+    try{if(next!==entry.output)parent.insertBefore(entry.output,next);}
+    catch(error){debugError('网页','插入译文失败',error);throw error;}
   }
   function ensureOutput(entry: PageEntry): asserts entry is PageEntry & {output:HTMLElement} {
     if(entry.output)return;
@@ -265,7 +268,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     }
     inner.className='kuai-translator-inner';
     inner.setAttribute('lang',getSettings().targetLanguage||'');
-    output.append(inner);entry.element.append(output);
+    try{output.append(inner);entry.element.append(output);}
+    catch(error){debugError('网页','插入译文失败',error);throw error;}
     entry.output=output;entry.inner=inner;positionOutput(entry);
   }
   /** One sheet styles every row by state; a stylesheet per row restyled the whole document on each insertion. */
@@ -460,12 +464,15 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     sources=new WeakMap();translations.clear();repairTargets.clear();repairAdded.clear();repairAll=false;
     observer?.disconnect();observer=null;return status();
   }
-  function candidatesOf(blocks: readonly PageBlock[] | null | undefined): PageBlock[] {
-    const seen=new Set<HTMLElement>(),result: PageBlock[]=[];
+  function candidatesOf(blocks: readonly PageBlock[] | null | undefined,report=false): PageBlock[] {
+    const seen=new Set<HTMLElement>(),result: PageBlock[]=[],reasons:Record<string,number>={};
+    const skip=(reason:string)=>{reasons[reason]=(reasons[reason]||0)+1;};
     for(const block of blocks||[]){
-      if(seen.has(block?.element)||typeof block?.text!=='string')continue;seen.add(block.element);
-      if(isReadable(block.element,env)&&blockText(block.element,env)===block.text&&isPageBlockAllowed(block,getSettings(),{env,url:route()}))result.push(block);
+      if(seen.has(block?.element)||typeof block?.text!=='string'){skip('duplicate-or-invalid');continue;}seen.add(block.element);
+      const reason=!isReadable(block.element,env)?'unreadable':blockText(block.element,env)!==block.text?'source-changed':pageBlockSkipReason(block,getSettings(),{env,url:route()});
+      if(reason)skip(reason);else result.push(block);
     }
+    if(report)reportPageCollection(blocks?.length||0,result.length,reasons);
     return result;
   }
   async function run(created: PageEntry[],settings: Settings): Promise<void> {
@@ -495,6 +502,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
         if(!batch.length)continue;
         const id=makeRequestId(),request: PageRequest={owners:new Set(batch.map(unit=>unit.entry)),release:null};
         const released=new Promise<typeof requestCancelled>(resolve=>{request.release=()=>resolve(requestCancelled);});requests.set(id,request);
+        const started=Date.now(),segments=new Set(batch.map(unit=>unit.entry)).size;
         try{
           const response=await Promise.race([translate(batch.map(unit=>unit.text),requestOptions(settings,id)),released]);
           if(response===requestCancelled)continue;
@@ -509,10 +517,12 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
               if(entry.parts.filter(value=>typeof value==='string').length===entry.expected)show(entry,entry.parts.join(' '),'success');
             });
           });
+          debugBatch('网页',{count:segments,providerId:settings.activeProviderId,durationMs:Date.now()-started},response);
         }catch(error){
+          debugBatchError('网页',{count:segments,providerId:settings.activeProviderId,durationMs:Date.now()-started},error);
           requests.delete(id);
           // A provider failure stops only this operation, including its queued rows.
-          fail(created,error);
+          fail(created,error,false);
           break;
         }
 
@@ -521,7 +531,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
       fail(created,error);
     }
   }
-  function fail(created: PageEntry[],error: unknown): void{
+  function fail(created: PageEntry[],error: unknown,report=true): void{
+    if(report)debugError('网页','网页翻译失败',error);
     withLayoutCache(()=>{
       const message=String((error as {message?:unknown} | null)?.message||labels().failed);
       for(const entry of created.filter(entry=>current(entry)&&entry.status==='pending'))show(entry,message,'error');
@@ -533,7 +544,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
   function startBlocks(blocks: readonly PageBlock[],{validate=alwaysAllowed,retryErrors=true,viewportOnly=false}: TranslateBlocksOptions,cacheOnly=false): Promise<PageStatus> {
     if(!cacheOnly)refreshPresentation();if(!validate())return Promise.resolve(status());
     const settings=getSettings(),key=pageTranslationKey(settings),created: PageEntry[]=[],selected: PageEntry[]=[];
-    for(const {element,text} of candidatesOf(blocks)){
+    for(const {element,text} of candidatesOf(blocks,true)){
       let entry: PageEntry | null | undefined=entries.get(element);
       if(entry&&entry.source!==text){sourceChanged(element,text,entry);remove(entry);entry=null;}
       const state=sourceChanged(element,text);
@@ -576,9 +587,9 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     return translateBlocks(candidates,{validate});
   }
   async function translatePage({retryErrors=true}: {retryErrors?:boolean}={}): Promise<PageStatus> {
-    if(isPageSiteBlocked(getSettings(),route())){const error=new Error('当前网址已设为不翻译，可在网页翻译设置中修改。') as CodedError;error.code='SITE_DISABLED';throw error;}
+    if(isPageSiteBlocked(getSettings(),route())){debug('网页','当前网址命中不翻译规则，跳过整页翻译');const error=new Error('当前网址已设为不翻译，可在网页翻译设置中修改。') as CodedError;error.code='SITE_DISABLED';throw error;}
     onBeforeTranslate();lastError='';return translateBlocks(collectBlocks(document,env,{visibleOnly:true}),{retryErrors,viewportOnly:true});
   }
-  function reportError(error: unknown): void{lastError=String((error as {message?:unknown} | null)?.message||labels().failed);changed();}
+  function reportError(error: unknown): void{debugError('网页','网页翻译失败',error);lastError=String((error as {message?:unknown} | null)?.message||labels().failed);changed();}
   return { translatePage,translateBlocks,toggleBlocks,restore,cancelCurrent,status,refreshPresentation,hasTranslation,reportError,stop:restore };
 }

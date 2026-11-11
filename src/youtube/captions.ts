@@ -1,3 +1,4 @@
+import {debug} from '../shared/debug.js';
 import type {CaptionCue,CaptionTrack,JsonCaptionEvent} from './types.js';
 interface RawTrack {baseUrl?:unknown;languageCode?:unknown;kind?:unknown;name?:string|{simpleText?:string;runs?:{text?:string}[]};vssId?:unknown;id?:unknown}
 import {segmentAutomaticEvents} from './asr-segmentation.js';
@@ -74,12 +75,19 @@ function xmlCues(body:string) {
   return normalized(cues);
 }
 export function parseTimedText(input:unknown,options?:{kind?:string;groupPhrases?:boolean}):CaptionCue[] {
-  const playback=(cues:CaptionCue[])=>options?.groupPhrases&&options.kind!=='asr'?groupAuthoredCues(cues):cues;
-  if(input && typeof input==='object')return playback(jsonCues(input as {events?:JsonCaptionEvent[]},options));
+  const playback=(cues:CaptionCue[],input=cues.length)=>{
+    const grouped=options?.groupPhrases&&options.kind!=='asr'?groupAuthoredCues(cues):cues;
+    debug('字幕',`字幕合并：原始 ${input} 条 → ${grouped.length} 句（${options?.kind||'人工字幕'}）`,{kind:options?.kind,input,output:grouped.length});return grouped;
+  };
+  const json=(data:{events?:JsonCaptionEvent[]}|null)=>playback(jsonCues(data,options),data?.events?.filter(event=>Array.isArray(event.segs)).slice(0,60_000).length);
+  if(input && typeof input==='object')return json(input as {events?:JsonCaptionEvent[]});
   if(typeof input!=='string'||input.length>MAX_BODY)throw new Error('字幕数据无效或过大');
   const body=input.trim();
   if(!body)return [];
-  if(body[0]==='{')return playback(jsonCues(JSON.parse(body),options));
+  if(body[0]==='{'){
+    let data;try{data=JSON.parse(body);}catch{throw new Error('字幕 JSON 格式无效');}
+    return json(data);
+  }
   if(/^WEBVTT|\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}\s+-->/m.test(body))return playback(vttCues(body));
   if(/<(?:transcript|timedtext)\b/i.test(body))return playback(xmlCues(body));
   throw new Error('无法识别字幕格式');

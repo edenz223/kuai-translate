@@ -111,7 +111,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
     modelRequestId=undefined;models=[];modelButton.disabled=false;modelSelect.hidden=true;
     modelSelect.replaceChildren();setStatus(modelStatus,'');
   }
-  const preferences: Record<'subtitlesEnabled' | 'subtitleTranslationEnabled' | 'selectionEnabled' | 'hoverEnabled',string>={subtitlesEnabled:'subtitles-enabled',subtitleTranslationEnabled:'subtitle-translation-enabled',selectionEnabled:'selection-enabled',hoverEnabled:'hover-enabled'};
+  const preferences: Record<'debugMode' | 'debugVerbose' | 'subtitlesEnabled' | 'subtitleTranslationEnabled' | 'selectionEnabled' | 'hoverEnabled',string>={debugMode:'debug-mode',debugVerbose:'debug-verbose',subtitlesEnabled:'subtitles-enabled',subtitleTranslationEnabled:'subtitle-translation-enabled',selectionEnabled:'selection-enabled',hoverEnabled:'hover-enabled'};
   function select(id: string,focus=false): void {
     selectedId=id;pickerOpen=false;setStatus(testStatus,'');render(editor.get(),editor.status());
     if(focus)rows.get(id)?.focus();
@@ -196,6 +196,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
     fillSelect(document,byId<HTMLSelectElement>(document,'target-language'),LANGUAGES.filter(([id])=>id!=='auto'),settings.targetLanguage);
     fillSelect(document,byId<HTMLSelectElement>(document,'subtitle-shortcuts'),SUBTITLE_SHORTCUT_CHOICES,settings.subtitleShortcuts);
     for(const [key,id] of Object.entries(preferences))byId<HTMLInputElement>(document,id).checked=!!settings[key as keyof Settings];
+    byId<HTMLInputElement>(document,'debug-verbose').disabled=!settings.debugMode;
     byId(document,'subtitle-options-panel').hidden=!settings.subtitlesEnabled;
     for(const id of ['subtitle-target-language','subtitle-provider'])byId<HTMLSelectElement>(document,id).disabled=!settings.subtitleTranslationEnabled;
     byId<HTMLButtonElement>(document,'page-swap-languages').disabled=settings.sourceLanguage==='auto';

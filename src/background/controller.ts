@@ -1,5 +1,6 @@
+import {debugError,setDebug} from '../shared/debug.js';
 import type {Settings,Provider} from '../shared/settings.js';
-import type {BackgroundRequest, BackgroundResponse, PageActionType, PageBadgeState, PageRequest, SettingsChanged} from '../shared/messages.js';
+import type {BackgroundRequest, BackgroundResponse, NetworkDiagnostics, NetworkRecord, PageActionType, PageBadgeState, PageRequest, SettingsChanged} from '../shared/messages.js';
 import type {SiteRule} from '../shared/site-rules.js';
 interface Owner {trusted:boolean;scope:string;tabId?:number;frameId?:number;documentId:string}
 interface TranslationJob {owner:Owner;controller:AbortController;savedProviderId:string;providerIdentity:string;
@@ -8,7 +9,8 @@ interface BackgroundController {start():BackgroundController;stop():void;
   handleMessage(message:BackgroundRequest,sender:chrome.runtime.MessageSender):Promise<BackgroundResponse>;readonly ready:Promise<void>}
 type MessageOf<T extends BackgroundRequest['type']> = Extract<BackgroundRequest,{type:T}>;
 import { SETTINGS_KEY, defaultSettings, normalizeSettings, publicSettings } from '../shared/settings.js';
-import { translateWithProvider, listProviderModels } from '../providers/index.js';
+import { translateWithProvider, listProviderModels, validateProvider, validateTranslationInput } from '../providers/index.js';
+import {createTranslationCache,translationCacheKey} from './translation-cache.js';
 import { failure, publicError } from '../providers/errors.js';
 import { mergeSettings } from './settings-merge.js';
 import { applyPreferencePatch } from './preferences.js';
@@ -38,6 +40,7 @@ const COMMANDS: Record<string,PageActionType> = {'toggle-page':'KUAI_PAGE_TOGGLE
 
 /** Owns privileged API credentials. Content scripts can supply only saved provider IDs. */
 export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = globalThis.fetch, timeoutMs = 30000 }: {chromeApi?:typeof chrome;fetchImpl?:typeof fetch;timeoutMs?:number} = {}):BackgroundController {
+  const cache=createTranslationCache({storage:chromeApi.storage.session});
   const jobs = new Map<string,TranslationJob>(), disposers:(()=>void)[] = [];
   let settings = defaultSettings(), serialized = JSON.stringify(settings);
   let initialization:Promise<void>|null|undefined, writeQueue:Promise<unknown> = Promise.resolve(), menuTask:Promise<void>|null|undefined, menuRequested = false, appliedMenuSignature:string|null = null;
@@ -94,6 +97,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     } catch { /* Tabs may close during a settings change. */ }
   }
   function publish(next:Settings) {
+    setDebug(next.debugMode,next.debugVerbose);
     const encoded = JSON.stringify(next);
     if (encoded === serialized) return;
     const previousMenus=menuSignature();
@@ -117,10 +121,12 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
         await chromeApi.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
         const value = await chromeApi.storage.local.get(SETTINGS_KEY);
         try { settings = normalizeSettings(value[SETTINGS_KEY] ?? defaultSettings()); }
-        catch { settings = defaultSettings(); } // Preserve malformed stored bytes until an explicit save.
+        catch (error) { debugError('设置','读取设置失败',error);settings = defaultSettings(); } // Preserve malformed stored bytes until an explicit save.
+        setDebug(settings.debugMode,settings.debugVerbose);
         serialized = JSON.stringify(settings);
         if (value[SETTINGS_KEY] === undefined) await chromeApi.storage.local.set({ [SETTINGS_KEY]: settings });
-      } catch { throw failure('STORAGE_UNAVAILABLE', 'Private extension storage could not be initialized. Reload the extension and retry.'); }
+      } catch (error) { debugError('后台','初始化存储失败',error);throw failure('STORAGE_UNAVAILABLE', 'Private extension storage could not be initialized. Reload the extension and retry.'); }
+      await cache.initialize();
     })();
     // An idle worker may initialize before its first caller subscribes to ready.
     // A transient failure must not poison every later request in this worker.
@@ -191,7 +197,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     await chromeApi.tabs.create({url:chromeApi.runtime.getURL('options.html')+'#'+section});
     return {opened:true,section};
   }
-  async function providerRequest(owner:Owner, requestId:unknown, provider:Provider, message:{texts:string[];providerId?:string;sourceLanguage?:string;targetLanguage?:string}, savedProvider=false, models=false) {
+  async function providerRequest(owner:Owner, requestId:unknown, provider:Provider, message:{texts:string[];providerId?:string;sourceLanguage?:string;targetLanguage?:string}, savedProvider=false, models=false, diagnostics?:NetworkDiagnostics) {
     const key = requestKey(owner, requestId);
     if (jobs.has(key)) throw failure('DUPLICATE_REQUEST', 'This translation request is already running.');
     if (jobs.size >= 64 || Array.from(jobs.values()).filter(job => job.owner.scope === owner.scope).length >= 12)
@@ -206,17 +212,34 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     try {
       const options = {
         signal: job.controller.signal, fetchImpl, timeoutMs,
+        onNetwork:diagnostics?(record:NetworkRecord)=>{diagnostics.network!.push(record);}:undefined,
       };
       if(models)return await listProviderModels(provider,options);
-      const translations = await translateWithProvider(provider, {
-        texts:message.texts,sourceLanguage:job.sourceLanguage,targetLanguage:job.targetLanguage,
-        ...options,
-      });
-      if (job.controller.signal.aborted) throw failure('CANCELLED', 'Translation was cancelled.');
-      return { translations, providerId: provider.id || provider.type };
+      // Validate the original batch even when every item is already cached.
+      validateProvider(provider);
+      validateTranslationInput(message.texts,job.sourceLanguage,job.targetLanguage);
+      const keys=savedProvider?await Promise.all(message.texts.map(text=>translationCacheKey(job.providerIdentity,job.sourceLanguage,job.targetLanguage,text))):[];
+      if(job.controller.signal.aborted)throw failure('CANCELLED','Translation was cancelled.');
+      const translations=message.texts.map((_,index)=>keys.length?cache.get(keys[index]):undefined);
+      const misses:number[]=[];
+      translations.forEach((value,index)=>{if(value===undefined)misses.push(index);});
+      if(diagnostics)diagnostics.cacheHits=message.texts.length-misses.length;
+      if(misses.length){
+        const fresh=await translateWithProvider(provider,{
+          texts:misses.map(index=>message.texts[index]),sourceLanguage:job.sourceLanguage,targetLanguage:job.targetLanguage,...options,
+        });
+        if(job.controller.signal.aborted)throw failure('CANCELLED','Translation was cancelled.');
+        misses.forEach((index,offset)=>{
+          translations[index]=fresh[offset];
+          // A misconfigured gateway may echo its credential as a translation.
+          if(keys.length && (!provider.apiKey?.trim() || !fresh[offset].includes(provider.apiKey.trim())))cache.set(keys[index],fresh[offset]);
+        });
+      }
+      return {translations:translations as string[],providerId:provider.id || provider.type};
     } finally { if (jobs.get(key) === job) jobs.delete(key); }
   }
   async function handleMessage(message:BackgroundRequest, sender:chrome.runtime.MessageSender):Promise<BackgroundResponse> {
+    let diagnostics:NetworkDiagnostics|undefined,providerId:string|undefined,providerLabel:string|undefined;
     try {
       if (stopped) throw failure('CANCELLED', 'The extension worker has stopped. Retry the request.');
       const owner = identify(sender);
@@ -256,14 +279,22 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
           });
           break;
         case 'KUAI_TRANSLATE': {
+          if(settings.debugMode)diagnostics={network:[],cacheHits:0};
           const id = !message.providerId || message.providerId === 'follow_page' ? settings.activeProviderId : message.providerId;
           const provider = settings.providers.find(item => item.id === id && item.enabled);
           if (!provider) throw failure('INVALID_CONFIG', 'Select an enabled translation service in the extension settings.');
-          value = await providerRequest(owner, message.requestId, provider, message, true); break;
+          providerId=provider.id || provider.type;
+          // Custom services have random ids; logs name the service and model instead.
+          providerLabel=[provider.name || provider.type,provider.model].filter(Boolean).join(' · ');
+          const result = await providerRequest(owner, message.requestId, provider, message, true, false, diagnostics);
+          value = diagnostics && settings.debugMode ? {...result,...diagnostics,providerLabel} : result; break;
         }
       }
       return { ok: true, value };
-    } catch (error) { return { ok: false, error: publicError(error) }; }
+    } catch (error) {
+      debugError('后台','后台消息处理失败',error);
+      return { ok: false, error: publicError(error),...(diagnostics && settings.debugMode?{...diagnostics,...(providerId?{providerId,providerLabel}:{})}:{}) };
+    }
   }
   function onMessage(message:BackgroundRequest, sender:chrome.runtime.MessageSender, respond:(response:BackgroundResponse)=>void) {
     if (!messageTypes.has(message?.type)) return false;
@@ -381,7 +412,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     // Read the current record, not a potentially delayed older change payload.
     initialize().then(() => chromeApi.storage.local.get(SETTINGS_KEY)).then(value => {
       if (!stopped && epoch === settingsEpoch && value[SETTINGS_KEY] !== undefined) publish(normalizeSettings(value[SETTINGS_KEY]));
-    }).catch(() => {});
+    }).catch(error => {debugError('设置','读取设置失败',error);});
   }
   function listen<T extends (...args:any[])=>void>(event:chrome.events.Event<T>|undefined, callback:T) {
     if (!event) return;
@@ -414,7 +445,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
   }
   function stop() {
     if (stopped) return;
-    stopped = true; cancelJobs();
+    stopped = true; cancelJobs();void cache.flush();
     for (const dispose of disposers.splice(0)) dispose();
   }
   const api:BackgroundController = { start, stop, handleMessage, get ready() { return initialize(); } };

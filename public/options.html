@@ -205,6 +205,10 @@
   <div class="group"><h3>导入</h3>
     <div class="row"><span>导入设置<small>支持 Kuai translate 及可识别的旧版翻译服务、快捷键和样式配置。</small></span><label class="file-button">选择文件…<input id="import-settings" type="file" accept=".json,application/json"></label></div>
   </div>
+  <details class="group advanced"><summary id="debug-heading">高级设置</summary>
+    <label class="row"><span><span id="debug-label">调试模式</span><small id="debug-help">日志位于 DevTools 控制台（内容脚本：网页；后台：Service Worker），密钥会脱敏。</small></span><input id="debug-mode" class="switch" type="checkbox" role="switch" aria-describedby="debug-help"></label>
+    <label class="row"><span><span id="debug-verbose-label">详细日志</span><small id="debug-verbose-help">调试模式下显示收集、字幕载入等过程日志。</small></span><input id="debug-verbose" class="switch" type="checkbox" role="switch" aria-describedby="debug-verbose-help" disabled></label>
+  </details>
 </section>
 </main></div>
 <footer id="save-bar" class="save-bar" data-state="idle"><p id="status" class="status" role="status" aria-live="polite"></p><button id="retry-save" type="button" hidden>重试保存</button><button id="reload-settings" type="button" hidden>重新读取（放弃未保存修改）</button></footer>

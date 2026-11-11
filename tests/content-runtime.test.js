@@ -161,3 +161,18 @@ test('stop rejects a pending action promptly and ignores its later settings resp
   read.resolve({...defaultSettings(),targetLanguage:'ja'});await immediate();
   assert.equal(h.runtime.status().phase,'stopped');assert.equal(h.requests.length,0);assert.equal(h.subscribers.size,0);
 });
+
+test('content logging follows initial settings and refreshed settings-change broadcasts',async t=>{
+ const {debug,isDebug,setDebug}=await import('../dist/src/shared/debug.js');
+ const calls=t.mock.method(console,'info',()=>{}),h=setup();
+ h.settings.debugMode=true;h.settings.debugVerbose=true;
+ t.after(()=>{h.runtime.stop();setDebug(false);});
+ await h.runtime.start();assert.equal(isDebug(),true);
+ debug('网页','initial');assert.ok(calls.mock.calls.some(call=>call.arguments[0]==='[Kuai] %c网页%c initial'));
+ await h.notify({...h.settings,debugMode:false});assert.equal(isDebug(),false);
+ const count=calls.mock.callCount();debug('网页','disabled');assert.equal(calls.mock.callCount(),count);
+ await h.notify({...h.settings,debugMode:true,debugVerbose:false});assert.equal(isDebug(),true);
+ debug('网页','quiet');assert.equal(calls.mock.callCount(),count);
+ await h.notify({...h.settings,debugMode:true,debugVerbose:true});
+ debug('网页','enabled');assert.ok(calls.mock.calls.some(call=>call.arguments[0]==='[Kuai] %c网页%c enabled'));
+});

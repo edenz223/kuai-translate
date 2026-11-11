@@ -1,3 +1,4 @@
+import {debug,debugError} from '../shared/debug.js';
 import type {Settings} from '../shared/settings.js';
 import type {BrowserEnvironment,PageBlock} from './dom.js';
 
@@ -5,6 +6,17 @@ import {ancestors,collectBlocks,configurationKey,isBlock,isNonLanguageText} from
 import {normalizeInteractionOptions,isSiteListed} from '../shared/interactions.js';
 
 const options=(settings: Partial<Settings>)=>normalizeInteractionOptions(settings,settings.providers).pageOptions;
+const skipLabels:Record<string,string>={
+  'non-language-or-detached':'非文本或已移除','min-length':'长度不足',language:'不翻译的语言','page-area':'页脚区域',
+  selector:'排除选择器','site-rule':'网址规则','duplicate-or-invalid':'重复或无效',unreadable:'不可见','source-changed':'原文已变化',
+};
+/** One aggregate per collection/policy pass, never one line per DOM node. */
+export function reportPageCollection(collected:number,selected:number,reasons:Record<string,number>,blocked=false,label='网页收集'):void{
+  const skipped=Object.values(reasons).reduce((sum,count)=>sum+count,0);
+  if(!skipped)return;
+  const explanation=Object.entries(reasons).filter(([,count])=>count>0).map(([reason,count])=>`${skipLabels[reason]||'其他'} ${count}`).join('、');
+  debug('网页',blocked?'当前网址命中不翻译规则，跳过整页翻译':`${label}：候选 ${collected} 段，翻译 ${selected} 段，跳过 ${skipped} 段${skipped?`（${explanation}）`:''}`,{collected,selected,skipped,reasons});
+}
 function language(value: unknown): string{
   if(typeof value!=='string'||value.length>32)return '';
   const code=value.trim().replace(/_/g,'-').toLowerCase();
@@ -34,8 +46,8 @@ export function detectTextLanguage(text: string,element: HTMLElement,env: Browse
       Promise.resolve(i18n.detectLanguage(String(text).slice(0,4096))).then(result=>{
         const item=result?.isReliable&&Array.isArray(result.languages)?result.languages.filter(item=>Number(item.percentage)>=70).sort((a,b)=>b.percentage-a.percentage)[0]:null;
         finish(language(item?.language));
-      },()=>finish(''));
-    }catch{finish('');}
+      },error=>{debugError('网页','检测网页语言失败',error);finish('');});
+    }catch(error){debugError('网页','检测网页语言失败',error);finish('');}
   });
 }
 
@@ -45,34 +57,43 @@ export function pageTranslationKey(settings: Partial<Settings>): string{
   return JSON.stringify([configurationKey(settings),value.neverSites,value.neverLanguages,value.translateFullPage,value.excludeSelectors,value.minTextLength]);
 }
 
-function blockAllowed({element,text}: PageBlock,value: ReturnType<typeof options>,env: BrowserEnvironment): boolean{
-  if(!element?.isConnected||typeof text!=='string'||!/\p{L}/u.test(text)||isNonLanguageText(text)||[...text.trim()].length<value.minTextLength)return false;
-  if(languageListed(declaredLanguage(element),value.neverLanguages))return false;
-  if(!value.translateFullPage&&element.closest?.('footer,[role="contentinfo"]'))return false;
+function blockSkipReason({element,text}: PageBlock,value: ReturnType<typeof options>,env: BrowserEnvironment): string{
+  if(!element?.isConnected||typeof text!=='string'||!/\p{L}/u.test(text)||isNonLanguageText(text))return 'non-language-or-detached';
+  if([...text.trim()].length<value.minTextLength)return 'min-length';
+  if(languageListed(declaredLanguage(element),value.neverLanguages))return 'language';
+  if(!value.translateFullPage&&element.closest?.('footer,[role="contentinfo"]'))return 'page-area';
   for(const selector of value.excludeSelectors){try{
-    if(element.closest?.(selector))return false;
+    if(element.closest?.(selector))return 'selector';
     for(const excluded of element.querySelectorAll?.(selector)||[]){
       if(ancestors(excluded).some(node=>node.hasAttribute?.('data-kuai-owned')))continue;
       // blockText skips nested blocks; an excluded inline region belongs to this entire source unit.
       let owner: Element | null=excluded;while(owner&&owner!==element&&!isBlock(owner,env))owner=owner.parentElement;
-      if(owner===element)return false;
+      if(owner===element)return 'selector';
     }
   }catch{/* Invalid selectors never become code or broad matches. */}}
-  return true;
+  return '';
 }
 
 /** Recheck current DOM policy without starting asynchronous language detection. */
 export function isPageBlockAllowed(block: PageBlock,settings: Settings,{env=globalThis,url=env.location?.href||''}: {env?:BrowserEnvironment;url?:string}={}): boolean{
-  const value=options(settings);return !isSiteListed(url,value.neverSites)&&blockAllowed(block,value,env);
+  return !pageBlockSkipReason(block,settings,{env,url});
+}
+
+/** A reason can be counted by a pass without logging individual DOM nodes. */
+export function pageBlockSkipReason(block:PageBlock,settings:Settings,{env=globalThis,url=env.location?.href||''}:{env?:BrowserEnvironment;url?:string}={}):string{
+  const value=options(settings);return isSiteListed(url,value.neverSites)?'site-rule':blockSkipReason(block,value,env);
 }
 
 /** Sync for ordinary pages; async only when per-paragraph language filtering is requested. */
 export function filterPageBlocks(blocks: PageBlock[],settings: Settings,{env=globalThis,url=env.location?.href||''}: {env?:BrowserEnvironment;url?:string}={}): PageBlock[] | Promise<PageBlock[]>{
-  const value=options(settings);if(isSiteListed(url,value.neverSites))return [];
-  const filtered=blocks.filter(block=>blockAllowed(block,value,env));
-  if(!value.neverLanguages.length)return filtered;
+  const value=options(settings),blocked=isSiteListed(url,value.neverSites),skips:Record<string,number>={};
+  const skip=(reason:string)=>{skips[reason]=(skips[reason]||0)+1;};
+  const filtered=blocks.filter(block=>{const reason=blocked?'site-rule':blockSkipReason(block,value,env);if(reason)skip(reason);return !reason;});
+  // The collection pass already logged; this recheck speaks only when it drops more blocks.
+  const finish=(selected:PageBlock[])=>{if(selected.length<blocks.length)reportPageCollection(blocks.length,selected.length,skips,blocked,'翻译前复核');return selected;};
+  if(blocked||!value.neverLanguages.length)return finish(filtered);
   return Promise.all(filtered.map(async block=>({block,code:await detectTextLanguage(block.text,block.element,env)})))
-    .then(items=>items.filter(item=>!languageListed(item.code,value.neverLanguages)&&isPageBlockAllowed(item.block,settings,{env,url})).map(item=>item.block));
+    .then(items=>finish(items.filter(item=>{const reason=languageListed(item.code,value.neverLanguages)?'language':pageBlockSkipReason(item.block,settings,{env,url});if(reason)skip(reason);return !reason;}).map(item=>item.block)));
 }
 
 export async function shouldAutoTranslate(document: Document,settings: Settings,env: BrowserEnvironment=globalThis): Promise<boolean>{

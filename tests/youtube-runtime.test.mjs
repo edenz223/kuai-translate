@@ -246,6 +246,82 @@ test('the first request of a timeline is small so the opening sentences return q
   session.updateSettings({...defaultSettings(),targetLanguage:'ja'});await settle();
   assert.deepEqual(sizes.slice(3),[3,8,1]);
 });
+test('steady playback fills batches ahead while keeping requests within sixty seconds',async t=>{
+  const requests=[],cues=Array.from({length:40},(_,index)=>({start:index*3,end:index*3+3,text:'Line '+index}));
+  const {session,state,video}=fixture(async texts=>{requests.push({time:video.currentTime,cues:texts.map(text=>cues.find(cue=>cue.text===text))});return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.setCues(cues);
+  for(let time=0;time<120;time++){video.currentTime=time;session.update();await settle();}
+  t.diagnostic(`40 cues: ${requests.length} requests, batch sizes ${requests.map(request=>request.cues.length).join(',')}`);
+  assert.ok(state.subtitlesList.every(cue=>cue.status==='success'));
+  assert.ok(requests[0].cues.length<=3,'opening sentences still return in a small batch');
+  for(const request of requests){
+    assert.ok(request.cues.length<=8);
+    assert.ok(request.cues.some(cue=>cue.end>request.time&&cue.start<=request.time+15),'a pending cue in the trigger window must start each request');
+    assert.ok(request.cues.every(cue=>cue.end>request.time&&cue.start<=request.time+60),'fill must stay within sixty seconds of playback');
+  }
+  assert.ok(requests.length<=Math.ceil(cues.length/8)+2,`expected at most 7 requests, got ${requests.length}`);
+});
+test('prefetch waits for the trigger window and includes only cues through sixty seconds',async t=>{
+  const requests=[],{session,state,video}=fixture(async texts=>{requests.push(texts);return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.setCues([0,30,45,60,75,75.01].map(start=>({start,end:start+2,text:'At '+start})));
+  video.currentTime=0;session.update();await settle();assert.deepEqual(requests,[['At 0']]);
+  video.currentTime=14.99;session.update();await settle();assert.equal(requests.length,1,'lookahead alone cannot trigger translation');
+  video.currentTime=15;session.update();await settle();
+  assert.deepEqual(requests,[['At 0'],['At 30','At 45','At 60','At 75']]);
+  assert.equal(state.subtitlesList.at(-1).status,'pending','a cue just beyond the fill window waits');
+});
+test('a seek during an opening request fills from the new position after seeking ends',async t=>{
+  let finish;const requests=[];
+  const {session,state,video}=fixture((texts,{signal})=>{
+    requests.push({texts,signal});const result={translations:texts.map(text=>'译:'+text)};
+    return requests.length===1?new Promise(resolve=>{finish=()=>resolve(result);}):Promise.resolve(result);
+  });t.after(()=>session.destroy());
+  session.setCues(Array.from({length:100},(_,index)=>({start:index*3,end:index*3+3,text:'Line '+index})));
+  video.duration=300;video.currentTime=0;session.update();await Promise.resolve();
+  video.seeking=true;video.currentTime=180;session.update();assert.equal(requests.length,1);
+  finish();await settle();assert.equal(requests.length,1,'no batch starts while seeking');
+  assert.equal(requests[0].signal.aborted,false,'seeking keeps the current request intact');
+  video.seeking=false;assert.equal(session.seek(180),true);await settle();
+  assert.deepEqual(requests[1].texts,Array.from({length:8},(_,index)=>'Line '+(60+index)));
+  assert.equal(requests.length,2);assert.equal(state.subtitlesList[3].status,'pending','skipped cues are not backfilled');
+});
+test('a selection hold blocks the next prefetch until release',async t=>{
+  let finish;const requests=[];
+  const {session,state,video}=fixture(texts=>{
+    requests.push(texts);const result={translations:texts.map(text=>'译:'+text)};
+    return requests.length===1?new Promise(resolve=>{finish=()=>resolve(result);}):Promise.resolve(result);
+  });t.after(()=>session.destroy());
+  session.setCues(Array.from({length:12},(_,index)=>({start:index*3,end:index*3+3,text:'Line '+index})));
+  video.currentTime=0;session.update();await Promise.resolve();session.hold(true);
+  finish();await settle();session.update();await settle();assert.equal(requests.length,1);
+  assert.equal(state.selectionCaptionSnapshot.translation,'');
+  session.hold(false);await settle();assert.equal(requests.length,2);assert.equal(requests[1].length,8);
+});
+test('automatic loop batches stop before the loop end and resume after it is disabled',async t=>{
+  const requests=[],{session,state,video}=fixture(async texts=>{requests.push(texts);return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.setCues([0,2,4,6,8,10,12].map(start=>({start,end:start===0?10:start+2,text:'At '+start})));
+  video.currentTime=0;session.update();assert.equal(session.setLoop(true),true);await settle();
+  assert.deepEqual(requests,[['At 0','At 2','At 4'],['At 6','At 8']]);
+  assert.deepEqual(state.loopingCaption,{start:0,end:10});assert.equal(state.subtitlesList[5].status,'pending');
+  session.setLoop(false);session.update();await settle();assert.deepEqual(requests.at(-1),['At 10','At 12']);
+});
+test('sidebar candidates stay explicit and retry still needs the playback trigger',async t=>{
+  let fail=true;const requests=[],{session,state,video}=fixture(async texts=>{requests.push(texts);if(fail)throw new Error('Try again');return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.setCues([100,200,210].map(start=>({start,end:start+3,text:'At '+start})));video.currentTime=0;
+  await session.translateCues([state.subtitlesList[1]]);await settle();
+  assert.deepEqual(requests,[['At 200']]);assert.equal(state.subtitlesList[1].status,'error');
+  fail=false;session.retry();await settle();assert.equal(requests.length,1);assert.equal(state.subtitlesList[1].status,'pending');
+  video.currentTime=200;session.update();await settle();assert.deepEqual(requests.at(-1),['At 200','At 210']);
+  assert.equal(state.subtitlesList[0].status,'pending');assert.ok(state.subtitlesList.slice(1).every(cue=>cue.status==='success'));
+});
+test('prefetch keeps the request character cap and fragments long cues',async t=>{
+  const requests=[],{session,state,video}=fixture(async texts=>{requests.push(texts);return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.setCues(Array.from({length:12},(_,index)=>({start:index,end:index+1,text:String(index).padStart(2,'0')+'x'.repeat(5999)})));
+  video.currentTime=0;session.update();await settle();
+  assert.deepEqual(requests.map(texts=>texts.length),[9,18,9],'the middle batch stops at six long cues');
+  assert.ok(requests.every(texts=>texts.every(text=>text.length<=3000)&&texts.join('').length<=40000));
+  assert.ok(state.subtitlesList.every(cue=>cue.status==='success'&&cue.translation===Array.from({length:3},(_,index)=>'译:'+cue.text.slice(index*3000,(index+1)*3000)).join('')));
+});
 test('a preroll ad prepares the opening translation from the start of the video',async t=>{
   const requests=[];let ad=true;const {session,state,video}=fixture(async texts=>{requests.push(texts);return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
   video.closest=()=>ad?{}:null;video.currentTime=20;
@@ -272,6 +348,16 @@ function liveSession(translate){
   const live=text=>{session.setCues([{start:0,end:7,text}],{live:true});session.update();};
   return{session,state:session.state,live};
 }
+test('live DOM batches retain the fifteen-second window without timeline prefetch',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  const requests=[],{session,state,video}=fixture(async texts=>{requests.push(texts);return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.setCues([0,10,20,30,60].map(start=>({start,end:start+3,text:'At '+start})),{live:true});video.currentTime=0;
+  session.update();await settle();assert.equal(requests.length,0);
+  t.mock.timers.tick(700);await settle();assert.deepEqual(requests,[['At 0','At 10']]);
+  video.currentTime=5;session.update();await settle();assert.deepEqual(requests,[['At 0','At 10'],['At 20']]);
+  video.currentTime=15;session.update();await settle();assert.deepEqual(requests.at(-1),['At 30']);
+  assert.equal(state.subtitlesList.at(-1).status,'pending');
+});
 test('rolling live DOM captions translate after the text settles instead of once per change',async t=>{
   t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
   const calls=[],{session,state,live}=liveSession(async texts=>{calls.push(texts);return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
@@ -374,4 +460,51 @@ test('the translation switch is a normalized, patchable player preference',async
   assert.equal(defaultSettings().subtitleTranslationEnabled,true);assert.equal(normalizeSettings({subtitleTranslationEnabled:false}).subtitleTranslationEnabled,false);
   assert.equal(applyPreferencePatch(defaultSettings(),{subtitleTranslationEnabled:false}).subtitleTranslationEnabled,false);
   assert.throws(()=>applyPreferencePatch(defaultSettings(),{subtitleTranslationEnabled:'no'}));
+});
+
+
+test('track diagnostics report Chinese choices once and keep render sync quiet',async t=>{
+  const {setDebug}=await import('../dist/src/shared/debug.js');
+  const calls=t.mock.method(console,'info',()=>{}),warnings=t.mock.method(console,'warn',()=>{}),h=setup();
+  t.after(()=>{h.manager.stop();setDebug(false);});setDebug(true,true);
+  h.message({kind:'tracks',videoId:'abcdef12345',selectedLanguage:'en',tracks:[{...track('en'),kind:'asr'},track('es')]});
+  const selections=()=>calls.mock.calls.filter(call=>call.arguments[0].startsWith('[Kuai] %c字幕%c 字幕轨道：'));
+  assert.equal(selections().length,1);
+  assert.equal(selections()[0].arguments[0],'[Kuai] %c字幕%c 字幕轨道：共 2 条，已选 en（自动生成）');
+  const count=calls.mock.callCount();for(let i=0;i<10;i++)h.manager.sync();
+  assert.equal(calls.mock.callCount(),count,'unchanged track selection and render sync must stay quiet');
+  h.message({kind:'tracks',videoId:'abcdef12345',tracks:[]});
+  assert.equal(selections().length,2);
+  assert.equal(selections().at(-1).arguments[0],'[Kuai] %c字幕%c 字幕轨道：未找到可用轨道');
+  assert.equal(warnings.mock.callCount(),0);
+  assert.ok(!JSON.stringify(calls.mock.calls.map(call=>call.arguments)).includes('baseUrl'));
+});
+
+for(const durationMs of [100,2400])test(`successful ${durationMs} ms subtitle batches use the expected trigger window`,async t=>{
+  let now=10000;const requests=[];
+  t.mock.method(Date,'now',()=>now);
+  const {session,video,state}=fixture(async texts=>{requests.push(texts);now+=durationMs;return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.setCues([0,30,60,65.01].map(start=>({start,end:start+2,text:'At '+start})));
+  video.currentTime=0;session.update();await settle();assert.deepEqual(requests,[['At 0']]);
+  video.currentTime=4.99;session.update();await settle();assert.equal(requests.length,1);
+  video.currentTime=5;session.update();await settle();
+  if(durationMs>2000){
+    assert.deepEqual(requests,[['At 0'],['At 30','At 60']]);assert.equal(state.subtitlesList.at(-1).status,'pending');
+  }else{
+    assert.equal(requests.length,1);video.currentTime=15;session.update();await settle();assert.deepEqual(requests[1],['At 30','At 60','At 65.01']);
+  }
+});
+test('adaptive prefetch logs only on window changes, only with verbose diagnostics',async t=>{
+  const {setDebug}=await import('../dist/src/shared/debug.js');
+  const info=t.mock.method(console,'info',()=>{});t.after(()=>setDebug(false));
+  let now=10000;t.mock.method(Date,'now',()=>now);
+  for(const verbose of [false,true]){
+    setDebug(true,verbose);
+    const {session,video}=fixture(async texts=>{now+=2400;return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+    session.setCues([0,30,60].map(start=>({start,end:start+2,text:'At '+start})));
+    video.currentTime=0;session.update();await settle();video.currentTime=5;session.update();await settle();session.destroy();
+    const changes=info.mock.calls.filter(call=>/服务较慢/.test(call.arguments[0]));
+    assert.equal(changes.length,verbose?1:0);
+    if(verbose)assert.match(changes[0].arguments[0],/字幕%c 服务较慢（平均 2.4 s），提前 25 秒预取/);
+  }
 });
