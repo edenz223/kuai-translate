@@ -1,3 +1,4 @@
+import {debug,setDebug} from '../shared/debug.js';
 import type {Settings,Provider} from '../shared/settings.js';
 import type {BackgroundRequest, BackgroundResponse, PageActionType, PageBadgeState, PageRequest, SettingsChanged} from '../shared/messages.js';
 import type {SiteRule} from '../shared/site-rules.js';
@@ -94,6 +95,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     } catch { /* Tabs may close during a settings change. */ }
   }
   function publish(next:Settings) {
+    setDebug(next.debugMode);
     const encoded = JSON.stringify(next);
     if (encoded === serialized) return;
     const previousMenus=menuSignature();
@@ -117,10 +119,11 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
         await chromeApi.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
         const value = await chromeApi.storage.local.get(SETTINGS_KEY);
         try { settings = normalizeSettings(value[SETTINGS_KEY] ?? defaultSettings()); }
-        catch { settings = defaultSettings(); } // Preserve malformed stored bytes until an explicit save.
+        catch (error) { debug('background:settings','error',error);settings = defaultSettings(); } // Preserve malformed stored bytes until an explicit save.
+        setDebug(settings.debugMode);
         serialized = JSON.stringify(settings);
         if (value[SETTINGS_KEY] === undefined) await chromeApi.storage.local.set({ [SETTINGS_KEY]: settings });
-      } catch { throw failure('STORAGE_UNAVAILABLE', 'Private extension storage could not be initialized. Reload the extension and retry.'); }
+      } catch (error) { debug('background:storage','error',error);throw failure('STORAGE_UNAVAILABLE', 'Private extension storage could not be initialized. Reload the extension and retry.'); }
     })();
     // An idle worker may initialize before its first caller subscribes to ready.
     // A transient failure must not poison every later request in this worker.
@@ -263,7 +266,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
         }
       }
       return { ok: true, value };
-    } catch (error) { return { ok: false, error: publicError(error) }; }
+    } catch (error) { debug('background:message','error',error);return { ok: false, error: publicError(error) }; }
   }
   function onMessage(message:BackgroundRequest, sender:chrome.runtime.MessageSender, respond:(response:BackgroundResponse)=>void) {
     if (!messageTypes.has(message?.type)) return false;
@@ -381,7 +384,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     // Read the current record, not a potentially delayed older change payload.
     initialize().then(() => chromeApi.storage.local.get(SETTINGS_KEY)).then(value => {
       if (!stopped && epoch === settingsEpoch && value[SETTINGS_KEY] !== undefined) publish(normalizeSettings(value[SETTINGS_KEY]));
-    }).catch(() => {});
+    }).catch(error => {debug('background:settings','error',error);});
   }
   function listen<T extends (...args:any[])=>void>(event:chrome.events.Event<T>|undefined, callback:T) {
     if (!event) return;

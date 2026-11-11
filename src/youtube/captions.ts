@@ -1,3 +1,4 @@
+import {debug} from '../shared/debug.js';
 import type {CaptionCue,CaptionTrack,JsonCaptionEvent} from './types.js';
 interface RawTrack {baseUrl?:unknown;languageCode?:unknown;kind?:unknown;name?:string|{simpleText?:string;runs?:{text?:string}[]};vssId?:unknown;id?:unknown}
 import {segmentAutomaticEvents} from './asr-segmentation.js';
@@ -74,7 +75,10 @@ function xmlCues(body:string) {
   return normalized(cues);
 }
 export function parseTimedText(input:unknown,options?:{kind?:string;groupPhrases?:boolean}):CaptionCue[] {
-  const playback=(cues:CaptionCue[])=>options?.groupPhrases&&options.kind!=='asr'?groupAuthoredCues(cues):cues;
+  const playback=(cues:CaptionCue[])=>{
+    const grouped=options?.groupPhrases&&options.kind!=='asr'?groupAuthoredCues(cues):cues;
+    debug('youtube:captions','group',{kind:options?.kind,input:cues.length,output:grouped.length});return grouped;
+  };
   if(input && typeof input==='object')return playback(jsonCues(input as {events?:JsonCaptionEvent[]},options));
   if(typeof input!=='string'||input.length>MAX_BODY)throw new Error('字幕数据无效或过大');
   const body=input.trim();

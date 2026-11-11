@@ -1,3 +1,4 @@
+import {debug} from '../shared/debug.js';
 import {sourceText,originalMutationFilter} from './source-text.js';
 import type {Settings} from '../shared/settings.js';
 import type {Translate} from '../shared/messages.js';
@@ -15,7 +16,7 @@ interface PageRequest {owners:Set<PageEntry>;release:(()=>void)|null}
 interface SourceChanges {source:string;changedAt?:number;wasted:number}
 
 import { ancestors, batches, blockText, collectBlocks, computedStyle, isPageControl, isBlock, pinBlock, unpinBlock, isChinese, isPageReadable as isReadable, isInViewport, visibleRect, makeId, requestOptions, translationsOf, withLayoutCache } from './dom.js';
-import {filterPageBlocks,isPageBlockAllowed,isPageSiteBlocked,pageTranslationKey} from './page-policy.js';
+import {pageBlockSkipReason,filterPageBlocks,isPageBlockAllowed,isPageSiteBlocked,pageTranslationKey} from './page-policy.js';
 import {pageStyleRule} from '../shared/styles.js';
 import {hideOriginal,restoreOriginal} from './originals.js';
 import {capturePageContent,pageContentMatches,renderPageContent,refreshPageLinks,isPageLinkMutation,PAGE_LINK_ATTRIBUTES} from './page-content.js';
@@ -250,7 +251,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     while(anchor.parentNode&&anchor.parentNode!==parent)anchor=anchor.parentNode;
     if(anchor.parentNode!==parent)return;
     const next=Array.from(parent.childNodes)[Array.from(parent.childNodes).indexOf(anchor as ChildNode)+1]||null;
-    if(next!==entry.output)parent.insertBefore(entry.output,next);
+    try{if(next!==entry.output)parent.insertBefore(entry.output,next);}
+    catch(error){debug('page:insert','error',error);throw error;}
   }
   function ensureOutput(entry: PageEntry): asserts entry is PageEntry & {output:HTMLElement} {
     if(entry.output)return;
@@ -265,7 +267,8 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     }
     inner.className='kuai-translator-inner';
     inner.setAttribute('lang',getSettings().targetLanguage||'');
-    output.append(inner);entry.element.append(output);
+    try{output.append(inner);entry.element.append(output);}
+    catch(error){debug('page:insert','error',error);throw error;}
     entry.output=output;entry.inner=inner;positionOutput(entry);
   }
   /** One sheet styles every row by state; a stylesheet per row restyled the whole document on each insertion. */
@@ -461,11 +464,14 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     observer?.disconnect();observer=null;return status();
   }
   function candidatesOf(blocks: readonly PageBlock[] | null | undefined): PageBlock[] {
-    const seen=new Set<HTMLElement>(),result: PageBlock[]=[];
+    const seen=new Set<HTMLElement>(),result: PageBlock[]=[],reasons:Record<string,number>={};
+    const skip=(reason:string)=>{reasons[reason]=(reasons[reason]||0)+1;};
     for(const block of blocks||[]){
-      if(seen.has(block?.element)||typeof block?.text!=='string')continue;seen.add(block.element);
-      if(isReadable(block.element,env)&&blockText(block.element,env)===block.text&&isPageBlockAllowed(block,getSettings(),{env,url:route()}))result.push(block);
+      if(seen.has(block?.element)||typeof block?.text!=='string'){skip('duplicate-or-invalid');continue;}seen.add(block.element);
+      const reason=!isReadable(block.element,env)?'unreadable':blockText(block.element,env)!==block.text?'source-changed':pageBlockSkipReason(block,getSettings(),{env,url:route()});
+      if(reason)skip(reason);else result.push(block);
     }
+    debug('page:collect','pass',{collected:blocks?.length||0,selected:result.length,skipped:Object.values(reasons).reduce((sum,count)=>sum+count,0),reasons});
     return result;
   }
   async function run(created: PageEntry[],settings: Settings): Promise<void> {
@@ -522,6 +528,7 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     }
   }
   function fail(created: PageEntry[],error: unknown): void{
+    debug('page:translate','error',error);
     withLayoutCache(()=>{
       const message=String((error as {message?:unknown} | null)?.message||labels().failed);
       for(const entry of created.filter(entry=>current(entry)&&entry.status==='pending'))show(entry,message,'error');
@@ -576,9 +583,9 @@ export function createPageTranslator({ document, env = globalThis, translate, ca
     return translateBlocks(candidates,{validate});
   }
   async function translatePage({retryErrors=true}: {retryErrors?:boolean}={}): Promise<PageStatus> {
-    if(isPageSiteBlocked(getSettings(),route())){const error=new Error('当前网址已设为不翻译，可在网页翻译设置中修改。') as CodedError;error.code='SITE_DISABLED';throw error;}
+    if(isPageSiteBlocked(getSettings(),route())){debug('page:collect','pass',{collected:0,selected:0,reasons:{'site-rule':1}});const error=new Error('当前网址已设为不翻译，可在网页翻译设置中修改。') as CodedError;error.code='SITE_DISABLED';throw error;}
     onBeforeTranslate();lastError='';return translateBlocks(collectBlocks(document,env,{visibleOnly:true}),{retryErrors,viewportOnly:true});
   }
-  function reportError(error: unknown): void{lastError=String((error as {message?:unknown} | null)?.message||labels().failed);changed();}
+  function reportError(error: unknown): void{debug('page:translate','error',error);lastError=String((error as {message?:unknown} | null)?.message||labels().failed);changed();}
   return { translatePage,translateBlocks,toggleBlocks,restore,cancelCurrent,status,refreshPresentation,hasTranslation,reportError,stop:restore };
 }

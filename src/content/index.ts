@@ -1,3 +1,4 @@
+import {debug,setDebug} from '../shared/debug.js';
 import type {Settings} from '../shared/settings.js';
 import type {MessageResponse,PageBadgeState,PageRequest,PageStatus,PreferencePatch,PublicFailure} from '../shared/messages.js';
 import type {YouTubeControllerOptions} from '../youtube/index.js';
@@ -46,7 +47,8 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
       if(stopped||settingsRead!==read)return;
       if(!next||typeof next!=='object'||Array.isArray(next))throw Error('Invalid settings response');
       settingsError='';updateSettings(next);read.resolve();
-    }).catch(()=>{
+    }).catch(error=>{
+      debug('content:settings','error',error);
       if(stopped||settingsRead!==read)return;
       settingsError='无法读取最新翻译设置，请重试或刷新页面。';
       read.reject(Object.assign(new Error(settingsError),{code:'SETTINGS_UNAVAILABLE'}));
@@ -76,13 +78,13 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
   function updateSettings(next: Settings): void{
     if(stopped||!next||typeof next!=='object'||JSON.stringify(settings)===JSON.stringify(next))return;
     const previous=settings,identityChanged=pageTranslationKey(previous)!==pageTranslationKey(next);
-    settings=next;
+    settings=next;setDebug(next.debugMode);
     if(identityChanged)page?.restore();else page?.refreshPresentation();
     if(interactionConfigurationKey(previous)!==interactionConfigurationKey(next))interactions?.updateSettings();
     interactions?.refreshPresentation?.();
     pageTriggers?.updateSettings();
     lastError='';
-    for(const callback of [...subscribers]){try{callback(next);}catch{subtitleError={code:'YOUTUBE_UPDATE_FAILED',message:'字幕界面更新失败，请重新打开字幕列表或刷新页面。'};}}
+    for(const callback of [...subscribers]){try{callback(next);}catch(error){debug('content:youtube','error',error);subtitleError={code:'YOUTUBE_UPDATE_FAILED',message:'字幕界面更新失败，请重新打开字幕列表或刷新页面。'};}}
     reportBadge();
   }
   function reportBadge(): void{
@@ -106,7 +108,8 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
     })).then(instance=>{
       if(stopped){instance?.stop?.();return;}
       youtube=instance;subtitleError=null;return instance;
-    }).catch(()=>{
+    }).catch(cause=>{
+      debug('content:youtube','error',cause);
       attemptSubscriptions.forEach(off=>off());
       const error=new Error('字幕入口暂时无法初始化，请重试打开字幕列表或刷新页面。') as CodedError & {code:string};error.code='YOUTUBE_INIT_FAILED';
       subtitleError={code:error.code,message:error.message};throw error;
@@ -156,7 +159,7 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
       disposers.push(()=>env.chrome?.runtime?.onMessage?.removeListener(messageListener));
       listen(env,'pagehide',pagehide);
       await ready();if(stopped)return api;
-      settings=await client.getSettings(false);if(stopped)return api;
+      settings=await client.getSettings(false);if(stopped)return api;setDebug(settings.debugMode);
       const dependencies={document,env,getSettings:()=>settings,translate:client.translate,cancel:client.cancel,makeRequestId:client.makeRequestId,openOptions:client.openOptions,onUserAction:(action:string)=>pageTriggers?.handleUserAction(action)};
       page=createPageTranslator({...dependencies,onRestore:()=>interactions?.clearParagraphGesture?.(),onChange:reportBadge});
       interactions=createInteractions({...dependencies,page}).start();
@@ -176,7 +179,8 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
       listen(env,'pageshow',event=>{if(event.persisted){reportedBadge='idle';reportBadge();}});
       if(!stopped)phase='ready';reportBadge();
       return api;
-    })().catch(()=>{
+    })().catch(cause=>{
+      debug('content:init','error',cause);
       cleanup();startPromise=null;
       if(stopped){
         phase='stopped';

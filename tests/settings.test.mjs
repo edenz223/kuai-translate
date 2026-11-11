@@ -388,3 +388,27 @@ test('page font defaults migrate once and preserve individually customized value
   const again=normalizeSettings(value);assert.equal(again.pageStyle.fontWeight,400);assert.equal(again.pageStyle.lineHeight,1.6);
  }
 });
+
+test('debug mode defaults off, is public, and diagnostic state stays out of all backups',()=>{
+  assert.equal(defaultSettings().debugMode,false);
+  for(const input of [undefined,null,0,1,'true','false',{},[]])assert.equal(normalizeSettings({debugMode:input}).debugMode,false);
+  assert.equal(normalizeSettings({debugMode:true}).debugMode,true);
+  assert.equal(normalizeSettings({debugMode:false}).debugMode,false);
+  const current=defaultSettings();current.debugMode=true;
+  assert.equal(publicSettings(current).debugMode,true);
+  for(const includeSecrets of [false,true]){
+    const backup=exportSettings(current,{includeSecrets});assert.equal(backup.settings.debugMode,false);
+    assert.equal(current.debugMode,true,'export does not mutate live settings');
+    for(const enabled of [false,true]){
+      current.debugMode=enabled;backup.settings.debugMode=!enabled;
+      assert.equal(importSettings(backup,current).debugMode,enabled);
+      assert.equal(importSettings(backup.settings,current).debugMode,enabled);
+      assert.equal(importSettings({member_settings:'{"translationEngineConfig":{}}'},current).debugMode,enabled);
+    }
+    current.debugMode=true;
+  }
+  delete current.debugMode;
+  for(const backup of [exportSettings(current),current,{member_settings:'{"translationEngineConfig":{}}'}]){
+    assert.equal(importSettings(backup,current).debugMode,false,'older settings without debugMode import as false');
+  }
+});

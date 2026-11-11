@@ -678,3 +678,20 @@ test('provider titles and subtitles avoid repeating type names and usage chips d
   assert.equal(h.node('provider-title').textContent,'我的服务');assert.equal(h.node('provider-kind').textContent,'自配 API · OpenAI 兼容 API');
   assert.equal(h.node('custom-provider-list').children[0].children.find(child=>child.className==='provider-type-name').textContent,'OpenAI 兼容 API · fixture-model');
 });
+
+test('debug mode switch keeps Chinese labels, uses autosave and survives reloading the settings page',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ const h=options(t),labels={'debug-heading':'高级设置','debug-label':'调试模式','debug-help':'日志位于 DevTools 控制台（内容脚本：网页；后台：Service Worker），密钥会脱敏。'};
+ const getMessage=t.mock.fn(()=> 'English debug text');globalThis.chrome.i18n={getMessage};
+ // This form boundary parses attributes only; seed the text supplied by the actual HTML.
+ for(const [id,text]of Object.entries(labels))h.node(id).textContent=text;
+ await h.start();assert.equal(h.node('debug-mode').checked,false);
+ assert.equal(getMessage.mock.callCount(),0);
+ for(const [id,text]of Object.entries(labels))assert.equal(h.node(id).textContent,text);
+ assert.equal(h.node('debug-mode').getAttribute('aria-describedby'),'debug-help');
+ await h.edit('debug-mode',true);assert.equal(h.stored.debugMode,true);
+ assert.equal(h.node('save-bar').dataset.state,'saved');
+ assert.equal(h.requests.filter(item=>item.type==='KUAI_SAVE_SETTINGS').at(-1).settings.debugMode,true);
+ const reopened=h.reopen();await reopened.start();assert.equal(reopened.node('debug-mode').checked,true);
+ await reopened.edit('debug-mode',false);assert.equal(h.stored.debugMode,false);
+});

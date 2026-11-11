@@ -1,3 +1,4 @@
+import {debug} from '../shared/debug.js';
 import {sourceText} from './source-text.js';
 import type {BrowserEnvironment} from './dom.js';
 
@@ -105,6 +106,7 @@ function bindActivation(binding: PageLinkBinding): void{
 }
 
 export function renderPageContent(output: HTMLElement,content: PageContent,parts: readonly (string | undefined)[],{document,env,valid}: {document:Document; env:BrowserEnvironment; valid:()=>boolean}): PageLinkBinding[]{
+  try{
   if(!content.linked){output.append(document.createTextNode(parts.join(' ')));return [];}
   const bindings: PageLinkBinding[]=[];
   for(const run of content.runs){
@@ -115,6 +117,7 @@ export function renderPageContent(output: HTMLElement,content: PageContent,parts
     const binding={source:run.anchor,node,output,valid,document,env};syncLink(binding,document,env);bindings.push(binding);
   }
   return bindings;
+  }catch(error){debug('page:content','error',error);throw error;}
 }
 export function refreshPageLinks(bindings: readonly PageLinkBinding[] | null | undefined,document: Document,env: BrowserEnvironment): void{for(const binding of bindings||[])syncLink(binding,document,env);}
 

@@ -161,3 +161,16 @@ test('stop rejects a pending action promptly and ignores its later settings resp
   read.resolve({...defaultSettings(),targetLanguage:'ja'});await immediate();
   assert.equal(h.runtime.status().phase,'stopped');assert.equal(h.requests.length,0);assert.equal(h.subscribers.size,0);
 });
+
+test('content logging follows initial settings and refreshed settings-change broadcasts',async t=>{
+ const {debug,isDebug,setDebug}=await import('../dist/src/shared/debug.js');
+ const calls=t.mock.method(console,'debug',()=>{}),h=setup();
+ h.settings.debugMode=true;
+ t.after(()=>{h.runtime.stop();setDebug(false);});
+ await h.runtime.start();assert.equal(isDebug(),true);
+ debug('content:test','initial');assert.ok(calls.mock.calls.some(call=>call.arguments[1]==='initial'));
+ await h.notify({...h.settings,debugMode:false});assert.equal(isDebug(),false);
+ const count=calls.mock.callCount();debug('content:test','disabled');assert.equal(calls.mock.callCount(),count);
+ await h.notify({...h.settings,debugMode:true});assert.equal(isDebug(),true);
+ debug('content:test','enabled');assert.ok(calls.mock.calls.some(call=>call.arguments[1]==='enabled'));
+});

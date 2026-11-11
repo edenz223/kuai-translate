@@ -1,3 +1,4 @@
+import {debug} from '../shared/debug.js';
 import type {Settings} from '../shared/settings.js';
 import type {SubtitleSession,SubtitleState,CaptionCue,TranslateSubtitles} from './types.js';
 import {subtitleWords} from './i18n.js';
@@ -64,7 +65,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     }
     if(loop&&!video.seeking){
       if(video.currentTime<loop.start-0.25||video.currentTime>loop.end+1)followLoop(video.currentTime);
-      else if(video.currentTime>=loop.end-0.05){try{video.currentTime=loop.start;}catch{}}
+      else if(video.currentTime>=loop.end-0.05){try{video.currentTime=loop.start;}catch(error){debug('youtube:seek','error',error);}}
     }
     const time=video.currentTime,{active,first}=activeAt(time);
     const next=active.length?{start:active[0].start,end:Math.min(...active.map(item=>item.end)),original:active.map(item=>item.text).join('\n'),
@@ -118,6 +119,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
       cues.forEach((cue,index)=>{cue.translation=values.slice(...mapping[index]).join('');cue.status='success';});
       if(state.isLiveDomCaptions){const latest=cues.at(-1)!;liveSource={text:latest.text,translation:latest.translation!};carryLive(state.subtitlesList);}
     }).catch(error=>{
+      debug('youtube:session','error',error);
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
       cues.forEach(cue=>{cue.status='error';cue.errorMessage=error?.message||subtitleWords(getLanguage()).translationFailed;});
     }).finally(()=>{
@@ -142,6 +144,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     else{invalidate();liveSource=null;livePendingSince=live?Date.now():null;liveChangedAt=livePendingSince||0;opening=!live;}
     state.isLiveDomCaptions=!!live;
     state.subtitlesList=(cues||[]).filter(cue=>Number.isFinite(cue.start)&&Number.isFinite(cue.end)&&cue.start>=0&&cue.end>cue.start&&typeof cue.text==='string'&&cue.text.trim()).map(cue=>({...cue,translation:cue.translation||'',status:cue.status||'pending'})).sort((a,b)=>a.start-b.start);
+    debug('youtube:session','cues',{input:cues?.length||0,accepted:state.subtitlesList.length,live});
     if(rolling)carryLive(state.subtitlesList);
     state.errorMessage='';if(!state.isSubtitleSelectionHeld)state.currentCaption=null;notify();
   }
@@ -178,7 +181,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
   function seek(time:number) {
     if(!available()||!Number.isFinite(time)||time<0||!Number.isFinite(video.duration)||time>=video.duration)return false;
     if(video.seekable?.length){let found=false;for(let index=0;index<video.seekable.length;index++)if(time>=video.seekable.start(index)&&time<video.seekable.end(index))found=true;if(!found)return false;}
-    try{followLoop(time);video.currentTime=time;update();return true;}catch{return false;}
+    try{followLoop(time);video.currentTime=time;update();return true;}catch(error){debug('youtube:seek','error',error);return false;}
   }
   function tick(){update();}
   function play(){clearInterval(timer!);timer=setInterval(tick,150);update();}

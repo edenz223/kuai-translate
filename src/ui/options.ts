@@ -111,7 +111,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
     modelRequestId=undefined;models=[];modelButton.disabled=false;modelSelect.hidden=true;
     modelSelect.replaceChildren();setStatus(modelStatus,'');
   }
-  const preferences: Record<'subtitlesEnabled' | 'subtitleTranslationEnabled' | 'selectionEnabled' | 'hoverEnabled',string>={subtitlesEnabled:'subtitles-enabled',subtitleTranslationEnabled:'subtitle-translation-enabled',selectionEnabled:'selection-enabled',hoverEnabled:'hover-enabled'};
+  const preferences: Record<'debugMode' | 'subtitlesEnabled' | 'subtitleTranslationEnabled' | 'selectionEnabled' | 'hoverEnabled',string>={debugMode:'debug-mode',subtitlesEnabled:'subtitles-enabled',subtitleTranslationEnabled:'subtitle-translation-enabled',selectionEnabled:'selection-enabled',hoverEnabled:'hover-enabled'};
   function select(id: string,focus=false): void {
     selectedId=id;pickerOpen=false;setStatus(testStatus,'');render(editor.get(),editor.status());
     if(focus)rows.get(id)?.focus();

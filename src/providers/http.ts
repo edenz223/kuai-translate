@@ -1,3 +1,4 @@
+import {debug} from '../shared/debug.js';
 import { failure, TranslationError } from './errors.js';
 
 export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -22,6 +23,7 @@ export async function withRequestLifetime<T>(run:(signal:AbortSignal)=>Promise<T
     if (signal?.aborted) return await cancelled;
     return await Promise.race([run(controller.signal), cancelled]);
   } catch (error) {
+    debug('provider:http','error',error);
     if (error instanceof TranslationError) throw error;
     if (signal?.aborted) throw failure('CANCELLED', 'Translation was cancelled.');
     throw failure('NETWORK_ERROR', 'Unable to reach the translation service. Check the connection and endpoint.');
@@ -73,5 +75,5 @@ export async function requestJSON(fetchImpl:typeof fetch, url:string|URL, option
       throw failure('RESPONSE_TOO_LARGE', 'The translation response was too large. Use a smaller batch.');
   }
   try { return JSON.parse(body); }
-  catch { throw failure('INVALID_RESPONSE', 'The translation service did not return valid JSON.'); }
+  catch (error) { debug('provider:json','error',error);throw failure('INVALID_RESPONSE', 'The translation service did not return valid JSON.'); }
 }

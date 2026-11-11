@@ -1,5 +1,6 @@
 /** Public configuration schema. Provider secrets are exposed only to extension pages. */
 import { normalizePageStyle, normalizeSubtitleStyle, SUBTITLE_STYLE_DEFAULTS } from './presentation.js';
+import {redactEndpoint} from './redaction.js';
 import { normalizeInteractionOptions, normalizeShortcut } from './interactions.js';
 export interface Provider {
   id: string; type: string; name: string; enabled: boolean;
@@ -43,7 +44,7 @@ export function normalizeSubtitleTrackPreference(input?:unknown):SubtitleTrackPr
 
 export function defaultSettings() {
   return {
-    schemaVersion:1, inputDefaultsVersion:3, paragraphDefaultsVersion:1, subtitleStyleDefaultsVersion:2, pageStyleDefaultsVersion:1, providerRevision:0, providers:structuredClone(FREE_PROVIDERS) as Provider[],
+    debugMode:false, schemaVersion:1, inputDefaultsVersion:3, paragraphDefaultsVersion:1, subtitleStyleDefaultsVersion:2, pageStyleDefaultsVersion:1, providerRevision:0, providers:structuredClone(FREE_PROVIDERS) as Provider[],
     activeProviderId:'microsoft', subtitleProviderId:'follow_page',
     sourceLanguage:'auto', targetLanguage:'zh-Hans', interfaceLanguage:'auto',
     // subtitlesEnabled turns Kuai captions and the list on; translation can be off within them.
@@ -130,7 +131,7 @@ export function normalizeSettings(input:unknown):Settings {
   if(input.schemaVersion===1&&version(input.paragraphDefaultsVersion,0)<1&&input.hoverOptions?.trigger==='alt')
     interactionInput={...interactionInput,hoverOptions:{...input.hoverOptions,trigger:'shift'}};
   return {
-    schemaVersion:1,inputDefaultsVersion:version(input.inputDefaultsVersion,3),paragraphDefaultsVersion:version(input.paragraphDefaultsVersion,1),subtitleStyleDefaultsVersion:version(input.subtitleStyleDefaultsVersion,2),pageStyleDefaultsVersion:version(input.pageStyleDefaultsVersion,1),providerRevision:Number.isSafeInteger(input.providerRevision)&&input.providerRevision>=0?input.providerRevision:0,providers,activeProviderId:active,
+    debugMode:flag(input.debugMode,false),schemaVersion:1,inputDefaultsVersion:version(input.inputDefaultsVersion,3),paragraphDefaultsVersion:version(input.paragraphDefaultsVersion,1),subtitleStyleDefaultsVersion:version(input.subtitleStyleDefaultsVersion,2),pageStyleDefaultsVersion:version(input.pageStyleDefaultsVersion,1),providerRevision:Number.isSafeInteger(input.providerRevision)&&input.providerRevision>=0?input.providerRevision:0,providers,activeProviderId:active,
     subtitleProviderId:input.subtitleProviderId==='follow_page' || !enabled(input.subtitleProviderId) ? 'follow_page' : input.subtitleProviderId,
     sourceLanguage:language(input.sourceLanguage,'auto',true),targetLanguage:language(input.targetLanguage,'zh-Hans'),
     interfaceLanguage:['auto','en','zh-CN'].includes(input.interfaceLanguage) ? input.interfaceLanguage : 'auto',
@@ -151,18 +152,9 @@ export function publicSettings(settings:unknown):PublicSettings {
   return value;
 }
 
-function redactEndpoint(value:string|undefined) {
-  if (!value) return value;
-  try {
-    const url=new URL(value);
-    url.hash='';
-    for (const key of [...url.searchParams.keys()]) if (/key|token|secret|auth|password|signature/i.test(key)) url.searchParams.delete(key);
-    return url.href;
-  } catch { return ''; }
-}
-
 export function exportSettings(settings:unknown, {includeSecrets=false}={}) {
   const value=normalizeSettings(settings);
+  value.debugMode=false;
   if (!includeSecrets) for (const provider of value.providers) {
     provider.apiKey='';provider.baseUrl=redactEndpoint(provider.baseUrl);
   }
@@ -338,7 +330,8 @@ export function importSettings(data:unknown, current=defaultSettings()) {
       const previous=current.providers?.find(item=>item.id===provider.id && item.type===provider.type);
       if (previous && provider.baseUrl===redactEndpoint(previous.baseUrl) && !provider.apiKey) provider.apiKey=previous.apiKey || '';
     }
+    value.debugMode=!!current.debugMode;
     return value;
   }
-  return importLegacy(input);
+  return {...importLegacy(input),debugMode:!!current.debugMode};
 }

@@ -1,3 +1,4 @@
+import {debug,setDebug} from '../shared/debug.js';
 import type {Settings} from '../shared/settings.js';
 import type {CaptionCue,CaptionTrack,SubtitleSession,SubtitleBridge,TranslateSubtitles,SettingsPatch} from './types.js';
 export interface YouTubeControllerOptions {
@@ -5,7 +6,7 @@ export interface YouTubeControllerOptions {
  updatePreferences?:(patch:SettingsPatch)=>Promise<Settings|undefined>;openOptions?:(section:'subtitles')=>unknown;
  env?:typeof globalThis;createSidebar?:typeof sidebarAPI.createController;createSelection?:typeof selectionAPI.createController;createView?:typeof createCaptionView;
 }
-interface YouTubeRecord {session:SubtitleSession;videoId:string;togglePending:boolean;tracks:CaptionTrack[];track?:CaptionTrack;
+interface YouTubeRecord {session:SubtitleSession;videoId:string;togglePending:boolean;tracks:CaptionTrack[];track?:CaptionTrack;selectionKey?:string;
  pending:{id:string;trackId:string;track:CaptionTrack;timer:ReturnType<typeof setTimeout>}|null;loadedTrack:string;capturedTrack?:CaptionTrack|null;failedTrack:string|undefined;timelineSignature:string;domText:string;view:ReturnType<typeof createCaptionView>}
 interface YouTubeDataMessage {source?:unknown;videoId?:unknown;kind?:unknown;tracks?:unknown[];selectedLanguage?:unknown;live?:unknown;requestId?:string;trackUrl?:string;languageCode?:string;body?:unknown}
 // Runtime event names include YouTube custom events and native DOM events.
@@ -23,6 +24,7 @@ import {subtitleWords} from './i18n.js';
 /** Coordinates one current YouTube player, independent of the website's UI framework. */
 export function createYouTubeController({settings,subscribeSettings,translate,updatePreferences,openOptions,env=globalThis,createSidebar=sidebarAPI.createController,createSelection=selectionAPI.createController,createView=createCaptionView}:YouTubeControllerOptions) {
   const doc=env.document,records=new Map<string,YouTubeRecord>(),subscribers=new Set<()=>void>(),listeners:(()=>void)[]=[];
+  setDebug(settings.debugMode);
   let config=settings,settingsEpoch=0,started=false,stopped=false,sequence=0,requestSequence=0,poll:ReturnType<typeof setInterval>|null=null,observer:MutationObserver|null=null,scheduled:ReturnType<typeof setTimeout>|null=null,unsubscribe:(()=>void)|undefined,noticePending=false,metadata:{videoId:string;tracks:CaptionTrack[];selectedLanguage:string;live:boolean}|null=null,lastVideoId='',navigateUntil=0;
   let sidebar:ReturnType<typeof sidebarAPI.createController>|undefined,selection:ReturnType<typeof selectionAPI.createController>|undefined,preferenceQueue:Promise<unknown>=Promise.resolve();
   const origin=()=>new URL(env.location.href).origin;
@@ -99,6 +101,9 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     // The logical track can keep its ID while YouTube renews its proof/signature.
     // A previous empty response must not block the newly usable URL.
     if(record.track?.id===selected?.id&&record.track?.baseUrl!==selected?.baseUrl){clearPending(record);record.failedTrack='';}
+    const selectionKey=JSON.stringify([tracks.length,selected?.id,selected?.languageCode,selected?.kind]);
+    if(record.selectionKey!==selectionKey)debug('youtube:tracks','selection',{available:tracks.length,language:selected?.languageCode,kind:selected?.kind,outcome:selected?'selected':'none'});
+    record.selectionKey=selectionKey;
     record.tracks=tracks;record.track=selected;
     const none=metadata?.videoId===record.videoId&&!tracks.length;
     if(record.session.state.noTracks!==none){record.session.state.noTracks=none;changed();}
@@ -132,7 +137,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
         const cues=Array.from(track.cues).map(cue=>{const text=(cue as VTTCue).text,voice=captionVoice(text);return{start:cue.startTime,end:cue.endTime,text:captionText(text),...(voice?{voice}:{})};});
         const live=liveVideo(record);installCues(record,live?cues:groupAuthoredCues(cues),'native:'+track.language,{live});return;
       }
-    }catch{}
+    }catch(error){debug('youtube:captions','error',error);}
     const player=record.session.video.closest?.('.html5-video-player');
     const text=Array.from(player?.querySelectorAll<HTMLElement>('.ytp-caption-segment')||[]).map(node=>node.textContent).join('\n').trim();
     if(text===record.domText)return;record.domText=text;
@@ -154,7 +159,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     preferenceQueue=operation;return operation;
   }
   function navigate(record:YouTubeRecord,direction:number){
-    const state=navigationState(record.session),time=direction===-1?state.previous:direction===0?state.current:state.next;
+    const state=navigationState(record.session,{diagnostic:true}),time=direction===-1?state.previous:direction===0?state.current:state.next;
     if(time===null)return false;
     if(!bridge.seek(record.session.id,time))throw new Error(words().seekError);
     changed();return true;
@@ -211,7 +216,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   function sync() {
     if(stopped||Date.now()<navigateUntil)return;
     const id=videoIdFromUrl(env.location.href);
-    if(id!==lastVideoId){clear();if(metadata?.videoId!==id)metadata=null;lastVideoId=id;}
+    if(id!==lastVideoId){debug('youtube:navigation','reset',{reason:'video-change'});clear();if(metadata?.videoId!==id)metadata=null;lastVideoId=id;}
     if(!id){clear();return;}
     let record:YouTubeRecord|null|undefined=currentRecord();const video=pickVideo(record?.session.video);
     if(record&&(record.session.video!==video||!record.session.video.isConnected)){remove(record);record=null;}
@@ -252,7 +257,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
         if(!data.requestId&&!record.track)record.capturedTrack=responseTrack;
         record.failedTrack='';record.session.state.errorMessage='';installCues(record,cues,trackId,{live:liveVideo(record)});return;
       }
-    }catch{}
+    }catch(error){debug('youtube:captions','error',error);}
     // Empty/unreadable caption bodies can arrive before the first caption.
     // Keep the video silent and retain native fallback cues; only a requested
     // track that came back empty marks the timeline as failed for the list.
@@ -260,6 +265,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   }
   function updateSettings(next:Settings){
     if(stopped||!next)return;
+    setDebug(next.debugMode);
     if(subtitleLayoutKey(config)!==subtitleLayoutKey(next)||config.subtitlesEnabled&&!next.subtitlesEnabled)
       for(const record of records.values())selection?.cancel(record.session.id,'subtitle-layout');
     settingsEpoch++;config=next;for(const record of records.values()){record.session.updateSettings(next);record.view.render(config);}sync();changed();
@@ -278,7 +284,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     try{
       const handled=action==='loop'?toggleLoop(record):navigate(record,action==='previous'?-1:action==='replay'?0:1);
       if(handled){event.preventDefault();event.stopPropagation();}
-    }catch(error){record.view.reportError?.(error);}
+    }catch(error){debug('youtube:navigation','error',error);record.view.reportError?.(error);}
   }
   function openSidebar(){sync();const record=currentRecord();if(!record||!sidebar)return false;sidebar.sync();return sidebar.toggle(record.session.id,true);}
   function listen(target:EventTarget,type:string,fn:BrowserEventCallback,capture=false){target.addEventListener(type,fn,capture);listeners.push(()=>target.removeEventListener(type,fn,capture));}
@@ -289,13 +295,13 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     sidebar=createSidebar(bridge,env);selection=createSelection(bridge,env);sidebar.start();selection.start();
     listen(env,'message',onData);listen(env,'popstate',sync);listen(env,'pageshow',sync);
     listen(env,'pagehide',event=>{if(!event.persisted)stop();});
-    listen(doc,'yt-navigate-start',()=>{navigateUntil=Date.now()+1500;clear();metadata=null;lastVideoId='';});
+    listen(doc,'yt-navigate-start',()=>{debug('youtube:navigation','reset',{reason:'navigate-start'});navigateUntil=Date.now()+1500;clear();metadata=null;lastVideoId='';});
     listen(doc,'yt-navigate-finish',()=>{navigateUntil=0;sync();post({kind:'request-tracks'});});
     listen(doc,'visibilitychange',()=>{if(doc.visibilityState!=='hidden')sync();});
     listen(doc,'keydown',keydown,true);
     if(env.MutationObserver){observer=new env.MutationObserver(schedule);observer.observe(doc.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['aria-pressed']});}
     poll=env.setInterval(sync,1000);unsubscribe=subscribeSettings?.(updateSettings);sync();post({kind:'request-tracks'});return controller;
-    }catch(error){stop();throw error;}
+    }catch(error){debug('youtube:init','error',error);stop();throw error;}
   }
   function stop(){if(stopped)return;stopped=true;unsubscribe?.();observer?.disconnect();if(poll!==null)env.clearInterval(poll);if(scheduled!==null)env.clearTimeout(scheduled);listeners.splice(0).forEach(dispose=>dispose());selection?.stop();sidebar?.stop();clear();subscribers.clear();}
   const controller={start,stop,sync,updateSettings,openSidebar};return controller;

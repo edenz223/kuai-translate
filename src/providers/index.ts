@@ -1,3 +1,4 @@
+import {debug} from '../shared/debug.js';
 import { PROMPT_LIMIT, type Provider } from '../shared/settings.js';
 interface ValidatedProvider {id:string;type:string;apiKey?:string;baseUrl?:string;model?:string;region?:string;temperature?:number|null;systemPrompt?:string;userPrompt?:string}
 interface ProviderOptions {texts?:string[];sourceLanguage?:string;targetLanguage?:string;signal?:AbortSignal;fetchImpl?:typeof fetch;timeoutMs?:number}
@@ -106,6 +107,7 @@ async function translateSplitting(p:ValidatedProvider, texts:string[], sourceLan
   catch (error) {
     const code = (error as {code?:string})?.code;
     if (!modelTypes.has(p.type) || texts.length < 2 || signal.aborted || (code !== 'INVALID_RESPONSE' && code !== 'INCOMPLETE_RESPONSE')) throw error;
+    debug('provider','retry',{id:p.id,type:p.type,model:p.model,items:texts.length,code});
     const middle = Math.ceil(texts.length / 2);
     const halves = await Promise.all([texts.slice(0, middle), texts.slice(middle)]
       .map(part => translateSplitting(p, part, sourceLanguage, targetLanguage, fetchImpl, signal)));
@@ -241,7 +243,7 @@ export function modelPrompts(p:Pick<ValidatedProvider,'systemPrompt'|'userPrompt
   return { instruction, userText };
 }
 
-export async function translateWithProvider(provider:Partial<Provider>|null|undefined, {
+async function translate(provider:Partial<Provider>|null|undefined, {
   texts, sourceLanguage = 'auto', targetLanguage = 'zh-Hans', signal, fetchImpl = globalThis.fetch, timeoutMs = 30000,
 }:ProviderOptions = {}):Promise<string[]> {
   const p = validateProvider(provider);
@@ -262,7 +264,7 @@ export async function translateWithProvider(provider:Partial<Provider>|null|unde
 export interface ProviderModel {id:string;name:string}
 
 /** Lists models with the same transport, credential and lifetime rules as translation. */
-export async function listProviderModels(provider:Partial<Provider>, {signal,fetchImpl=globalThis.fetch,timeoutMs}:Pick<ProviderOptions,'signal'|'fetchImpl'|'timeoutMs'> = {}):Promise<ProviderModel[]> {
+async function listModels(provider:Partial<Provider>, {signal,fetchImpl=globalThis.fetch,timeoutMs}:Pick<ProviderOptions,'signal'|'fetchImpl'|'timeoutMs'> = {}):Promise<ProviderModel[]> {
   const p=validateProvider(provider,{requireModel:false});
   if(!modelTypes.has(p.type))throw failure('INVALID_CONFIG','This translation service does not expose AI models.');
   const url=new URL(p.baseUrl!);
@@ -301,4 +303,23 @@ export async function listProviderModels(provider:Partial<Provider>, {signal,fet
     }
     throw failure('INVALID_RESPONSE','The model list has too many pages.');
   },{signal,timeoutMs});
+}
+
+/** Only request metadata crosses the diagnostic boundary, never input text or prompts. */
+async function trace<T>(provider:Partial<Provider>|null|undefined,operation:string,texts:unknown,run:()=>Promise<T>):Promise<T>{
+  const started=Date.now(),items=Array.isArray(texts)?texts:[];
+  const meta={operation,id:provider?.id,type:provider?.type,model:provider?.model,items:items.length,characters:items.reduce((sum,item)=>sum+(typeof item==='string'?item.length:0),0)};
+  try{
+    const result=await run();
+    debug('provider','request',{...meta,durationMs:Date.now()-started,outcome:'success'});return result;
+  }catch(error){
+    debug('provider','request',{...meta,durationMs:Date.now()-started,outcome:'error',code:(error as {code?:string})?.code||'UNKNOWN'});
+    throw error;
+  }
+}
+export function translateWithProvider(provider:Partial<Provider>|null|undefined,options:ProviderOptions={}):Promise<string[]>{
+  return trace(provider,'translate',options.texts,()=>translate(provider,options));
+}
+export function listProviderModels(provider:Partial<Provider>,options:Pick<ProviderOptions,'signal'|'fetchImpl'|'timeoutMs'>={}):Promise<ProviderModel[]>{
+  return trace(provider,'models',[],()=>listModels(provider,options));
 }
