@@ -18,16 +18,16 @@
 </aside>
 <main class="settings-main">
 <section id="webpage" class="settings-section" aria-labelledby="webpage-heading">
-  <header class="section-header"><div><h2 id="webpage-heading">网页翻译</h2><p class="section-desc">按滚动位置翻译可见内容。划词、输入和字幕可单独设置服务与语言。</p></div></header>
-  <div class="group">
-    <div class="row" role="group" aria-labelledby="page-languages-label"><span id="page-languages-label">语言<span class="hint" tabindex="0"><span id="page-swap-help" class="hint-text" hidden>原文为自动检测时无法互换。</span></span></span><div class="language-pair"><select id="source-language" aria-label="原文语言"></select><button id="page-swap-languages" class="icon-button" type="button" aria-label="互换原文与目标语言" title="互换语言"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg></button><select id="target-language" aria-label="目标语言"></select></div></div>
-    <label class="row"><span>翻译服务</span><select id="active-provider"></select></label>
+  <header class="section-header"><div><h2 id="webpage-heading">网页翻译</h2><p class="section-desc">把正在浏览的网页翻译成你的语言。这里的语言和翻译服务，也是其他功能选择“跟随网页”时的默认值。</p><p id="webpage-usage" class="section-usage"></p></div></header>
+  <div class="group"><h3>语言与服务</h3>
+    <div class="row" role="group" aria-labelledby="page-languages-label"><span id="page-languages-label">语言<span class="hint" tabindex="0"><span id="page-swap-help" class="hint-text" hidden>原文为自动检测时无法互换。</span></span><small>原文 → 译文</small></span><div class="language-pair"><select id="source-language" aria-label="原文语言"></select><button id="page-swap-languages" class="icon-button" type="button" aria-label="互换原文与目标语言" title="互换语言"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg></button><select id="target-language" aria-label="目标语言"></select></div></div>
+    <div class="row"><div><label for="active-provider">翻译服务</label><small><a href="#providers">添加或管理翻译服务</a></small></div><select id="active-provider"></select></div>
   </div>
   <div class="group"><h3>显示</h3>
     <label class="row"><span>显示模式</span><select id="page-display-mode"></select></label>
     <label class="row"><span>译文样式</span><select id="page-style-preset"></select></label>
     <div class="row block"><span class="block-label">效果预览</span><div class="page-preview"><p id="page-preview-source" lang="en">A small step every day makes learning a language easier.</p><p id="page-preview-translation" lang="zh-CN" tabindex="0">每天进步一点，语言学习就会更轻松。</p></div></div>
-    <details class="more"><summary>调整样式细节<span class="hint" tabindex="0"><span class="hint-text">整页与悬浮翻译共用，更改会立即更新已有译文和上方预览。仅译文模式在翻译失败时仍保留原文。</span></span></summary>
+    <details class="more"><summary>调整样式细节<span class="hint" tabindex="0"><span class="hint-text">网页翻译与悬浮翻译共用，更改会立即更新已有译文和上方预览。仅译文模式在翻译失败时仍保留原文。</span></span></summary>
       <div class="row"><label for="page-style-fontSize">字体大小<small>原文的 50–200%</small></label><input id="page-style-fontSize" type="number" min="50" max="200" step="5"></div>
       <label class="row"><span>字体粗细</span><select id="page-style-fontWeight"></select></label>
       <div class="row"><label for="page-style-lineHeight">行高</label><select id="page-style-lineHeight"></select></div>
@@ -60,19 +60,19 @@
   <details class="group advanced"><summary>高级设置</summary>
     <label class="row"><span>继续翻译动态变化的内容<span class="hint" tabindex="0"><span id="page-dynamic-help" class="hint-text">滚动出现的新内容总会翻译；开启后还会更新已变化的正文。手动停止或恢复原文后不再继续。</span></span></span><input id="page-option-translateDynamic" class="switch" type="checkbox" role="switch" aria-describedby="page-dynamic-help"></label>
     <label class="row"><span>翻译整页可读区域（含页脚）</span><input id="page-option-translateFullPage" class="switch" type="checkbox" role="switch" aria-describedby="page-area-help"></label>
-    <div class="row"><label for="page-option-minTextLength">段落最少字符数<span class="hint" tabindex="0"><span id="page-area-help" class="hint-text">短于此长度的段落会跳过。关闭整页翻译时跳过页脚；编辑框、代码和扩展控件始终排除。</span></span><small>1–200</small></label><input id="page-option-minTextLength" type="number" min="1" max="200" step="1" aria-describedby="page-area-help page-option-minTextLength-error"><p id="page-option-minTextLength-error" class="field-error" role="alert" hidden></p></div>
+    <div class="row"><label for="page-option-minTextLength">段落最少字符数<span class="hint" tabindex="0"><span id="page-area-help" class="hint-text">短于此长度的段落会跳过。关闭“翻译整页可读区域”时跳过页脚；编辑框、代码和扩展控件始终排除。</span></span><small>1–200</small></label><input id="page-option-minTextLength" type="number" min="1" max="200" step="1" aria-describedby="page-area-help page-option-minTextLength-error"><p id="page-option-minTextLength-error" class="field-error" role="alert" hidden></p></div>
     <h4>排除规则</h4>
-    <div class="row block"><label for="page-option-neverSites">不翻译的网站（每行一个）<span class="hint" tabindex="0"><span id="site-rules-help" class="hint-text">最多 100 项，每行最多 2000 字符。域名包含其子域名；可填写 HTTP/HTTPS 地址，路径中的 * 匹配一层、** 可跨多层。同时用于整页与段落翻译。</span></span></label><textarea id="page-option-neverSites" class="rule-list" rows="4" maxlength="200100" placeholder="private.example" spellcheck="false" aria-describedby="site-rules-help page-option-neverSites-error"></textarea><p id="page-option-neverSites-error" class="field-error" role="alert" hidden></p></div>
+    <div class="row block"><label for="page-option-neverSites">不翻译的网站（每行一个）<span class="hint" tabindex="0"><span id="site-rules-help" class="hint-text">最多 100 项，每行最多 2000 字符。域名包含其子域名；可填写 HTTP/HTTPS 地址，路径中的 * 匹配一层、** 可跨多层。同时用于网页翻译与悬浮翻译。</span></span></label><textarea id="page-option-neverSites" class="rule-list" rows="4" maxlength="200100" placeholder="private.example" spellcheck="false" aria-describedby="site-rules-help page-option-neverSites-error"></textarea><p id="page-option-neverSites-error" class="field-error" role="alert" hidden></p></div>
     <div class="row block"><label for="page-option-neverLanguages">不翻译的原文语言（每行一个代码）<span class="hint" tabindex="0"><span id="language-rules-help" class="hint-text">最多 100 项，例如 en、ja、zh-Hans。按识别出的原文语言判断；未知语言不会被猜测为某一项。</span></span></label><textarea id="page-option-neverLanguages" class="rule-list" rows="4" maxlength="200100" placeholder="zh-Hans&#10;zh-Hant" spellcheck="false" aria-describedby="language-rules-help page-option-neverLanguages-error"></textarea><p id="page-option-neverLanguages-error" class="field-error" role="alert" hidden></p></div>
     <div class="row block"><label for="page-option-excludeSelectors">排除的 CSS 选择器（每行一个）<span class="hint" tabindex="0"><span id="selector-rules-help" class="hint-text">最多 50 项，每行最多 2000 字符。匹配区域及其子元素不参与翻译；命中段落内的区域时，跳过包含它的整个段落。</span></span></label><textarea id="page-option-excludeSelectors" class="rule-list" rows="4" maxlength="100050" placeholder=".advertisement&#10;[data-private]" spellcheck="false" aria-describedby="selector-rules-help page-option-excludeSelectors-error"></textarea><p id="page-option-excludeSelectors-error" class="field-error" role="alert" hidden></p></div>
   </details>
 </section>
 <section id="hover" class="settings-section" aria-labelledby="hover-heading" hidden>
-  <header class="section-header"><div><h2 id="hover-heading">悬浮翻译</h2><p id="hover-service-summary" class="section-desc">鼠标指向段落，按一次快捷键翻译，再按一次关闭。服务、显示方式、样式与整页翻译共用。</p></div><input id="hover-enabled" class="switch" type="checkbox" role="switch" aria-label="启用悬浮翻译"></header>
-  <p class="off-note">已关闭。打开右上方的开关即可启用并调整设置。</p>
+  <header class="section-header"><div><h2 id="hover-heading">悬浮翻译</h2><p id="hover-service-summary" class="section-desc">不翻译整个网页，只翻译鼠标指着的那一段。语言、翻译服务和译文样式跟随<a href="#webpage">网页翻译</a>。</p><p id="hover-usage" class="section-usage"></p></div><label class="feature-toggle"><span id="hover-state" class="feature-state"></span><input id="hover-enabled" class="switch" type="checkbox" role="switch" aria-label="启用悬浮翻译"></label></header>
+  <div id="hover-off-note" class="off-note"><p>悬浮翻译已关闭，打开后可调整下面的设置。</p><button id="enable-hover" class="primary" type="button">启用悬浮翻译</button></div>
   <div id="hover-options-panel" hidden>
-    <div class="group">
-      <div class="row"><label for="hover-option-trigger">触发方式<span class="hint" tabindex="0"><span id="hover-trigger-help" class="hint-text">鼠标指向文字，按一次所选按键翻译，再按一次关闭；无需一直按住。整页翻译会复用这里的译文，恢复原文会一起清除。</span></span></label><select id="hover-option-trigger"></select></div>
+    <div class="group"><h3>触发</h3>
+      <div class="row"><label for="hover-option-trigger">触发方式<span class="hint" tabindex="0"><span id="hover-trigger-help" class="hint-text">鼠标指向文字，按一次所选按键翻译，再按一次关闭；无需一直按住。网页翻译会复用这里的译文，恢复原文会一起清除。</span></span></label><select id="hover-option-trigger"></select></div>
       <div id="hover-custom-keys-field" class="row" hidden><label for="hover-option-customKeys">自定义按键<span class="hint" tabindex="0"><span id="hover-custom-keys-help" class="hint-text">一至两个按键，可用 Control、Alt、Shift、Meta / Cmd 和 A–Z，用 + 分隔；按下并松开一次即可切换。</span></span></label><input id="hover-option-customKeys" type="text" maxlength="40" placeholder="例如 Control + K，或 A + B" autocomplete="off" spellcheck="false" aria-describedby="hover-custom-keys-help hover-option-customKeys-error"><p id="hover-option-customKeys-error" class="field-error" role="alert" hidden></p></div>
       <div id="hover-delay-field" class="row" hidden><label for="hover-option-delay">悬停等待<small>50–3000 毫秒</small></label><input id="hover-option-delay" type="number" min="50" max="3000" step="50" aria-describedby="hover-option-delay-error"><p id="hover-option-delay-error" class="field-error" role="alert" hidden></p></div>
       <div id="hover-hold-delay-field" class="row" hidden><label for="hover-option-holdDelay">左键按住时长<span class="hint" tabindex="0"><span id="hover-left-hold-help" class="hint-text" hidden>左键需先达到按住时长，再等待悬停延迟；拖动选择文字时不会触发。</span></span><small>200–3000 毫秒</small></label><input id="hover-option-holdDelay" type="number" min="200" max="3000" step="50" aria-describedby="hover-left-hold-help hover-option-holdDelay-error"><p id="hover-option-holdDelay-error" class="field-error" role="alert" hidden></p></div>
@@ -87,11 +87,11 @@
   </div>
 </section>
 <section id="selection" class="settings-section" aria-labelledby="selection-heading" hidden>
-  <header class="section-header"><div><h2 id="selection-heading">划词翻译</h2><p class="section-desc">选中文字后翻译，取消选择时关闭。<span class="hint" tabindex="0"><span class="hint-text">点击结果中的图钉可固定位置并拖动标题栏；固定后可继续选择其他文字。</span></span></p></div><input id="selection-enabled" class="switch" type="checkbox" role="switch" aria-label="启用划词翻译"></header>
-  <p class="off-note">已关闭。打开右上方的开关即可启用并调整设置。</p>
+  <header class="section-header"><div><h2 id="selection-heading">划词翻译</h2><p class="section-desc">选中网页上的一个词或一段话，在旁边的卡片里显示译文。<span class="hint" tabindex="0"><span class="hint-text">点击结果中的图钉可固定位置并拖动标题栏；固定后可继续选择其他文字。</span></span></p><p id="selection-usage" class="section-usage"></p></div><label class="feature-toggle"><span id="selection-state" class="feature-state"></span><input id="selection-enabled" class="switch" type="checkbox" role="switch" aria-label="启用划词翻译"></label></header>
+  <div id="selection-off-note" class="off-note"><p>划词翻译已关闭，打开后可调整下面的设置。</p><button id="enable-selection" class="primary" type="button">启用划词翻译</button></div>
   <div id="selection-options-panel">
-    <div class="group">
-      <div class="row" role="group" aria-labelledby="selection-languages-label"><span id="selection-languages-label">语言<span class="hint" tabindex="0"><span id="selection-swap-help" class="hint-text" hidden>原文为自动检测时无法互换。</span></span></span><div class="language-pair"><select id="selection-option-sourceLanguage" aria-label="原文语言"></select><button id="selection-swap-languages" class="icon-button" type="button" aria-label="互换原文与目标语言" title="互换语言"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg></button><select id="selection-option-targetLanguage" aria-label="目标语言"></select></div></div>
+    <div class="group"><h3>语言与服务</h3>
+      <div class="row" role="group" aria-labelledby="selection-languages-label"><span id="selection-languages-label">语言<span class="hint" tabindex="0"><span id="selection-swap-help" class="hint-text" hidden>原文为自动检测时无法互换。</span></span><small>原文 → 译文</small></span><div class="language-pair"><select id="selection-option-sourceLanguage" aria-label="原文语言"></select><button id="selection-swap-languages" class="icon-button" type="button" aria-label="互换原文与目标语言" title="互换语言"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg></button><select id="selection-option-targetLanguage" aria-label="目标语言"></select></div></div>
       <label class="row"><span>翻译服务</span><select id="selection-option-providerId"></select></label>
     </div>
     <div class="group"><h3>触发与显示</h3>
@@ -108,11 +108,11 @@
   </div>
 </section>
 <section id="input" class="settings-section" aria-labelledby="input-heading" hidden>
-  <header class="section-header"><div><h2 id="input-heading">输入翻译</h2><p class="section-desc">把输入框里写好的内容翻译后写回原处。<span class="hint" tabindex="0"><span class="hint-text">密码框和明确标记的验证码、支付卡字段不会处理；写回前内容、焦点或可编辑状态有变化时停止写回。</span></span></p></div><input id="input-option-enabled" class="switch" type="checkbox" role="switch" aria-label="启用输入翻译"></header>
-  <p class="off-note">已关闭。打开右上方的开关即可启用并调整设置。</p>
+  <header class="section-header"><div><h2 id="input-heading">输入翻译</h2><p class="section-desc">在网页输入框里用自己的语言写好内容，一键翻译成目标语言并写回输入框。<span class="hint" tabindex="0"><span class="hint-text">密码框和明确标记的验证码、支付卡字段不会处理；写回前内容、焦点或可编辑状态有变化时停止写回。</span></span></p><p id="input-usage" class="section-usage"></p></div><label class="feature-toggle"><span id="input-state" class="feature-state"></span><input id="input-option-enabled" class="switch" type="checkbox" role="switch" aria-label="启用输入翻译"></label></header>
+  <div id="input-off-note" class="off-note"><p>输入翻译已关闭，打开后可调整下面的设置。</p><button id="enable-input" class="primary" type="button">启用输入翻译</button></div>
   <div id="input-options-panel">
-    <div class="group">
-      <div class="row" role="group" aria-labelledby="input-languages-label"><span id="input-languages-label">语言<span class="hint" tabindex="0"><span id="input-swap-help" class="hint-text" hidden>原文为自动检测时无法互换。</span></span></span><div class="language-pair"><select id="input-option-sourceLanguage" aria-label="原文语言"></select><button id="input-swap-languages" class="icon-button" type="button" aria-label="互换原文与输出语言" title="互换语言"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg></button><select id="input-option-targetLanguage" aria-label="输出语言"></select></div></div>
+    <div class="group"><h3>语言与服务</h3>
+      <div class="row" role="group" aria-labelledby="input-languages-label"><span id="input-languages-label">语言<span class="hint" tabindex="0"><span id="input-swap-help" class="hint-text" hidden>原文为自动检测时无法互换。</span></span><small>原文 → 译文</small></span><div class="language-pair"><select id="input-option-sourceLanguage" aria-label="原文语言"></select><button id="input-swap-languages" class="icon-button" type="button" aria-label="互换原文与输出语言" title="互换语言"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg></button><select id="input-option-targetLanguage" aria-label="输出语言"></select></div></div>
       <label class="row"><span>翻译服务</span><select id="input-option-providerId"></select></label>
     </div>
     <div class="group"><h3>触发与写回</h3>
@@ -127,11 +127,11 @@
   </div>
 </section>
 <section id="subtitles" class="settings-section" aria-labelledby="subtitles-heading" hidden>
-  <header class="section-header"><div><h2 id="subtitles-heading">YouTube 字幕</h2><p class="section-desc">在播放器中显示双语字幕和侧边字幕列表，视频需提供字幕并开启 CC。<span class="hint" tabindex="0"><span class="hint-text">播放器中使用“译”开关、字幕设置和列表按钮。选中字幕文字会暂停播放并固定字幕，取消选中后恢复播放。</span></span></p></div><input id="subtitles-enabled" class="switch" type="checkbox" role="switch" aria-label="启用 Kuai YouTube 字幕（断句、样式和侧边列表）"></header>
-  <p class="off-note">已关闭。打开右上方的开关即可启用并调整设置。</p>
+  <header class="section-header"><div><h2 id="subtitles-heading">YouTube 字幕</h2><p class="section-desc">在 YouTube 播放器里显示双语字幕和侧边字幕列表。<span class="hint" tabindex="0"><span class="hint-text">播放器中使用“译”开关、字幕设置和列表按钮。选中字幕文字会暂停播放并固定字幕，取消选中后恢复播放。</span></span></p><p id="subtitles-usage" class="section-usage">使用方法：打开有字幕的视频并开启 CC，播放器控制栏会出现“译”按钮。</p></div><label class="feature-toggle"><span id="subtitles-state" class="feature-state"></span><input id="subtitles-enabled" class="switch" type="checkbox" role="switch" aria-label="启用 Kuai YouTube 字幕（断句、样式和侧边列表）"></label></header>
+  <div id="subtitles-off-note" class="off-note"><p>YouTube 字幕已关闭，打开后可调整下面的设置。</p><button id="enable-subtitles" class="primary" type="button">启用 YouTube 字幕</button></div>
   <div id="subtitle-options-panel">
-    <div class="group">
-      <label class="row"><span>翻译字幕<span class="hint" tabindex="0"><span class="hint-text">关闭后仍使用 Kuai 的断句、字幕样式和字幕列表，只显示原文，不再请求翻译服务。播放器里的“译”按钮切换的就是这一项。</span></span></span><input id="subtitle-translation-enabled" class="switch" type="checkbox" role="switch"></label>
+    <div class="group"><h3>翻译</h3>
+      <label class="row"><span>翻译字幕<span class="hint" tabindex="0"><span class="hint-text">播放器里的“译”按钮切换的就是这一项。</span></span><small>关闭后只显示原文字幕，不请求翻译服务。</small></span><input id="subtitle-translation-enabled" class="switch" type="checkbox" role="switch"></label>
       <label class="row"><span>目标语言</span><select id="subtitle-target-language"></select></label>
       <label class="row"><span>翻译服务</span><select id="subtitle-provider"></select></label>
     </div>
@@ -166,20 +166,21 @@
   </div>
 </section>
 <section id="providers" class="settings-section" aria-labelledby="providers-heading" hidden>
-  <header class="section-header"><div><h2 id="providers-heading">翻译服务</h2><p class="section-desc">免费服务无需配置即可使用；自配 API 可添加多个实例，用于 AI 翻译或使用自己的额度。</p></div></header>
+  <header class="section-header"><div><h2 id="providers-heading">翻译服务</h2><p class="section-desc">选择由谁来翻译。免费服务开箱即用；也可以添加自己的 API（OpenAI、Gemini、Claude、DeepL 等），用于 AI 翻译或使用自己的额度。</p></div></header>
 <div class="group provider-layout"><aside class="provider-sidebar" aria-label="翻译服务列表">
   <h3 class="provider-group-title">免费服务</h3><div id="free-provider-list" class="provider-list"></div>
-  <div class="provider-group-title"><h3>自配 API</h3><button id="add-provider" class="link-button" type="button" aria-expanded="false" aria-controls="provider-picker">＋ 添加</button></div>
+  <h3 class="provider-group-title">自配 API</h3>
   <div id="custom-provider-list" class="provider-list"></div>
-  <p id="custom-empty" class="provider-empty">还没有自配 API，可用于 AI 翻译或 DeepL、Azure 等自己的额度。</p>
+  <button id="add-provider" class="add-provider" type="button" aria-expanded="false" aria-controls="provider-picker">＋ 添加自配 API</button>
+  <p id="custom-empty" class="provider-empty">用于 AI 翻译，或使用 DeepL、Azure 等自己的额度。</p>
 </aside>
 <div class="provider-detail">
 <div id="provider-picker" class="provider-picker" hidden><h3>选择要添加的服务类型</h3><div id="provider-types" class="provider-types"></div><div class="actions"><button id="cancel-add" type="button">取消</button></div></div>
 <div id="provider-form">
-  <div class="provider-header"><div class="provider-heading"><h3 id="provider-title"></h3><p class="provider-kind"><span id="provider-kind"></span><span class="hint" tabindex="0"><span id="free-notice" class="hint-text">无需账号或 API Key。免费接口的可用性和限流由服务方决定；不稳定时可换用其他服务。</span></span></p></div><div class="provider-header-actions"><button id="make-default" type="button">设为网页默认</button><button id="test-provider" class="primary" type="button">测试连接</button></div></div>
+  <div class="provider-header"><div class="provider-heading"><h3 id="provider-title"></h3><p class="provider-kind"><span id="provider-kind"></span><span class="hint" tabindex="0"><span id="free-notice" class="hint-text">无需账号或 API Key。免费接口的可用性和限流由服务方决定；不稳定时可换用其他服务。</span></span></p></div><div class="provider-header-actions"><button id="make-default" type="button">设为默认服务</button><button id="test-provider" class="primary" type="button">测试连接</button></div></div>
   <p id="provider-usage" class="provider-usage"></p>
   <div id="test-result" class="test-result"><p id="test-status" class="status" role="status" aria-live="polite"></p><p id="test-detail" class="test-detail" hidden></p></div>
-  <label class="row"><span>在服务选择器中启用</span><input id="provider-enabled" class="switch" type="checkbox" role="switch"></label>
+  <label class="row"><span>启用此服务<small>停用后，各功能的“翻译服务”下拉列表里不再显示它。</small></span><input id="provider-enabled" class="switch" type="checkbox" role="switch"></label>
   <div id="custom-fields">
     <label id="name-field">显示名称<input id="provider-name" type="text" maxlength="100" autocomplete="off"></label>
     <fieldset class="provider-group"><legend>连接</legend>
@@ -193,13 +194,15 @@
     </fieldset>
     <details id="advanced-field" class="provider-advanced"><summary>高级设置</summary><label id="temperature-field">温度<span class="hint" tabindex="0"><span class="hint-text">0–2，数值越低译文越稳定。留空使用服务默认值。</span></span><input id="provider-temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用服务默认"></label><label for="provider-systemPrompt" class="prompt-label">系统提示词<span class="hint" tabindex="0"><span class="hint-text">可用变量：<code>{{from}}</code> 源语言、<code>{{to}}</code> 目标语言、<code>{{text}}</code> 待翻译文本（JSON 数组，仅用户提示词；未写时自动附在末尾）。系统提示词末尾始终追加 JSON 输出格式要求，以保证译文能被正确解析。</span></span></label><textarea id="provider-systemPrompt" class="prompt-field" rows="4" maxlength="8000" spellcheck="false" placeholder="留空使用内置提示词。例如：You are a professional translator. Translate from {{from}} into {{to}} in a natural, concise style."></textarea><label for="provider-userPrompt" class="prompt-label">用户提示词</label><textarea id="provider-userPrompt" class="prompt-field" rows="3" maxlength="8000" spellcheck="false" placeholder="留空直接发送待翻译文本。例如：Translate the following strings: {{text}}"></textarea></details>
   </div>
-  <div class="actions"><button id="delete-provider" class="danger" type="button">删除此实例</button></div>
+  <div class="actions"><button id="delete-provider" class="danger" type="button">删除此服务</button></div>
 </div></div></div></section>
 <section id="backup" class="settings-section" aria-labelledby="backup-heading" hidden>
   <header class="section-header"><div><h2 id="backup-heading">备份与导入</h2><p class="section-desc">设置只保存在此浏览器中，可导出为文件备份或迁移到其他设备。</p></div></header>
-  <div class="group">
+  <div class="group"><h3>导出</h3>
+    <label class="row"><span>包含 API Key<small>Key 会以明文写入文件，请妥善保管。</small></span><input id="include-secrets" class="switch" type="checkbox" role="switch"></label>
     <div class="row"><span>导出设置<small>保存为 JSON 文件。</small></span><button id="export-settings" type="button">导出</button></div>
-    <label class="row"><span>导出时包含 API Key<small>Key 会以明文写入文件，请妥善保管。</small></span><input id="include-secrets" class="switch" type="checkbox" role="switch"></label>
+  </div>
+  <div class="group"><h3>导入</h3>
     <div class="row"><span>导入设置<small>支持 Kuai translate 及可识别的旧版翻译服务、快捷键和样式配置。</small></span><label class="file-button">选择文件…<input id="import-settings" type="file" accept=".json,application/json"></label></div>
   </div>
 </section>

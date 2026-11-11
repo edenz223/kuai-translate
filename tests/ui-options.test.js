@@ -197,8 +197,9 @@ test('the settings page shows only the controls that apply to each selected trig
 
 test('the settings page shows one section per address and marks disabled features and unsaved drafts in the sidebar',async t=>{
   const h=options(t),listeners={};
-  h.document.defaultView={location:{hash:'#hover'},addEventListener(type,listener){listeners[type]=listener;},scrollTo(){}};
+  h.document.defaultView={history:{scrollRestoration:'auto'},location:{hash:'#hover'},addEventListener(type,listener){listeners[type]=listener;},scrollTo(){}};
   await h.start();
+  assert.equal(h.document.defaultView.history.scrollRestoration,'manual');
   assert.equal(h.node('hover').hidden,false);assert.equal(h.node('webpage').hidden,true);
   assert.equal(h.node('nav-hover')['aria-current'],'page');assert.equal(h.node('nav-webpage')['aria-current'],undefined);
   h.document.defaultView.location.hash='#providers';listeners.hashchange();
@@ -327,7 +328,7 @@ test('provider list groups free and custom services and shows where each one is 
   assert.equal(h.node('custom-provider-list').children.length,2);
   assert.equal(h.node('custom-empty').hidden,true);
   const [a,b]=h.node('custom-provider-list').children;
-  assert.deepEqual(chips(a),['网页','划词','缺少 Key']);
+  assert.deepEqual(chips(a),['默认','用于划词','缺少 Key']);
   assert.deepEqual(chips(b),['已停用']);
   assert.match(text(a),/OpenAI 兼容 API · fixture-model/);
   assert.deepEqual(chips(h.node('free-provider-list').children[0]),[]);
@@ -345,7 +346,7 @@ test('the type picker adds a numbered instance and moves focus to its first fiel
   const openai=cards.find(card=>card.dataset.type==='openai');
   await openai.fire('click');
   assert.equal(h.node('provider-picker').hidden,true);
-  assert.equal(h.node('provider-kind').textContent,'OpenAI 兼容 API');
+  assert.equal(h.node('provider-kind').textContent,'自配 API');
   assert.equal(h.node('provider-title').textContent,'OpenAI 兼容 API');
   assert.equal(h.document.activeElement,h.node('provider-baseUrl'));
   await h.node('add-provider').fire('click');
@@ -574,4 +575,106 @@ test('settings page opens the browser shortcut page that the popup no longer lin
   globalThis.chrome.tabs={create:async value=>{opened.push(value.url);}};
   await s.node('browser-shortcuts').fire('click');
   assert.deepEqual(opened,['chrome://extensions/shortcuts']);
+});
+
+const content=node=>node.textContent+(node.children||[]).map(content).join('');
+const usageText=(h,id)=>content(h.node(id+'-usage'));
+
+test('usage instructions follow saved shortcuts and hover triggers, including invalid drafts',async t=>{
+  const h=options(t);await h.start();
+  assert.equal(usageText(h,'webpage'),'使用方法：点击浏览器工具栏的 Kuai 图标，或在网页上按 Alt + Z；再按一次恢复原文。');
+  await h.edit('page-option-shortcut','Ctrl+','input');
+  assert.match(usageText(h,'webpage'),/Alt \+ Z/);
+  await h.edit('page-option-shortcut','','input');
+  assert.equal(usageText(h,'webpage'),'使用方法：点击浏览器工具栏的 Kuai 图标。');
+  for(const [trigger,key] of [['shift','Shift'],['alt','Alt'],['ctrl','Ctrl']]){
+    await h.edit('hover-option-trigger',trigger);
+    assert.equal(usageText(h,'hover'),`使用方法：鼠标指向一段文字，按一下 ${key} 显示译文，再按一下关闭。`);
+    assert.equal(h.node('hover-usage').children.filter(child=>child.tagName==='KBD').length,1);
+  }
+  await h.edit('hover-option-trigger','custom');
+  assert.equal(usageText(h,'hover'),'使用方法：先在下方填写自定义按键。');
+  await h.edit('hover-option-customKeys','Control+K','input');
+  assert.match(usageText(h,'hover'),/Ctrl \+ K/);
+  await h.edit('hover-option-customKeys','Control+','input');
+  assert.match(usageText(h,'hover'),/Ctrl \+ K/);
+  await h.edit('hover-option-trigger','left_hold');
+  assert.equal(usageText(h,'hover'),'使用方法：在一段文字上按住鼠标左键，直到出现译文。');
+  await h.edit('hover-option-trigger','hover');
+  assert.equal(usageText(h,'hover'),'使用方法：鼠标在一段文字上停留片刻，自动显示译文。');
+  await h.edit('hover-enabled',false);assert.match(usageText(h,'hover'),/自动显示译文/);
+});
+
+test('selection usage covers automatic, entry and modifier triggers',async t=>{
+  const h=options(t);await h.start();
+  assert.equal(usageText(h,'selection'),'使用方法：用鼠标选中文字，译文卡片自动出现；取消选择即关闭。');
+  for(const [mode,entry] of [['icon','翻译图标'],['dot','小圆点']])for(const action of ['click','hover']){
+    await h.edit('selection-option-triggerMode',mode);await h.edit('selection-option-triggerAction',action);
+    assert.equal(usageText(h,'selection'),action==='click'?`使用方法：选中文字后，点击旁边出现的${entry}。`:`使用方法：选中文字后，把鼠标移到旁边出现的${entry}上。`);
+  }
+  for(const [mode,key] of [['shift','Shift'],['alt','Alt'],['ctrl','Ctrl'],['meta','Win']]){
+    await h.edit('selection-option-triggerMode',mode);
+    assert.equal(usageText(h,'selection'),`使用方法：按住 ${key} 选中文字，或选中后按一下 ${key}。`);
+  }
+});
+
+test('input usage covers shortcuts, both entries and the context-menu fallback',async t=>{
+  const h=options(t);await h.start();
+  assert.deepEqual(h.node('input-option-icon').children.map(option=>[option.value,option.textContent]),[['none','不显示入口'],['dot','小圆点'],['icon','图标']]);
+  for(const [icon,entry] of [['dot','小圆点'],['icon',' Kuai 图标']]){
+    await h.edit('input-option-icon',icon);
+    assert.equal(usageText(h,'input'),`使用方法：在输入框里按 Alt + X，或点击输入框里的${entry}，再点展开的翻译按钮。`);
+    assert.equal(h.node('input-icon-help').textContent,`聚焦输入框时右下角显示${entry}；点击它展开翻译按钮，再点按钮翻译，完成后再点还原。`);
+    assert.deepEqual(h.node('input-usage').children.filter(child=>child.tagName==='KBD').map(child=>child.textContent),['Alt','X']);
+  }
+  await h.edit('input-option-shortcut','Ctrl+','input');assert.match(usageText(h,'input'),/Alt \+ X/);
+  await h.edit('input-option-icon','none');assert.equal(usageText(h,'input'),'使用方法：在输入框里按 Alt + X。');assert.equal(h.node('input-icon-help').textContent,'不显示入口，只用快捷键或右键菜单翻译。');
+  await h.edit('input-option-shortcut','','input');assert.equal(usageText(h,'input'),'使用方法：在输入框上点右键，选择翻译。');
+  await h.edit('page-option-contextMenuEnabled',false);assert.equal(usageText(h,'input'),'使用方法：先在下方设置快捷键或输入框内的入口。');
+  for(const [icon,entry] of [['dot','小圆点'],['icon',' Kuai 图标']]){
+    await h.edit('input-option-icon',icon);assert.equal(usageText(h,'input'),`使用方法：点击输入框里的${entry}，再点展开的翻译按钮。`);
+  }
+});
+
+for(const [section,control,panel,enabled] of [
+  ['hover','hover-enabled','hover-options-panel',s=>s.hoverEnabled],
+  ['selection','selection-enabled','selection-options-panel',s=>s.selectionEnabled],
+  ['input','input-option-enabled','input-options-panel',s=>s.inputOptions.enabled],
+  ['subtitles','subtitles-enabled','subtitle-options-panel',s=>s.subtitlesEnabled],
+])test(`enable button saves ${section} through its switch and focuses it`,async t=>{
+  const h=options(t);await h.start();await h.edit(control,false);
+  assert.equal(h.node(section+'-state').textContent,'已关闭');assert.equal(h.node(section+'-off-note').hidden,false);
+  assert.equal(h.node(panel).hidden,true);assert.equal(h.node('nav-'+section).classList.contains('off'),true);
+  const writes=h.writes();await h.node('enable-'+section).fire('click');await setImmediate();
+  assert.equal(h.writes(),writes+1);assert.equal(enabled(h.stored),true);
+  assert.equal(h.node(panel).hidden,false);assert.equal(h.node(section+'-off-note').hidden,true);
+  assert.equal(h.node(section+'-state').textContent,'已开启');assert.equal(h.node('nav-'+section).classList.contains('off'),false);
+  assert.equal(h.document.activeElement,h.node(control));
+});
+
+test('subtitle translation disables only language and service without changing their saved values',async t=>{
+  const h=options(t);await h.start();
+  await h.edit('subtitle-target-language','ja');await h.edit('subtitle-provider','google');
+  await h.edit('subtitle-translation-enabled',false);
+  for(const id of ['subtitle-target-language','subtitle-provider'])assert.equal(h.node(id).disabled,true);
+  assert.equal(h.node('subtitle-options-panel').hidden,false);
+  assert.equal(h.stored.subtitleTargetLanguage,'ja');assert.equal(h.stored.subtitleProviderId,'google');
+  await h.edit('subtitle-translation-enabled',true);
+  for(const id of ['subtitle-target-language','subtitle-provider'])assert.equal(h.node(id).disabled,false);
+  assert.equal(h.node('subtitle-target-language').value,'ja');assert.equal(h.node('subtitle-provider').value,'google');
+});
+
+test('provider titles and subtitles avoid repeating type names and usage chips describe their purpose',async t=>{
+  const settings=defaultSettings();settings.providers.push(custom('a',{name:'OpenAI 兼容 API'}),custom('b',{name:'OpenAI 兼容 API',model:''}));
+  settings.activeProviderId='a';settings.subtitleProviderId='a';settings.selectionOptions.providerId='a';settings.inputOptions.providerId='a';
+  const h=await open(t,settings);
+  assert.equal(h.node('provider-kind').textContent,'免费服务');
+  const [a,b]=h.node('custom-provider-list').children;
+  assert.equal(a.children.find(child=>child.className==='provider-type-name').textContent,'fixture-model');
+  assert.equal(b.children.some(child=>child.className==='provider-type-name'),false);
+  assert.deepEqual(chips(a),['默认','用于字幕','用于划词','用于输入']);
+  await a.fire('click');assert.equal(h.node('provider-kind').textContent,'自配 API');
+  h.node('provider-name').value='我的服务';await h.node('provider-name').fire('input');
+  assert.equal(h.node('provider-title').textContent,'我的服务');assert.equal(h.node('provider-kind').textContent,'自配 API · OpenAI 兼容 API');
+  assert.equal(h.node('custom-provider-list').children[0].children.find(child=>child.className==='provider-type-name').textContent,'OpenAI 兼容 API · fixture-model');
 });

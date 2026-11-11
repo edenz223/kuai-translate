@@ -1,3 +1,5 @@
+import {KUAI_ICON} from '../shared/kuai-icon.js';
+
 /** Player toolbar icons, drawn locally to sit with YouTube's own white controls. */
 export type ToolbarIcon='translate'|'list'|'previous'|'replay'|'next'|'kuai';
 /** Leading icons of the settings menu rows, in YouTube's 24px white line style. */
@@ -16,12 +18,7 @@ const icons:Record<ToolbarIcon|MenuIcon,{viewBox:string;size:number;shapes:Shape
   previous:{viewBox:'0 0 24 24',size:24,shapes:[['path',{d:'M14.5 6l-6 6 6 6',...chevron}]]},
   replay:{viewBox:'0 0 24 24',size:24,shapes:[['path',{d:'M4.8 12a7.2 7.2 0 1 0 2.1-5.1M4.8 4.6v4.3h4.3',...line}]]},
   next:{viewBox:'0 0 24 24',size:24,shapes:[['path',{d:'M9.5 6l6 6-6 6',...chevron}]]},
-  // The extension's own logo (public/icons/kuai.svg) marks its settings.
-  kuai:{viewBox:'0 0 128 128',size:22,shapes:[
-    ['rect',{x:'4',y:'4',width:'120',height:'120',rx:'29',fill:'#3340a6'}],
-    ['path',{d:'M34 29H49V57L74 29H94L65 62L95 99H75L49 68V99H34Z',fill:'#ffffff'}],
-    ['path',{d:'M88 82H112V101H102L96 108V101H88Z',fill:'#7de3e0'}],
-  ]},
+  kuai:KUAI_ICON,
   captions:{viewBox:'0 0 24 24',size:24,shapes:[
     ['rect',{x:'2.5',y:'4.5',width:'19',height:'15',rx:'3',...line}],
     ['path',{d:'M10.5 10.2a2.4 2.4 0 1 0 0 3.6M17 10.2a2.4 2.4 0 1 0 0 3.6',...line}],

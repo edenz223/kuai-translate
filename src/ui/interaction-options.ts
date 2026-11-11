@@ -12,7 +12,7 @@ export interface InteractionControlOptions { document: Document; editor: Setting
 export interface InteractionControls { render(settings: Settings): void; bind(): void; resetDrafts(group?: string): void; validationCount(): number; incompleteCount(): number; invalidGroups(): string[]; }
 
 import {PAGE_OPTIONS_DEFAULTS,SELECTION_OPTIONS_DEFAULTS,INPUT_OPTIONS_DEFAULTS,HOVER_OPTIONS_DEFAULTS,normalizeShortcut,normalizeKey,normalizeSiteList} from '../shared/interactions.js';
-import {byId,fillProviders,fillSelect,languageName,LANGUAGES,hoverTriggers,selectionTriggers} from './common.js';
+import {byId,fillProviders,fillSelect,languageName,LANGUAGES,hoverTriggers,selectionTriggers,keyName} from './common.js';
 
 const sourceLanguages: SelectEntry[]=[['follow_page','跟随网页'],...LANGUAGES];
 const targetLanguages: SelectEntry[]=[['follow_page','跟随网页'],...LANGUAGES.filter(([id])=>id!=='auto')];
@@ -40,7 +40,7 @@ const groups: Record<string,InteractionGroup>={
   input:{property:'inputOptions',defaults:INPUT_OPTIONS_DEFAULTS,fields:{
     enabled:['checkbox'],providerId:['provider'],sourceLanguage:['select',sourceLanguages],targetLanguage:['select',targetLanguages],
     shortcut:['shortcut','restoreShortcut','已保存的还原快捷键'],
-    icon:['select',[['none','不显示入口'],['dot','小圆点'],['icon','翻译图标']]],autoApply:['checkbox'],writeBack:['writeBack'],disabledSites:['sites'],
+    icon:['select',[['none','不显示入口'],['dot','小圆点'],['icon','图标']]],autoApply:['checkbox'],writeBack:['writeBack'],disabledSites:['sites'],
   }},
   hover:{property:'hoverOptions',defaults:HOVER_OPTIONS_DEFAULTS,fields:{
     trigger:['select',hoverTriggers()],
@@ -106,6 +106,29 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
     if(listKinds.has(kind))return parseList(value as string,kind);
     return {value};
   }
+  const keys=(value: string | string[]): Node[]=>{
+    const parts=typeof value==='string'?value.split('+'):value;
+    return parts.flatMap((key,index)=>{const node=document.createElement('kbd');node.textContent=keyName(key);return index?[document.createTextNode(' + '),node]:[node];});
+  };
+  const usage=(id: string,...parts: (string | Node)[]): void=>node(id+'-usage').replaceChildren(document.createTextNode('使用方法：'),...parts.map(part=>typeof part==='string'?document.createTextNode(part):part));
+  function renderUsage(settings: Settings): void {
+    const {pageOptions:page,hoverOptions:hover,selectionOptions:selection,inputOptions:input}=settings;
+    usage('webpage','点击浏览器工具栏的 Kuai 图标',...(page.shortcut?['，或在网页上按 ',...keys(page.shortcut),'；再按一次恢复原文。']:['。']));
+    const modifier: Record<string,string>={shift:'Shift',alt:'Alt',ctrl:'Control',meta:'Meta'};
+    if(hover.trigger==='hover')usage('hover','鼠标在一段文字上停留片刻，自动显示译文。');
+    else if(hover.trigger==='left_hold')usage('hover','在一段文字上按住鼠标左键，直到出现译文。');
+    else if(hover.trigger==='custom'&&!hover.customKeys.length)usage('hover','先在下方填写自定义按键。');
+    else usage('hover','鼠标指向一段文字，按一下 ',...keys(hover.trigger==='custom'?hover.customKeys:modifier[hover.trigger]),' 显示译文，再按一下关闭。');
+    if(selection.triggerMode==='auto')usage('selection','用鼠标选中文字，译文卡片自动出现；取消选择即关闭。');
+    else if(['icon','dot'].includes(selection.triggerMode)){
+      const entry=selection.triggerMode==='dot'?'小圆点':'翻译图标';
+      usage('selection',selection.triggerAction==='hover'?`选中文字后，把鼠标移到旁边出现的${entry}上。`:`选中文字后，点击旁边出现的${entry}。`);
+    }else usage('selection','按住 ',...keys(modifier[selection.triggerMode]),' 选中文字，或选中后按一下 ',...keys(modifier[selection.triggerMode]),'。');
+    const entry=input.icon==='dot'?'小圆点':' Kuai 图标';
+    if(input.shortcut)usage('input','在输入框里按 ',...keys(input.shortcut),input.icon==='none'?'。':`，或点击输入框里的${entry}，再点展开的翻译按钮。`);
+    else if(input.icon!=='none')usage('input',`点击输入框里的${entry}，再点展开的翻译按钮。`);
+    else usage('input',page.contextMenuEnabled?'在输入框上点右键，选择翻译。':'先在下方设置快捷键或输入框内的入口。');
+  }
   function render(settings: Settings): void {
     for(const [group,{property,fields,defaults}] of Object.entries(groups)){
       const values=(settings[property]||defaults) as unknown as Record<string,unknown>;
@@ -133,8 +156,8 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
       const auto=resolvedSource(settings,options)==='auto';
       node<HTMLButtonElement>(group+'-swap-languages').disabled=auto;node(group+'-swap-help').hidden=!auto;
     }
-    node('input-icon-help').textContent=input.icon==='dot'?'聚焦输入框时右下角显示小圆点；点击展开翻译图标，再点图标翻译，完成后再点还原。':
-      input.icon==='icon'?'聚焦输入框时显示翻译图标，点击即翻译，完成后再点还原。':'不显示入口，只用快捷键或右键菜单翻译。';
+    node('input-icon-help').textContent=input.icon==='dot'?'聚焦输入框时右下角显示小圆点；点击它展开翻译按钮，再点按钮翻译，完成后再点还原。':
+      input.icon==='icon'?'聚焦输入框时右下角显示 Kuai 图标；点击它展开翻译按钮，再点按钮翻译，完成后再点还原。':'不显示入口，只用快捷键或右键菜单翻译。';
     node('input-write-back-help').hidden=!input.includeOriginal;
     node('input-apply-help').textContent=input.autoApply?'不弹出结果卡，译文直接替换输入框内容。':'先在小卡片中预览译文，确认后点“应用”写回。';
     node('hover-options-panel').hidden=!settings.hoverEnabled;
@@ -145,9 +168,9 @@ export function createInteractionControls({document,editor,onError=()=>{},onVali
     node('hover-trigger-help').textContent=hover.trigger==='hover'?'无需按键，指向文字并达到等待时长即可翻译。移开文字、开始选择文字或按 Escape 会取消待触发任务。':
       hover.trigger==='left_hold'?'在文字上按住鼠标左键触发；松开左键、拖动选择文字或按 Escape 会取消待触发任务。':
       hover.trigger==='custom'&&!hover.customKeys.length?'请先填写一至两个不同的按键，填好后即可切换段落译文。':
-      '鼠标指向文字，按一次所选按键翻译，再按一次关闭；无需一直按住。整页翻译会复用这里的译文，恢复原文会一起清除。';
+      '鼠标指向文字，按一次所选按键翻译，再按一次关闭；无需一直按住。网页翻译会复用这里的译文，恢复原文会一起清除。';
     node('hover-border-color-field').hidden=!hover.showIndicator;
-    node('hover-service-summary').textContent='鼠标指向段落，按一次快捷键翻译，再按一次关闭。服务、显示方式、样式与整页翻译共用。';
+    renderUsage(settings);
   }
   function commit(group: string,key: string,{blur=false}: {blur?: boolean}={}) {
     const {property,fields}=groups[group],[kind]=fields[key],id=idFor(group,key),field=node<FormControl>(id);
