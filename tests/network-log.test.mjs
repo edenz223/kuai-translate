@@ -34,7 +34,8 @@ for(const [name,status,body,code] of [
   ['HTTP error',429,'{"error":"Try later","token":"private-token","text":"Visible error"}','HTTP_429'],
   ['invalid JSON',200,'not JSON; text=Visible; token=private-token','INVALID_RESPONSE'],
 ])test(`${name} records URL, query, request, status and parsed or raw response`,async()=>{
-  const h=call(async()=>new Response(body,{status}),'https://api.example/translate?api_key=private-key&q=Hello',{method:'POST',body:'{"text":"Hello"}'});
+  // Retry-After: 0 keeps the 429 retries instant; backoff timing has its own tests.
+  const h=call(async()=>new Response(body,{status,headers:{'Retry-After':'0'}}),'https://api.example/translate?api_key=private-key&q=Hello',{method:'POST',body:'{"text":"Hello"}'});
   await assert.rejects(h.promise,{code});const [record]=h.records;
   assert.equal(record.status,status);assert.equal(record.ok,false);assert.equal(record.error.code,code);assert.match(record.error.message,/translation service/);
   assert.equal(new URL(record.url).searchParams.get('api_key'),'priv…');assert.deepEqual(record.query,{api_key:'priv…',q:'Hello'});
@@ -145,7 +146,7 @@ test('without records only a summary is printed, and debug off suppresses all ba
 test('HTTP layer collects records without printing success or failure request lines in the worker',async t=>{
   const calls=capture(t);setDebug(true,true);
   const good=call(async()=>Response.json({text:'Visible'}));await good.promise;
-  const bad=call(async()=>new Response('Unavailable',{status:503}));await assert.rejects(bad.promise,{code:'HTTP_503'});
+  const bad=call(async()=>new Response('Unavailable',{status:401}));await assert.rejects(bad.promise,{code:'HTTP_401'});
   assert.equal(good.records.length,1);assert.equal(bad.records.length,1);assert.deepEqual(calls,[]);
 });
 
@@ -181,4 +182,13 @@ for(const kind of ['page','youtube'])test(`${kind} runtime prints a single group
   assert.match(calls[0][1],/✖.*1 [段条] · google · HTTP_429 Busy · \d+ ms$/);
   assert.match(calls[0][2],/background:#b45309/);
   assert.deepEqual(calls[2],['log',{url:bad.url,params:bad.query,result:bad.response}]);
+});
+
+test('cache hit summaries include the count and fully cached batches have no empty group',t=>{
+  const calls=capture(t);setDebug(true);
+  const details={providerLabel:'Gemini · gemini-flash-lite-latest',cacheHits:9,network:[base]};
+  debugBatch('网页',{count:12,providerId:'gemini',durationMs:420},details);
+  assert.equal(calls[0][0],'groupCollapsed');assert.equal(calls[0][1],'[Kuai] %c网页%c 12 段 · Gemini · gemini-flash-lite-latest · 缓存 9 · 420 ms');
+  calls.length=0;debugBatch('网页',{count:12,providerId:'gemini',durationMs:1},{...details,cacheHits:12,network:[]});
+  assert.deepEqual(calls.map(call=>call[0]),['info']);assert.equal(calls[0][1],'[Kuai] %c网页%c 12 段 · Gemini · gemini-flash-lite-latest · 缓存 12 · 1 ms');
 });

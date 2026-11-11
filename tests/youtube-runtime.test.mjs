@@ -479,3 +479,32 @@ test('track diagnostics report Chinese choices once and keep render sync quiet',
   assert.equal(warnings.mock.callCount(),0);
   assert.ok(!JSON.stringify(calls.mock.calls.map(call=>call.arguments)).includes('baseUrl'));
 });
+
+for(const durationMs of [100,2400])test(`successful ${durationMs} ms subtitle batches use the expected trigger window`,async t=>{
+  let now=10000;const requests=[];
+  t.mock.method(Date,'now',()=>now);
+  const {session,video,state}=fixture(async texts=>{requests.push(texts);now+=durationMs;return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+  session.setCues([0,30,60,65.01].map(start=>({start,end:start+2,text:'At '+start})));
+  video.currentTime=0;session.update();await settle();assert.deepEqual(requests,[['At 0']]);
+  video.currentTime=4.99;session.update();await settle();assert.equal(requests.length,1);
+  video.currentTime=5;session.update();await settle();
+  if(durationMs>2000){
+    assert.deepEqual(requests,[['At 0'],['At 30','At 60']]);assert.equal(state.subtitlesList.at(-1).status,'pending');
+  }else{
+    assert.equal(requests.length,1);video.currentTime=15;session.update();await settle();assert.deepEqual(requests[1],['At 30','At 60','At 65.01']);
+  }
+});
+test('adaptive prefetch logs only on window changes, only with verbose diagnostics',async t=>{
+  const {setDebug}=await import('../dist/src/shared/debug.js');
+  const info=t.mock.method(console,'info',()=>{});t.after(()=>setDebug(false));
+  let now=10000;t.mock.method(Date,'now',()=>now);
+  for(const verbose of [false,true]){
+    setDebug(true,verbose);
+    const {session,video}=fixture(async texts=>{now+=2400;return{translations:texts.map(text=>'译:'+text)};});t.after(()=>session.destroy());
+    session.setCues([0,30,60].map(start=>({start,end:start+2,text:'At '+start})));
+    video.currentTime=0;session.update();await settle();video.currentTime=5;session.update();await settle();session.destroy();
+    const changes=info.mock.calls.filter(call=>/服务较慢/.test(call.arguments[0]));
+    assert.equal(changes.length,verbose?1:0);
+    if(verbose)assert.match(changes[0].arguments[0],/字幕%c 服务较慢（平均 2.4 s），提前 25 秒预取/);
+  }
+});

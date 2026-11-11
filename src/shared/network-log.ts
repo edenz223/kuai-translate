@@ -117,7 +117,7 @@ const duration=(ms:number)=>ms<1000?`${ms} ms`:`${Number((ms/1000).toFixed(1))} 
 function batch(category:'网页'|'字幕',summary:BatchSummary,details?:NetworkDiagnostics,failure?:{error:unknown}):void{
   if(!isDebug())return;
   const failed=!!failure;
-  const message=`${summary.count} ${category==='网页'?'段':'条'} · ${details?.providerLabel||details?.providerId||summary.providerId} · ${failed?debugFailure(failure!.error)+' · ':''}${duration(summary.durationMs)}`;
+  const message=`${summary.count} ${category==='网页'?'段':'条'} · ${details?.providerLabel||details?.providerId||summary.providerId} · ${details?.cacheHits?`缓存 ${details.cacheHits} · `:''}${failed?debugFailure(failure!.error)+' · ':''}${duration(summary.durationMs)}`;
   const label=debugLabel(category,message,failed),records=details?.network||[];
   if(!records.length){console[failed?'warn':'info'](...label);return;}
   // Console groups have no warning level; use the warning badge and reason on the header itself.

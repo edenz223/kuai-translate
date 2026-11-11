@@ -1,10 +1,22 @@
-import {isDebug} from '../shared/debug.js';
+import {debug,isDebug} from '../shared/debug.js';
 import {networkRequest,sanitizeNetworkRecord} from '../shared/network-log.js';
 import type {NetworkRecord} from '../shared/messages.js';
 export type NetworkObserver = (record:NetworkRecord)=>void;
 import { failure, TranslationError } from './errors.js';
 
 export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_RETRIES=2,MAX_RETRY_AFTER_MS=10000;
+const deadlines=new WeakMap<AbortSignal,number>(),retryAfter=new WeakMap<TranslationError,number>();
+const abortReason=(signal:AbortSignal)=>signal.reason instanceof TranslationError?signal.reason:failure('CANCELLED','Translation was cancelled.');
+
+function wait(ms:number,signal:AbortSignal):Promise<void> {
+  return new Promise((resolve,reject)=>{
+    const abort=()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);reject(abortReason(signal));};
+    const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},ms);
+    signal.addEventListener('abort',abort,{once:true});
+    if(signal.aborted)abort();
+  });
+}
 
 /** Covers connection, body reading and parsing; a stalled transport cannot hang a job. */
 export async function withRequestLifetime<T>(run:(signal:AbortSignal)=>Promise<T>, { signal, timeoutMs = 30000 }: {signal?:AbortSignal;timeoutMs?:number} = {}):Promise<T> {
@@ -23,7 +35,9 @@ export async function withRequestLifetime<T>(run:(signal:AbortSignal)=>Promise<T
   };
   signal?.addEventListener('abort', abort, { once: true });
   if (signal?.aborted) abort();
-  timer = setTimeout(timedOut, Math.max(1, Math.min(Number(timeoutMs) || 30000, 60000)));
+  const lifetime=Math.max(1, Math.min(Number(timeoutMs) || 30000, 60000));
+  deadlines.set(controller.signal,Date.now()+lifetime);
+  timer = setTimeout(timedOut, lifetime);
   try {
     if (signal?.aborted) return await cancelled;
     return await Promise.race([run(controller.signal), cancelled]);
@@ -36,10 +50,28 @@ export async function withRequestLifetime<T>(run:(signal:AbortSignal)=>Promise<T
     signal?.removeEventListener('abort', abort);
     // Stop remaining members of a parallel batch after any failure.
     controller.abort();
+    deadlines.delete(controller.signal);
   }
 }
 
-export async function requestJSON(fetchImpl:typeof fetch, url:string|URL, options:RequestInit, signal:AbortSignal, onNetwork?:NetworkObserver):Promise<any> {
+/** Retry one HTTP call within its enclosing lifetime; every attempt owns a network record. */
+export async function requestJSON(fetchImpl:typeof fetch, url:string|URL, options:RequestInit, signal:AbortSignal, onNetwork?:NetworkObserver,sleep=wait):Promise<any> {
+  for(let retry=0;;retry++){
+    try{return await requestAttempt(fetchImpl,url,options,signal,onNetwork);}
+    catch(error){
+      if(signal.aborted)throw abortReason(signal);
+      if(!(error instanceof TranslationError) || !['HTTP_429','HTTP_503'].includes(error.code) || retry>=MAX_RETRIES)throw error;
+      const delay=retryAfter.get(error) ?? 1000*2**retry+Math.random()*100;
+      // Preserve the provider error when there is no budget left to wait and retry.
+      if(delay>=((deadlines.get(signal) ?? Infinity)-Date.now()))throw error;
+      debug('服务',`服务繁忙（${error.code}），${(delay/1000).toFixed(1)} s 后重试（第 ${retry+1} 次）`);
+      await sleep(delay,signal);
+      if(signal.aborted)throw abortReason(signal);
+    }
+  }
+}
+
+async function requestAttempt(fetchImpl:typeof fetch, url:string|URL, options:RequestInit, signal:AbortSignal, onNetwork?:NetworkObserver):Promise<any> {
   const started=Date.now(),recording=isDebug() || !!onNetwork;
   const record:NetworkRecord={
     ...(recording?networkRequest(url,options):{method:'GET',url:'',query:{},request:null,sentBytes:0}),
@@ -74,6 +106,13 @@ export async function requestJSON(fetchImpl:typeof fetch, url:string|URL, option
     if(signal.aborted){response.body?.cancel?.().catch(()=>{});throw signal.reason;}
     record.status=Number(response.status) || 0;
     const httpError=response.ok?undefined:failure('HTTP_' + record.status, `The translation service returned HTTP ${record.status}. Check its configuration or retry later.`);
+    if(httpError){
+      const header=response.headers?.get('retry-after')?.trim();
+      if(header){
+        const delay=/^\d+(?:\.\d+)?$/.test(header)?Number(header)*1000:/[a-z]{3}/i.test(header)?Date.parse(header)-Date.now():NaN;
+        if(Number.isFinite(delay)&&delay<=MAX_RETRY_AFTER_MS)retryAfter.set(httpError,Math.max(0,delay));
+      }
+    }
     const tooLarge=()=>httpError || failure('RESPONSE_TOO_LARGE', 'The translation response was too large. Use a smaller batch.');
     // Without diagnostics, preserve the existing HTTP-error fast path.
     if(httpError && !recording){response.body?.cancel?.().catch(()=>{});throw httpError;}

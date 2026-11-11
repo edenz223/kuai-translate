@@ -104,7 +104,7 @@ test('provider success, retry and model listing are verbose processes; failures 
   assert.equal(info.mock.callCount(),0);
   for(const verbose of [false,true]){
     setDebug(true,verbose);
-    await assert.rejects(translateWithProvider(provider,{...options,fetchImpl:async()=>new Response('',{status:429})}),{code:'HTTP_429'});
+    await assert.rejects(translateWithProvider(provider,{...options,fetchImpl:async()=>new Response('',{status:429,headers:{'Retry-After':'0'}})}),{code:'HTTP_429'});
     assert.match(warn.mock.calls.at(-1).arguments[0],/^\[Kuai\] ✖ %c服务%c 翻译请求失败：.*HTTP_429/);
   }
   assert.equal(warn.mock.callCount(),2);

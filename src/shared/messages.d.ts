@@ -16,7 +16,7 @@ export interface NetworkRecord {
   sentBytes: number; receivedBytes: number; durationMs: number;
   error?: {code: string; message: string};
 }
-export interface NetworkDiagnostics {network?: NetworkRecord[]; providerId?: string; providerLabel?: string}
+export interface NetworkDiagnostics {network?: NetworkRecord[]; cacheHits?: number; providerId?: string; providerLabel?: string}
 export interface TranslationResult extends NetworkDiagnostics { translations: string[]; providerId: string }
 export type Translate = (texts: string[], options?: TranslationOptions) => Promise<TranslationResult>;
 export type PreferencePatch = Partial<Pick<Settings,

@@ -10,12 +10,12 @@ const extensionId='kuai-extension';
 const page={id:extensionId,url:'https://example.com/article',tab:{id:4},frameId:0,documentId:'document-a'};
 const options={id:extensionId,url:'chrome-extension://'+extensionId+'/options.html',documentId:'options-a'};
 function event(){const callbacks=new Set();return {addListener:fn=>callbacks.add(fn),removeListener:fn=>callbacks.delete(fn),emit:(...args)=>{for(const fn of callbacks)fn(...args);},get size(){return callbacks.size;}};}
-function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenuHook,createMenuHook,tabs={},fetchHook}={}){
+function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenuHook,createMenuHook,tabs={},fetchHook,session}={}){
   let data=structuredClone(stored);const access=[],writes=[],broadcasts=[],menus=[],menuCalls=[],menuUpdates=[],created=[],requests=[],badges=[];
   const changed=event();
   const chromeApi={
     runtime:{id:extensionId,getURL:path=>'chrome-extension://'+extensionId+'/'+path,onMessage:event(),onInstalled:event(),sendMessage:async message=>{broadcasts.push(message);}},
-    storage:{onChanged:changed,local:{
+    storage:{onChanged:changed,session,local:{
       setAccessLevel:async value=>{access.push(value);await accessHook?.();},
       get:async()=>{await getHook?.();return data===undefined?{}:{[SETTINGS_KEY]:structuredClone(data)};},
       set:async values=>{const next=values[SETTINGS_KEY];writes.push(structuredClone(next));await setHook?.(next);data=structuredClone(next);changed.emit({[SETTINGS_KEY]:{newValue:data}},'local');},
@@ -286,7 +286,7 @@ test('translation diagnostics attach per-call payloads on success/failure only w
   for(const debugMode of [false,true])for(const debugVerbose of [false,true])for(const status of [200,429]){
     const stored=defaultSettings();stored.debugMode=debugMode;stored.debugVerbose=debugVerbose;
     const before=[info.mock.callCount(),warn.mock.callCount()];
-    const h=fixture({stored,fetchHook:async()=>status===200?Response.json([{translations:[{text:'你好'}]}]):new Response('Service busy',{status})});
+    const h=fixture({stored,fetchHook:async()=>status===200?Response.json([{translations:[{text:'你好'}]}]):new Response('Service busy',{status,headers:{'Retry-After':'0'}})});
     t.after(()=>h.controller.stop());await h.controller.ready;
     const answer=await h.controller.handleMessage({type:'KUAI_TRANSLATE',requestId:'diagnostics',texts:['Hello']},page);
     assert.equal(answer.ok,status===200);
@@ -298,7 +298,7 @@ test('translation diagnostics attach per-call payloads on success/failure only w
     const result=answer.ok?answer.value:answer;
     assert.equal(Object.hasOwn(result,'network'),debugMode);
     if(debugMode){
-      assert.equal(result.network.length,1);const [record]=result.network;
+      assert.equal(result.network.length,status===200?1:3);const [record]=result.network;
       assert.equal(record.method,'POST');assert.match(record.url,/edge.microsoft.com\/translate\/translatetext/);
       assert.equal(record.query.to,'zh-Hans');assert.deepEqual(record.request,['Hello']);
       assert.equal(record.status,status);assert.equal(record.ok,status===200);assert.equal('headers' in record,false);
@@ -333,4 +333,94 @@ test('request client preserves failure network objects for content batch logging
   await assert.rejects(request('KUAI_TRANSLATE',{requestId:'failed',texts:['Hello']},{runtime:{sendMessage:async()=>({ok:false,error:{code:'HTTP_503',message:'Unavailable'},network,providerId:'google'})}}),error=>{
     assert.equal(error.code,'HTTP_503');assert.equal(error.providerId,'google');assert.deepEqual(error.network,network);return true;
   });
+});
+
+const cachedRequest=(h,texts,extra={})=>h.controller.handleMessage({type:'KUAI_TRANSLATE',requestId:'cached',texts,...extra},page);
+function sessionStorage(){
+  let data={};const writes=[];
+  return {writes,get data(){return data;},
+    get:async()=>structuredClone(data),
+    set:async value=>{data={...data,...structuredClone(value)};writes.push(structuredClone(value));},
+  };
+}
+test('background cache survives a document reload, sends only misses and merges in original order',async t=>{
+  const stored=defaultSettings();stored.debugMode=true;
+  t.mock.method(console,'warn',()=>{});
+  const h=fixture({stored});t.after(()=>h.controller.stop());
+  const first=await cachedRequest(h,['Alpha','Beta']);assert.equal(first.value.cacheHits,0);
+  const second=await h.controller.handleMessage({type:'KUAI_TRANSLATE',requestId:'reload',texts:['Beta','Gamma','Alpha','Delta']},{...page,documentId:'reload'});
+  assert.deepEqual(second.value.translations,['译文:Beta','译文:Gamma','译文:Alpha','译文:Delta']);
+  assert.equal(second.value.cacheHits,2);assert.deepEqual(JSON.parse(h.requests[1].init.body),['Gamma','Delta']);
+  const third=await cachedRequest(h,['Delta','Beta']);
+  assert.equal(h.requests.length,2);assert.equal(third.value.cacheHits,2);assert.deepEqual(third.value.network,[]);
+  // Hits never bypass validation of the original request.
+  for(const extra of [{texts:Array(65).fill('Alpha')},{targetLanguage:'auto'},{sourceLanguage:'invalid!'}])assert.equal((await cachedRequest(h,['Alpha'],extra)).error.code,'INVALID_INPUT');
+});
+test('cache identity includes model, provider, credentials, endpoint, prompts and both languages',async t=>{
+  const stored=customSettings();stored.activeProviderId='custom';
+  const calls=[];
+  const h=fixture({stored,fetchHook:async(url,init)=>{calls.push(init);return Response.json(url.includes('edge.microsoft.com')?[{translations:[{text:'译文'}]}]:{choices:[{message:{content:'["译文"]'}}]});}});t.after(()=>h.controller.stop());
+  assert.equal((await cachedRequest(h,['Hello'])).ok,true);
+  await cachedRequest(h,['Hello']);assert.equal(calls.length,1);
+  for(const extra of [{targetLanguage:'ja'},{sourceLanguage:'en'},{providerId:'microsoft'}])assert.equal((await cachedRequest(h,['Hello'],extra)).ok,true);
+  assert.equal(calls.length,4);
+  for(const patch of [{model:'new-model'},{apiKey:'new-key'},{baseUrl:'https://new.example/v1'},{systemPrompt:'new instruction'},{userPrompt:'{{text}} please'},{id:'custom-2'}]){
+    const next=await privateSettings(h);Object.assign(next.providers.at(-1),patch);next.activeProviderId=next.providers.at(-1).id;
+    assert.equal((await saveSnapshot(h,next)).ok,true);assert.equal((await cachedRequest(h,['Hello'])).ok,true);
+  }
+  assert.equal(calls.length,10);
+});
+test('session cache persists across controller restart with digests and translations only',async t=>{
+  const stored=customSettings();stored.activeProviderId='custom';const session=sessionStorage();
+  const h=fixture({stored,session,fetchHook:async()=>Response.json({choices:[{message:{content:'["你好"]'}}]})});t.after(()=>h.controller.stop());
+  assert.equal((await cachedRequest(h,['Hello'])).ok,true);
+  assert.equal(session.writes.length,0,'writes are debounced');
+  h.controller.stop();await flush();assert.equal(session.writes.length,1);
+  assert.doesNotMatch(JSON.stringify(session.data),/old-test-key|old-model|api.example|Hello|systemPrompt|apiKey/);
+  const entries=Object.values(session.data)[0];assert.equal(entries.length,1);assert.match(entries[0][0],/^[a-f0-9]{64}$/);assert.equal(entries[0][1],'你好');
+  let fetched=false;
+  const controller=createBackground({chromeApi:h.chromeApi,fetchImpl:async()=>{fetched=true;throw Error('must not fetch');}}).start();t.after(()=>controller.stop());await controller.ready;
+  assert.deepEqual(await controller.handleMessage({type:'KUAI_TRANSLATE',requestId:'restart',texts:['Hello']},page),{ok:true,value:{translations:['你好'],providerId:'custom'}});
+  assert.equal(fetched,false);
+});
+for(const operation of ['get','set'])test('session storage '+operation+' failure silently falls back to memory',async t=>{
+  const session=sessionStorage();session[operation]=async()=>{throw Error('session unavailable');};
+  const h=fixture({session});t.after(()=>h.controller.stop());
+  await cachedRequest(h,['Hello']);
+  if(operation==='set')await new Promise(resolve=>setTimeout(resolve,300));
+  const answer=await cachedRequest(h,['Hello']);assert.deepEqual(answer.value,{translations:['译文:Hello'],providerId:'microsoft'});assert.equal(h.requests.length,1);
+});
+test('failed and empty results are never cached and provider tests never populate the cache',async t=>{
+  let calls=0;
+  const h=fixture({fetchHook:async()=>{
+    calls++;if(calls===1)return new Response('',{status:500});
+    return Response.json([{translations:[{text:calls===2?'':'你好'}]}]);
+  }});t.after(()=>h.controller.stop());
+  assert.equal((await cachedRequest(h,['Hello'])).error.code,'HTTP_500');
+  assert.equal((await cachedRequest(h,['Hello'])).error.code,'INVALID_RESPONSE');
+  assert.equal((await cachedRequest(h,['Hello'])).ok,true);assert.equal((await cachedRequest(h,['Hello'])).ok,true);assert.equal(calls,3);
+  for(let index=0;index<2;index++)assert.equal((await h.controller.handleMessage({type:'KUAI_TEST_PROVIDER',provider:{id:'microsoft',type:'microsoft'},text:'Hello'},options)).ok,true);
+  assert.equal(calls,5,'provider tests bypass even a populated cache');
+  await h.controller.handleMessage({type:'KUAI_TEST_PROVIDER',provider:{id:'microsoft',type:'microsoft'},text:'World'},options);
+  await cachedRequest(h,['World']);assert.equal(calls,7,'a test result does not warm the cache');
+});
+test('cache diagnostics exist only with debug enabled, including fully cached batches',async t=>{
+  for(const debugMode of [false,true]){
+    const stored=defaultSettings();stored.debugMode=debugMode;
+    const h=fixture({stored});t.after(()=>h.controller.stop());
+    for(let index=0;index<2;index++){
+      const result=await cachedRequest(h,['Hello']);
+      assert.equal(Object.hasOwn(result.value,'cacheHits'),debugMode);
+      if(debugMode){assert.equal(result.value.cacheHits,index);assert.equal(result.value.network.length,index?0:1);}
+      else assert.deepEqual(result,{ok:true,value:{translations:['译文:Hello'],providerId:'microsoft'}});
+    }
+    h.controller.stop();
+  }
+});
+
+test('a provider echoing its API key cannot put that secret in session cache values',async t=>{
+  const stored=customSettings();stored.activeProviderId='custom';const session=sessionStorage();let calls=0;
+  const h=fixture({stored,session,fetchHook:async()=>{calls++;return Response.json({choices:[{message:{content:JSON.stringify(['old-test-key'])}}]});}});t.after(()=>h.controller.stop());
+  await cachedRequest(h,['Hello']);await cachedRequest(h,['Hello']);h.controller.stop();await flush();
+  assert.equal(calls,2);assert.doesNotMatch(JSON.stringify(session.data),/old-test-key/);
 });

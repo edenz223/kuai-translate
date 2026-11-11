@@ -243,16 +243,21 @@ export function modelPrompts(p:Pick<ValidatedProvider,'systemPrompt'|'userPrompt
   return { instruction, userText };
 }
 
-async function translate(provider:Partial<Provider>|null|undefined, {
-  texts, sourceLanguage = 'auto', targetLanguage = 'zh-Hans', signal, fetchImpl = globalThis.fetch, timeoutMs = 30000, onNetwork,
-}:ProviderOptions = {}):Promise<string[]> {
-  const p = validateProvider(provider);
+/** Shared with the background cache so hits obey the same request limits. */
+export function validateTranslationInput(texts:unknown,sourceLanguage:string,targetLanguage:string):asserts texts is string[] {
   if (!Array.isArray(texts) || !texts.length || texts.length > REQUEST_LIMITS.items ||
       texts.some(text => typeof text !== 'string' || !text.trim() || text.length > REQUEST_LIMITS.textCharacters) ||
       texts.reduce((sum, text) => sum + text.length, 0) > REQUEST_LIMITS.totalCharacters)
     throw failure('INVALID_INPUT', 'Send 1–64 nonempty paragraphs, at most 5,000 characters each and 50,000 in total.');
   if (![sourceLanguage, targetLanguage].every(code => typeof code === 'string' && /^[a-z][a-z0-9_-]{0,30}$/i.test(code)) || targetLanguage === 'auto')
     throw failure('INVALID_INPUT', 'Choose valid source and target languages.');
+}
+
+async function translate(provider:Partial<Provider>|null|undefined, {
+  texts, sourceLanguage = 'auto', targetLanguage = 'zh-Hans', signal, fetchImpl = globalThis.fetch, timeoutMs = 30000, onNetwork,
+}:ProviderOptions = {}):Promise<string[]> {
+  const p = validateProvider(provider);
+  validateTranslationInput(texts,sourceLanguage,targetLanguage);
   sourceLanguage = sourceLanguage.replaceAll('_', '-'); targetLanguage = targetLanguage.replaceAll('_', '-');
   return withRequestLifetime(async requestSignal => {
     const translated:string[] = [];

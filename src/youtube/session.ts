@@ -10,11 +10,13 @@ const LIVE_SETTLE_MS=700,LIVE_MAX_WAIT_MS=3000,OVERLAP_SCAN=8;
 // The first request of a timeline is small so the opening sentences come back quickly.
 const BATCH=8,OPENING_BATCH=3;
 // Trigger near playback, then fill farther ahead to avoid one request per line.
-const TRIGGER=15,PREFETCH=60;
+const TRIGGER=15,SLOW_TRIGGER=25,PREFETCH=60;
+const SLOW_BATCH_MS=2000,LATENCY_WEIGHT=0.3;
 const lastLine=(text:string)=>text.split('\n').map(line=>line.trim()).filter(Boolean).at(-1)||'';
 const continuesText=(previous:string,next:string)=>{const line=lastLine(previous);return !!line&&(next.startsWith(previous)||next.includes(line));};
 /** Framework-independent subtitle state and translation scheduling. */
 export function createSubtitleSession({id,video,settings,translate,onChange=()=>{},getLanguage=()=>undefined}:{id:string;video:HTMLVideoElement;settings:Settings;translate:TranslateSubtitles;onChange?:(session:SubtitleSession)=>void;getLanguage?:()=>string|undefined}):SubtitleSession {
+  let averageDuration:number|undefined,triggerWindow=TRIGGER;
   let config=settings,enabled=true,destroyed=false,running:TranslationJob|null=null,revision=0,timer:ReturnType<typeof setInterval>|null=null,queued=false,opening=false;
   let loop:{start:number;end:number}|null=null,liveChangedAt=0,livePendingSince:number|null=null,liveTimer:ReturnType<typeof setTimeout>|null=null,liveSource:{text:string;translation:string}|null=null;
   const state:SubtitleState={videoId:id,subtitlesList:[],currentCaption:null,loopingCaption:null,selectionCaptionSnapshot:null,isSubtitleSelectionHeld:false,translateVersion:0,isLiveDomCaptions:false,timelineFailed:false,noTracks:false,errorMessage:''};
@@ -81,7 +83,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
       if(pending.length)translateCues(opening||state.isLiveDomCaptions?pending:pendingFrom(time,first,PREFETCH));
     }
   }
-  function pendingFrom(time:number,first=activeAt(time).first,lookahead=TRIGGER) {
+  function pendingFrom(time:number,first=activeAt(time).first,lookahead=state.isLiveDomCaptions?TRIGGER:triggerWindow) {
     const pending=[];
     for(let index=first;index<state.subtitlesList.length;index++){
       const item=state.subtitlesList[index];if(item.start>time+lookahead)break;
@@ -122,7 +124,15 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
       const values=result?.translations;
       if(!Array.isArray(values)||values.length!==fragments.length||values.some(value=>typeof value!=='string'||!value.trim()))throw new Error(subtitleWords(getLanguage()).emptyTranslation);
-      debugBatch('字幕',{count:cues.length,providerId:providerId(),durationMs:Date.now()-started},result);
+      const durationMs=Date.now()-started;
+      // Smooth successful batches so slow services get a little more lead time.
+      averageDuration=averageDuration===undefined?durationMs:averageDuration*(1-LATENCY_WEIGHT)+durationMs*LATENCY_WEIGHT;
+      const nextWindow=averageDuration>SLOW_BATCH_MS?SLOW_TRIGGER:TRIGGER;
+      if(nextWindow!==triggerWindow){
+        triggerWindow=nextWindow;
+        debug('字幕',`${nextWindow===SLOW_TRIGGER?'服务较慢':'服务恢复'}（平均 ${(averageDuration/1000).toFixed(1)} s），提前 ${nextWindow} 秒预取`);
+      }
+      debugBatch('字幕',{count:cues.length,providerId:providerId(),durationMs},result);
       cues.forEach((cue,index)=>{cue.translation=values.slice(...mapping[index]).join('');cue.status='success';});
       if(state.isLiveDomCaptions){const latest=cues.at(-1)!;liveSource={text:latest.text,translation:latest.translation!};carryLive(state.subtitlesList);}
     }).catch(error=>{
