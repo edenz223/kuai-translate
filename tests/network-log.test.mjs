@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {requestJSON,withRequestLifetime,MAX_RESPONSE_BYTES} from '../dist/src/providers/http.js';
-import {sanitizeNetworkRecord,debugBatch,debugBatchError,formatNetworkRecord} from '../dist/src/shared/network-log.js';
+import {sanitizeNetworkRecord,debugBatch,debugBatchError} from '../dist/src/shared/network-log.js';
 import {setDebug} from '../dist/src/shared/debug.js';
 
 const base={method:'POST',url:'https://api.example/translate',query:{},request:null,status:200,ok:true,response:null,sentBytes:0,receivedBytes:0,durationMs:180};
@@ -33,13 +33,15 @@ test('HTTP success records full URL, repeated query, JSON params/results, byte s
 for(const [name,status,body,code] of [
   ['HTTP error',429,'{"error":"Try later","token":"private-token","text":"Visible error"}','HTTP_429'],
   ['invalid JSON',200,'not JSON; text=Visible; token=private-token','INVALID_RESPONSE'],
-])test(`${name} records URL, query, request, status and raw response text`,async()=>{
+])test(`${name} records URL, query, request, status and parsed or raw response`,async()=>{
   const h=call(async()=>new Response(body,{status}),'https://api.example/translate?api_key=private-key&q=Hello',{method:'POST',body:'{"text":"Hello"}'});
   await assert.rejects(h.promise,{code});const [record]=h.records;
   assert.equal(record.status,status);assert.equal(record.ok,false);assert.equal(record.error.code,code);assert.match(record.error.message,/translation service/);
   assert.equal(new URL(record.url).searchParams.get('api_key'),'priv…');assert.deepEqual(record.query,{api_key:'priv…',q:'Hello'});
-  assert.deepEqual(record.request,{text:'Hello'});assert.equal(typeof record.response,'string');assert.match(record.response,/Visible/);
-  assert.equal(record.receivedBytes,Buffer.byteLength(body));assert.doesNotMatch(record.response,/private-token/);
+  assert.deepEqual(record.request,{text:'Hello'});assert.match(JSON.stringify(record.response),/Visible/);
+  if(code==='HTTP_429')assert.deepEqual(record.response,{error:'Try later',token:'priv…',text:'Visible error'});
+  else assert.equal(typeof record.response,'string');
+  assert.equal(record.receivedBytes,Buffer.byteLength(body));assert.doesNotMatch(JSON.stringify(record.response),/private-token/);
 });
 
 test('credential matching handles lowercase compound keys without hiding harmless names or token counts',()=>{
@@ -94,41 +96,65 @@ test('network failure, stalled timeout, pre-cancel and mid-body cancel each reco
   assert.equal(partial.records.length,1);assert.equal(partial.records[0].status,200);assert.equal(partial.records[0].error.code,'CANCELLED');assert.equal(partial.records[0].response,'partial response');
 });
 
-test('shared batch logger prints plain batch then one separate expandable line per HTTP call',t=>{
-  const calls=[];t.mock.method(console,'info',(...args)=>calls.push(['info',...args]));t.mock.method(console,'warn',(...args)=>calls.push(['warn',...args]));
-  setDebug(true);t.after(()=>setDebug(false));
-  const one={...base,request:{text:'Visible'},response:{translations:['可见']}},two={...base,method:'GET',durationMs:200};
-  debugBatch('page:batch','翻译批次完成：1 段 · 180 ms',{network:[one]});
-  assert.deepEqual(calls,[['info','[Kuai·page:batch] 翻译批次完成：1 段 · 180 ms'],['info','[Kuai·page:http] '+formatNetworkRecord(one),one]]);
-  calls.length=0;debugBatch('youtube:batch','字幕翻译批次完成：2 条 · 200 ms',{network:[one,two]});
-  assert.equal(calls.length,3);assert.equal(calls[0][1],'[Kuai·youtube:batch] 字幕翻译批次完成：2 条 · 200 ms');
-  assert.deepEqual(calls.slice(1),[['info','[Kuai·youtube:http] '+formatNetworkRecord(one),one],['info','[Kuai·youtube:http] '+formatNetworkRecord(two),two]]);
-  calls.length=0;const failed={...base,status:503,ok:false,error:{code:'HTTP_503',message:'Unavailable'}};
-  debugBatchError('page:batch','翻译批次失败：1 段 · 180 ms',Object.assign(Error('Unavailable'),{code:'HTTP_503',network:[one,failed]}));
-  assert.equal(calls[0][0],'warn');assert.match(calls[0][1],/^\[Kuai·page:batch\]/);
-  assert.deepEqual(calls.slice(1),[['info','[Kuai·page:http] '+formatNetworkRecord(one),one],['warn','[Kuai·page:http] '+formatNetworkRecord(failed),failed]]);
-  setDebug(false);calls.length=0;debugBatch('page:batch','silent',{network:[one]});debugBatchError('youtube:batch','silent',{network:[failed]});assert.deepEqual(calls,[]);
+function capture(t){
+  const calls=[];
+  for(const method of ['info','warn','groupCollapsed','log','groupEnd','table'])t.mock.method(console,method,(...args)=>calls.push([method,...args]));
+  t.after(()=>setDebug(false));return calls;
+}
+const summary={count:8,providerId:'microsoft',durationMs:420};
+
+test('one collapsed group per batch contains exactly URL, body/query params and result per request',t=>{
+  const calls=capture(t);setDebug(true);
+  const post=sanitizeNetworkRecord({...base,url:'https://api.example/translate?apiKey=private-key',query:{apiKey:'private-key'},request:{text:'Hello',apiKey:'private-key'},response:{translations:['你好'],token:'private-token'}});
+  const get=sanitizeNetworkRecord({...base,method:'GET',url:'https://api.example/translate?q=Hello',query:{q:'Hello'},response:['你好']});
+  debugBatch('字幕',summary,{network:[post,get]});
+  assert.deepEqual(calls.map(call=>call[0]),['groupCollapsed','log','log','groupEnd']);
+  assert.equal(calls[0][1],'[Kuai] %c字幕%c 8 条 · microsoft · 420 ms');
+  assert.match(calls[0][2],/background:#[a-f0-9]+;color:white/);assert.equal(calls[0][3],'color:inherit');
+  assert.deepEqual(calls.slice(1,3),[['log',{url:post.url,params:post.request,result:post.response}],['log',{url:get.url,params:get.query,result:get.response}]]);
+  for(const call of calls.slice(1,3)){assert.equal(call.length,2);assert.deepEqual(Object.keys(call[1]),['url','params','result']);}
+  assert.doesNotMatch(JSON.stringify(calls),/private-|headers|sentBytes|receivedBytes|durationMs/);
+  calls.length=0;debugBatch('网页',{count:12,providerId:'openai',durationMs:1234},{network:[post]});
+  assert.equal(calls[0][1],'[Kuai] %c网页%c 12 段 · openai · 1.2 s');
 });
 
-test('worker emits exactly one info/warn line per HTTP call with the record as second argument',async t=>{
-  const info=t.mock.method(console,'info',()=>{}),warn=t.mock.method(console,'warn',()=>{});
-  setDebug(true);t.after(()=>setDebug(false));
+test('failed group warns in its summary, retains readable results, and never adds error metadata lines',t=>{
+  const calls=capture(t);setDebug(true);
+  const records=[sanitizeNetworkRecord({...base,status:429,ok:false,response:'服务繁忙',error:{code:'HTTP_429',message:'服务繁忙'}}),
+    sanitizeNetworkRecord({...base,status:'NETWORK_ERROR',ok:false,error:{code:'NETWORK_ERROR',message:'无法连接'}})];
+  debugBatchError('网页',{count:12,providerId:'fallback',durationMs:95},Object.assign(Error('服务繁忙 https://user:pass@api.example/?token=private-token'),{code:'HTTP_429',providerId:'openai',network:records}));
+  assert.deepEqual(calls.map(call=>call[0]),['groupCollapsed','log','log','groupEnd']);
+  assert.equal(calls[0][1],'[Kuai] ✖ %c网页%c 12 段 · openai · HTTP_429 服务繁忙 https://api.example/ · 95 ms');
+  assert.match(calls[0][2],/background:#b45309/);assert.equal(calls[0][3],'color:#b45309');
+  assert.equal(calls[1][1].result,'服务繁忙');assert.deepEqual(calls[2][1].result,{code:'NETWORK_ERROR',message:'无法连接'});
+  assert.doesNotMatch(JSON.stringify(calls),/private-token|user:pass|headers/);
+});
+
+test('without records only a summary is printed, and debug off suppresses all batch output',t=>{
+  const calls=capture(t);setDebug(true);
+  debugBatch('字幕',summary);debugBatch('字幕',summary,{network:[]});
+  debugBatchError('网页',summary,Object.assign(Error('服务繁忙'),{code:'HTTP_429'}));
+  assert.deepEqual(calls.map(call=>call[0]),['info','info','warn']);
+  assert.match(calls[2][1],/HTTP_429 服务繁忙/);assert.match(calls[2][2],/background:#b45309/);
+  calls.length=0;debugBatchError('网页',summary,undefined);assert.match(calls[0][1],/✖.*UNKNOWN/);
+  setDebug(false,true);calls.length=0;debugBatch('字幕',summary,{network:[base]});debugBatchError('网页',summary,{network:[base]});assert.deepEqual(calls,[]);
+});
+
+test('HTTP layer collects records without printing success or failure request lines in the worker',async t=>{
+  const calls=capture(t);setDebug(true,true);
   const good=call(async()=>Response.json({text:'Visible'}));await good.promise;
   const bad=call(async()=>new Response('Unavailable',{status:503}));await assert.rejects(bad.promise,{code:'HTTP_503'});
-  assert.equal(info.mock.callCount(),1);assert.equal(warn.mock.callCount(),1);
-  assert.deepEqual(info.mock.calls[0].arguments,['[Kuai·http] '+formatNetworkRecord(good.records[0]),good.records[0]]);
-  assert.deepEqual(warn.mock.calls[0].arguments,['[Kuai·http] '+formatNetworkRecord(bad.records[0]),bad.records[0]]);
+  assert.equal(good.records.length,1);assert.equal(bad.records.length,1);assert.deepEqual(calls,[]);
 });
 
-for(const kind of ['page','youtube'])test(`${kind} runtime logs each success/failure record immediately after its batch line`,async t=>{
-  const calls=[];t.mock.method(console,'info',(...args)=>calls.push(['info',...args]));t.mock.method(console,'warn',(...args)=>calls.push(['warn',...args]));
-  setDebug(true);t.after(()=>setDebug(false));
+for(const kind of ['page','youtube'])test(`${kind} runtime prints a single group on success or failure with relayed records`,async t=>{
+  const calls=capture(t);setDebug(true);
   const good=sanitizeNetworkRecord({...base,request:{texts:['Hello']},response:{translations:['你好']}});
   const bad=sanitizeNetworkRecord({...base,status:429,ok:false,response:'Busy',error:{code:'HTTP_429',message:'Busy'}});
   let failed=false;
   const translate=async texts=>{
-    if(failed)throw Object.assign(Error('Busy'),{code:'HTTP_429',network:[good,bad]});
-    return {translations:texts.map(()=>'你好'),providerId:'example',network:[good]};
+    if(failed)throw Object.assign(Error('Busy'),{code:'HTTP_429',providerId:'google',network:[good,bad]});
+    return {translations:texts.map(()=>'你好'),providerId:'google',network:[good]};
   };
   let run;
   if(kind==='page'){
@@ -145,13 +171,12 @@ for(const kind of ['page','youtube'])test(`${kind} runtime logs each success/fai
     run=async()=>{session.setCues([{start:0,end:3,text:'Hello'}]);await session.translateCues(session.state.subtitlesList);};
   }
   await run();
-  let index=calls.findIndex(call=>call[1].startsWith(`[Kuai·${kind}:batch]`));
-  assert.ok(index>=0);assert.match(calls[index][1],new RegExp(`^\\[Kuai·${kind}:batch\\] .*完成：1 [段条] · \\d+ ms$`));
-  assert.equal(calls[index].length,2);assert.deepEqual(calls[index+1],['info',`[Kuai·${kind}:http] `+formatNetworkRecord(good),good]);
-  assert.equal(calls.filter(call=>call[1].startsWith(`[Kuai·${kind}:http]`)).length,1);
+  assert.deepEqual(calls.map(call=>call[0]),['groupCollapsed','log','groupEnd']);
+  assert.match(calls[0][1],/1 [段条] · google · \d+ ms$/);
+  assert.deepEqual(calls[1],['log',{url:good.url,params:good.request,result:good.response}]);
   failed=true;calls.length=0;await run();
-  index=calls.findIndex(call=>call[1].startsWith(`[Kuai·${kind}:batch]`));
-  assert.ok(index>=0);assert.equal(calls[index][0],'warn');assert.match(calls[index][1],/批次失败：1 [段条] · \d+ ms：HTTP_429 Busy$/);
-  assert.deepEqual(calls.slice(index+1,index+3),[['info',`[Kuai·${kind}:http] `+formatNetworkRecord(good),good],['warn',`[Kuai·${kind}:http] `+formatNetworkRecord(bad),bad]]);
-  assert.equal(calls.filter(call=>call[1].startsWith(`[Kuai·${kind}:http]`)).length,2);
+  assert.deepEqual(calls.map(call=>call[0]),['groupCollapsed','log','log','groupEnd']);
+  assert.match(calls[0][1],/✖.*1 [段条] · google · HTTP_429 Busy · \d+ ms$/);
+  assert.match(calls[0][2],/background:#b45309/);
+  assert.deepEqual(calls[2],['log',{url:bad.url,params:bad.query,result:bad.response}]);
 });

@@ -1,7 +1,7 @@
 import {redactEndpoint,secretProperty} from './redaction.js';
 
-let enabled=false;
-export function setDebug(on:boolean):void{enabled=!!on;}
+let enabled=false,verbose=false;
+export function setDebug(on:boolean,details=false):void{enabled=!!on;verbose=!!details;}
 export function isDebug():boolean{return enabled;}
 const safeText=(value:string)=>value
   .replace(/https?:\/\/[^\s<>"']+/gi,url=>redactEndpoint(url)||'[URL]')
@@ -46,21 +46,29 @@ export function redact(value:unknown):unknown{
   return visit(value);
 }
 
-export function debug(scope:string,message:string,details?:unknown):void{
-  if(!enabled)return;
-  console.info(safeText('[Kuai·'+scope+'] '+message),...(details!==undefined?[redact(details)]:[]));
+export type DebugCategory='网页'|'字幕'|'服务'|'设置'|'后台';
+const colors:Record<DebugCategory,string>={'网页':'#2563eb','字幕':'#7c3aed','服务':'#0891b2','设置':'#64748b','后台':'#64748b'};
+
+export function debugLabel(category:DebugCategory,message:string,warning=false):[string,string,string]{
+  return [safeText(`[Kuai] ${warning?'✖ ':''}%c${category}%c ${message}`),
+    `background:${warning?'#b45309':colors[category]};color:white;border-radius:3px;padding:1px 4px`,
+    warning?'color:#b45309':'color:inherit'];
 }
 
-/** Metadata-only warnings, with the same redaction as other diagnostics. */
-export function debugWarn(scope:string,message:string):void{
-  if(enabled)console.warn(safeText('[Kuai·'+scope+'] '+message));
+export function debug(category:DebugCategory,message:string,details?:unknown):void{
+  if(!enabled||!verbose)return;
+  console.info(...debugLabel(category,message),...(details!==undefined?[redact(details)]:[]));
 }
 
-/** Keep the error readable on the first line and its redacted snapshot expandable. */
-export function debugError(scope:string,message:string,error:unknown,details?:unknown):void{
-  if(!enabled)return;
+export function debugFailure(error:unknown):string{
   const clean=redact(error),info=clean as {code?:unknown;message?:unknown}|null;
   const code=typeof info?.code==='string'||typeof info?.code==='number'?String(info.code):'UNKNOWN';
   const reason=typeof info?.message==='string'?info.message:typeof clean==='string'?clean:'未知错误';
-  console.warn(safeText('[Kuai·'+scope+'] '+message+'：'+code+' '+reason),...(details!==undefined?[redact(details)]:[]),clean);
+  return safeText(code+' '+reason);
+}
+
+/** Errors stay visible even when process diagnostics are off. */
+export function debugError(category:DebugCategory,message:string,error:unknown,details?:unknown):void{
+  if(!enabled)return;
+  console.warn(...debugLabel(category,message+'：'+debugFailure(error),true),...(details!==undefined?[redact(details)]:[]),redact(error));
 }

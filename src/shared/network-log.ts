@@ -1,4 +1,4 @@
-import {debug,debugError,isDebug} from './debug.js';
+import {debugFailure,debugLabel,isDebug} from './debug.js';
 import type {NetworkDiagnostics,NetworkRecord} from './messages.js';
 
 const encoder=new TextEncoder();
@@ -110,29 +110,27 @@ export function networkRequest(url:string|URL,options:RequestInit):Pick<NetworkR
   return {method:(options.method || 'GET').toUpperCase(),url:safeURL(String(url)),query,request,sentBytes};
 }
 
-export function formatNetworkRecord(record:NetworkRecord):string {
-  let endpoint='[URL]';
-  try{const url=new URL(record.url);endpoint=url.host+url.pathname;}catch{/* Invalid URL. */}
-  return `${record.method} ${endpoint} → ${record.status} · ${record.durationMs} ms`;
-}
+interface BatchSummary {count:number;providerId:string;durationMs:number}
+const duration=(ms:number)=>ms<1000?`${ms} ms`:`${Number((ms/1000).toFixed(1))} s`;
 
-/** Records are sanitized at collection; bypass the metadata-only debug redactor. */
-export function debugNetworkRecord(record:NetworkRecord,scope='http'):void {
+/** Only use the sanitized snapshots relayed by the worker. */
+function batch(category:'网页'|'字幕',summary:BatchSummary,details?:NetworkDiagnostics,failure?:{error:unknown}):void{
   if(!isDebug())return;
-  console[record.ok?'info':'warn'](`[Kuai·${scope}] ${formatNetworkRecord(record)}`,record);
+  const failed=!!failure;
+  const message=`${summary.count} ${category==='网页'?'段':'条'} · ${details?.providerId||summary.providerId} · ${failed?debugFailure(failure!.error)+' · ':''}${duration(summary.durationMs)}`;
+  const label=debugLabel(category,message,failed),records=details?.network||[];
+  if(!records.length){console[failed?'warn':'info'](...label);return;}
+  // Console groups have no warning level; use the warning badge and reason on the header itself.
+  console.groupCollapsed(...label);
+  try{
+    for(const record of records)console.log({url:record.url,params:record.request!==null||record.sentBytes>0?record.request:record.query,result:record.response??record.error??null});
+  }finally{console.groupEnd();}
 }
 
-function batchRecords(scope:string,details?:NetworkDiagnostics):void {
-  for(const record of details?.network || [])debugNetworkRecord(record,scope.replace(/:batch$/,':http'));
+export function debugBatch(category:'网页'|'字幕',summary:BatchSummary,result?:NetworkDiagnostics):void{
+  batch(category,summary,result);
 }
 
-export function debugBatch(scope:string,message:string,result?:NetworkDiagnostics):void {
-  if(!isDebug())return;
-  debug(scope,message);batchRecords(scope,result);
-}
-
-export function debugBatchError(scope:string,message:string,error:unknown):void {
-  if(!isDebug())return;
-  const details=error && typeof error==='object'?error as NetworkDiagnostics:undefined;
-  debugError(scope,message,error);batchRecords(scope,details);
+export function debugBatchError(category:'网页'|'字幕',summary:BatchSummary,error:unknown):void{
+  batch(category,summary,error&&typeof error==='object'?error as NetworkDiagnostics:undefined,{error});
 }

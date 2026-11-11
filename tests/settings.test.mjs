@@ -389,26 +389,27 @@ test('page font defaults migrate once and preserve individually customized value
  }
 });
 
-test('debug mode defaults off, is public, and diagnostic state stays out of all backups',()=>{
-  assert.equal(defaultSettings().debugMode,false);
-  for(const input of [undefined,null,0,1,'true','false',{},[]])assert.equal(normalizeSettings({debugMode:input}).debugMode,false);
-  assert.equal(normalizeSettings({debugMode:true}).debugMode,true);
-  assert.equal(normalizeSettings({debugMode:false}).debugMode,false);
-  const current=defaultSettings();current.debugMode=true;
-  assert.equal(publicSettings(current).debugMode,true);
-  for(const includeSecrets of [false,true]){
-    const backup=exportSettings(current,{includeSecrets});assert.equal(backup.settings.debugMode,false);
-    assert.equal(current.debugMode,true,'export does not mutate live settings');
-    for(const enabled of [false,true]){
-      current.debugMode=enabled;backup.settings.debugMode=!enabled;
-      assert.equal(importSettings(backup,current).debugMode,enabled);
-      assert.equal(importSettings(backup.settings,current).debugMode,enabled);
-      assert.equal(importSettings({member_settings:'{"translationEngineConfig":{}}'},current).debugMode,enabled);
+test('diagnostic flags default off, normalize booleans, remain public, and never come from backups',()=>{
+  for(const key of ['debugMode','debugVerbose']){
+    assert.equal(defaultSettings()[key],false);
+    for(const input of [undefined,null,0,1,'true','false',{},[]])assert.equal(normalizeSettings({[key]:input})[key],false);
+    for(const enabled of [false,true])assert.equal(normalizeSettings({[key]:enabled})[key],enabled);
+    const current=defaultSettings();current[key]=true;
+    assert.equal(publicSettings(current)[key],true);
+    for(const includeSecrets of [false,true]){
+      const backup=exportSettings(current,{includeSecrets});assert.equal(backup.settings[key],false);
+      assert.equal(current[key],true,'export does not mutate live settings');
+      for(const enabled of [false,true]){
+        current[key]=enabled;backup.settings[key]=!enabled;
+        assert.equal(importSettings(backup,current)[key],enabled);
+        assert.equal(importSettings(backup.settings,current)[key],enabled);
+        assert.equal(importSettings({member_settings:'{"translationEngineConfig":{}}'},current)[key],enabled);
+      }
+      current[key]=true;
     }
-    current.debugMode=true;
-  }
-  delete current.debugMode;
-  for(const backup of [exportSettings(current),current,{member_settings:'{"translationEngineConfig":{}}'}]){
-    assert.equal(importSettings(backup,current).debugMode,false,'older settings without debugMode import as false');
+    delete current[key];
+    for(const backup of [exportSettings(current),current,{member_settings:'{"translationEngineConfig":{}}'}]){
+      assert.equal(importSettings(backup,current)[key],false,'older settings import as false');
+    }
   }
 });

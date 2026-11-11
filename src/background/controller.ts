@@ -95,7 +95,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     } catch { /* Tabs may close during a settings change. */ }
   }
   function publish(next:Settings) {
-    setDebug(next.debugMode);
+    setDebug(next.debugMode,next.debugVerbose);
     const encoded = JSON.stringify(next);
     if (encoded === serialized) return;
     const previousMenus=menuSignature();
@@ -119,11 +119,11 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
         await chromeApi.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
         const value = await chromeApi.storage.local.get(SETTINGS_KEY);
         try { settings = normalizeSettings(value[SETTINGS_KEY] ?? defaultSettings()); }
-        catch (error) { debugError('background:settings','读取设置失败',error);settings = defaultSettings(); } // Preserve malformed stored bytes until an explicit save.
-        setDebug(settings.debugMode);
+        catch (error) { debugError('设置','读取设置失败',error);settings = defaultSettings(); } // Preserve malformed stored bytes until an explicit save.
+        setDebug(settings.debugMode,settings.debugVerbose);
         serialized = JSON.stringify(settings);
         if (value[SETTINGS_KEY] === undefined) await chromeApi.storage.local.set({ [SETTINGS_KEY]: settings });
-      } catch (error) { debugError('background:storage','初始化存储失败',error);throw failure('STORAGE_UNAVAILABLE', 'Private extension storage could not be initialized. Reload the extension and retry.'); }
+      } catch (error) { debugError('后台','初始化存储失败',error);throw failure('STORAGE_UNAVAILABLE', 'Private extension storage could not be initialized. Reload the extension and retry.'); }
     })();
     // An idle worker may initialize before its first caller subscribes to ready.
     // A transient failure must not poison every later request in this worker.
@@ -272,7 +272,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
       }
       return { ok: true, value };
     } catch (error) {
-      debugError('background:message','后台消息处理失败',error);
+      debugError('后台','后台消息处理失败',error);
       return { ok: false, error: publicError(error),...(network && settings.debugMode?{network,...(providerId?{providerId}:{})}:{}) };
     }
   }
@@ -392,7 +392,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     // Read the current record, not a potentially delayed older change payload.
     initialize().then(() => chromeApi.storage.local.get(SETTINGS_KEY)).then(value => {
       if (!stopped && epoch === settingsEpoch && value[SETTINGS_KEY] !== undefined) publish(normalizeSettings(value[SETTINGS_KEY]));
-    }).catch(error => {debugError('background:settings','读取设置失败',error);});
+    }).catch(error => {debugError('设置','读取设置失败',error);});
   }
   function listen<T extends (...args:any[])=>void>(event:chrome.events.Event<T>|undefined, callback:T) {
     if (!event) return;

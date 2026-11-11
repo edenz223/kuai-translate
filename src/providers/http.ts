@@ -1,5 +1,5 @@
 import {isDebug} from '../shared/debug.js';
-import {debugNetworkRecord,networkRequest,sanitizeNetworkRecord} from '../shared/network-log.js';
+import {networkRequest,sanitizeNetworkRecord} from '../shared/network-log.js';
 import type {NetworkRecord} from '../shared/messages.js';
 export type NetworkObserver = (record:NetworkRecord)=>void;
 import { failure, TranslationError } from './errors.js';
@@ -58,7 +58,7 @@ export async function requestJSON(fetchImpl:typeof fetch, url:string|URL, option
     }
     // Snapshot synchronously: aborted transports may settle after the job returns.
     const snapshot=sanitizeNetworkRecord(record);
-    debugNetworkRecord(snapshot);onNetwork?.(snapshot);
+    onNetwork?.(snapshot);
   };
   const cancelled=new Promise<never>((_,reject)=>{rejectAbort=reject;});
   const abort=()=>{
@@ -110,7 +110,10 @@ export async function requestJSON(fetchImpl:typeof fetch, url:string|URL, option
     }
     if(recording)record.response=body;
     if(signal.aborted)throw signal.reason;
-    if(httpError)throw httpError;
+    if(httpError){
+      if(recording){try{record.response=JSON.parse(body);}catch{/* Keep the readable response text. */}}
+      throw httpError;
+    }
     let result;
     try {result=JSON.parse(body);}
     catch {throw failure('INVALID_RESPONSE', 'The translation service did not return valid JSON.');}

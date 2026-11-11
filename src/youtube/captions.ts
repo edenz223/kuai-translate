@@ -77,7 +77,7 @@ function xmlCues(body:string) {
 export function parseTimedText(input:unknown,options?:{kind?:string;groupPhrases?:boolean}):CaptionCue[] {
   const playback=(cues:CaptionCue[],input=cues.length)=>{
     const grouped=options?.groupPhrases&&options.kind!=='asr'?groupAuthoredCues(cues):cues;
-    debug('youtube:captions',`字幕合并：原始 ${input} 条 → ${grouped.length} 句（${options?.kind||'人工字幕'}）`,{kind:options?.kind,input,output:grouped.length});return grouped;
+    debug('字幕',`字幕合并：原始 ${input} 条 → ${grouped.length} 句（${options?.kind||'人工字幕'}）`,{kind:options?.kind,input,output:grouped.length});return grouped;
   };
   const json=(data:{events?:JsonCaptionEvent[]}|null)=>playback(jsonCues(data,options),data?.events?.filter(event=>Array.isArray(event.segs)).slice(0,60_000).length);
   if(input && typeof input==='object')return json(input as {events?:JsonCaptionEvent[]});

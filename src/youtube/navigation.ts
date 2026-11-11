@@ -11,7 +11,7 @@ export function navigationState(session:SubtitleSession,{words=subtitleWords(),s
   const reason=status==='disabled'?words.navDisabled:status==='captions-off'?words.navCaptionsOff:status==='live'?words.navLive:status==='failed'?words.failed:status==='none'?words.noCaptions:status!=='ready'?words.navWaiting:
     !Number.isFinite(video.duration)||video.duration<=0||!Number.isFinite(video.currentTime)?words.navUnseekable:'';
   const cues=state.subtitlesList||[];
-  if(diagnostic&&reason)debug('youtube:navigation',`字幕导航不可用：${status}，共 ${cues.length} 条`,{outcome:'unavailable',status,cues:cues.length});
+  if(diagnostic&&reason)debug('字幕',`字幕导航不可用：${status}，共 ${cues.length} 条`,{outcome:'unavailable',status,cues:cues.length});
   if(reason)return{previous:null,next:null,current:null,replay:false,reason};
   let low=0,high=cues.length;
   while(low<high){const middle=(low+high)>>>1;if(cues[middle].start<=video.currentTime)low=middle+1;else high=middle;}

@@ -466,16 +466,16 @@ test('the translation switch is a normalized, patchable player preference',async
 test('track diagnostics report Chinese choices once and keep render sync quiet',async t=>{
   const {setDebug}=await import('../dist/src/shared/debug.js');
   const calls=t.mock.method(console,'info',()=>{}),warnings=t.mock.method(console,'warn',()=>{}),h=setup();
-  t.after(()=>{h.manager.stop();setDebug(false);});setDebug(true);
+  t.after(()=>{h.manager.stop();setDebug(false);});setDebug(true,true);
   h.message({kind:'tracks',videoId:'abcdef12345',selectedLanguage:'en',tracks:[{...track('en'),kind:'asr'},track('es')]});
-  const selections=()=>calls.mock.calls.filter(call=>call.arguments[0].startsWith('[Kuai·youtube:tracks]'));
+  const selections=()=>calls.mock.calls.filter(call=>call.arguments[0].startsWith('[Kuai] %c字幕%c 字幕轨道：'));
   assert.equal(selections().length,1);
-  assert.equal(selections()[0].arguments[0],'[Kuai·youtube:tracks] 字幕轨道：共 2 条，已选 en（自动生成）');
+  assert.equal(selections()[0].arguments[0],'[Kuai] %c字幕%c 字幕轨道：共 2 条，已选 en（自动生成）');
   const count=calls.mock.callCount();for(let i=0;i<10;i++)h.manager.sync();
   assert.equal(calls.mock.callCount(),count,'unchanged track selection and render sync must stay quiet');
   h.message({kind:'tracks',videoId:'abcdef12345',tracks:[]});
   assert.equal(selections().length,2);
-  assert.equal(selections().at(-1).arguments[0],'[Kuai·youtube:tracks] 字幕轨道：未找到可用轨道');
+  assert.equal(selections().at(-1).arguments[0],'[Kuai] %c字幕%c 字幕轨道：未找到可用轨道');
   assert.equal(warnings.mock.callCount(),0);
   assert.ok(!JSON.stringify(calls.mock.calls.map(call=>call.arguments)).includes('baseUrl'));
 });

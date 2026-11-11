@@ -282,13 +282,19 @@ test('settings unsubscribe does not throw after the extension context is invalid
 
 test('translation diagnostics attach per-call payloads on success/failure only while debug is enabled',async t=>{
   const {setDebug}=await import('../dist/src/shared/debug.js');
-  t.mock.method(console,'info',()=>{});t.mock.method(console,'warn',()=>{});t.after(()=>setDebug(false));
-  for(const debugMode of [false,true])for(const status of [200,429]){
-    const stored=defaultSettings();stored.debugMode=debugMode;
+  const info=t.mock.method(console,'info',()=>{}),warn=t.mock.method(console,'warn',()=>{}),log=t.mock.method(console,'log',()=>{});t.after(()=>setDebug(false));
+  for(const debugMode of [false,true])for(const debugVerbose of [false,true])for(const status of [200,429]){
+    const stored=defaultSettings();stored.debugMode=debugMode;stored.debugVerbose=debugVerbose;
+    const before=[info.mock.callCount(),warn.mock.callCount()];
     const h=fixture({stored,fetchHook:async()=>status===200?Response.json([{translations:[{text:'你好'}]}]):new Response('Service busy',{status})});
     t.after(()=>h.controller.stop());await h.controller.ready;
     const answer=await h.controller.handleMessage({type:'KUAI_TRANSLATE',requestId:'diagnostics',texts:['Hello']},page);
     assert.equal(answer.ok,status===200);
+    if(status===200&&!debugVerbose)assert.equal(info.mock.callCount(),before[0]);
+    if(status===200||!debugMode)assert.equal(warn.mock.callCount(),before[1]);
+    else assert.ok(warn.mock.callCount()>before[1]);
+    assert.equal(log.mock.callCount(),0);
+    for(const call of info.mock.calls)assert.match(call.arguments[0],/^\[Kuai\] %c服务%c /);
     const result=answer.ok?answer.value:answer;
     assert.equal(Object.hasOwn(result,'network'),debugMode);
     if(debugMode){

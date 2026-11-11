@@ -68,7 +68,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     }
     if(loop&&!video.seeking){
       if(video.currentTime<loop.start-0.25||video.currentTime>loop.end+1)followLoop(video.currentTime);
-      else if(video.currentTime>=loop.end-0.05){try{video.currentTime=loop.start;}catch(error){debugError('youtube:seek','字幕跳转失败',error);}}
+      else if(video.currentTime>=loop.end-0.05){try{video.currentTime=loop.start;}catch(error){debugError('字幕','字幕跳转失败',error);}}
     }
     const time=video.currentTime,{active,first}=activeAt(time);
     const next=active.length?{start:active[0].start,end:Math.min(...active.map(item=>item.end)),original:active.map(item=>item.text).join('\n'),
@@ -122,11 +122,11 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
       const values=result?.translations;
       if(!Array.isArray(values)||values.length!==fragments.length||values.some(value=>typeof value!=='string'||!value.trim()))throw new Error(subtitleWords(getLanguage()).emptyTranslation);
-      debugBatch('youtube:batch',`字幕翻译批次完成：${cues.length} 条 · ${Date.now()-started} ms`,result);
+      debugBatch('字幕',{count:cues.length,providerId:providerId(),durationMs:Date.now()-started},result);
       cues.forEach((cue,index)=>{cue.translation=values.slice(...mapping[index]).join('');cue.status='success';});
       if(state.isLiveDomCaptions){const latest=cues.at(-1)!;liveSource={text:latest.text,translation:latest.translation!};carryLive(state.subtitlesList);}
     }).catch(error=>{
-      debugBatchError('youtube:batch',`字幕翻译批次失败：${cues.length} 条 · ${Date.now()-started} ms`,error);
+      debugBatchError('字幕',{count:cues.length,providerId:providerId(),durationMs:Date.now()-started},error);
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
       cues.forEach(cue=>{cue.status='error';cue.errorMessage=error?.message||subtitleWords(getLanguage()).translationFailed;});
     }).finally(()=>{
@@ -151,7 +151,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     else{invalidate();liveSource=null;livePendingSince=live?Date.now():null;liveChangedAt=livePendingSince||0;opening=!live;}
     state.isLiveDomCaptions=!!live;
     state.subtitlesList=(cues||[]).filter(cue=>Number.isFinite(cue.start)&&Number.isFinite(cue.end)&&cue.start>=0&&cue.end>cue.start&&typeof cue.text==='string'&&cue.text.trim()).map(cue=>({...cue,translation:cue.translation||'',status:cue.status||'pending'})).sort((a,b)=>a.start-b.start);
-    debug('youtube:session',`字幕载入：接收 ${cues?.length||0} 条，有效 ${state.subtitlesList.length} 条${live?'（直播）':''}`,{input:cues?.length||0,accepted:state.subtitlesList.length,live});
+    debug('字幕',`字幕载入：接收 ${cues?.length||0} 条，有效 ${state.subtitlesList.length} 条${live?'（直播）':''}`,{input:cues?.length||0,accepted:state.subtitlesList.length,live});
     if(rolling)carryLive(state.subtitlesList);
     state.errorMessage='';if(!state.isSubtitleSelectionHeld)state.currentCaption=null;notify();
   }
@@ -188,7 +188,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
   function seek(time:number) {
     if(!available()||!Number.isFinite(time)||time<0||!Number.isFinite(video.duration)||time>=video.duration)return false;
     if(video.seekable?.length){let found=false;for(let index=0;index<video.seekable.length;index++)if(time>=video.seekable.start(index)&&time<video.seekable.end(index))found=true;if(!found)return false;}
-    try{followLoop(time);video.currentTime=time;update();return true;}catch(error){debugError('youtube:seek','字幕跳转失败',error);return false;}
+    try{followLoop(time);video.currentTime=time;update();return true;}catch(error){debugError('字幕','字幕跳转失败',error);return false;}
   }
   function tick(){update();}
   function play(){clearInterval(timer!);timer=setInterval(tick,150);update();}

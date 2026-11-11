@@ -107,7 +107,7 @@ async function translateSplitting(p:ValidatedProvider, texts:string[], sourceLan
   catch (error) {
     const code = (error as {code?:string})?.code;
     if (!modelTypes.has(p.type) || texts.length < 2 || signal.aborted || (code !== 'INVALID_RESPONSE' && code !== 'INCOMPLETE_RESPONSE')) throw error;
-    debug('provider',`模型响应不完整，拆分重试：${texts.length} 条 → 2 批 (${code})`,{id:p.id,type:p.type,model:p.model,items:texts.length,code});
+    debug('服务',`模型响应不完整，拆分重试：${texts.length} 条 → 2 批 (${code})`,{id:p.id,type:p.type,model:p.model,items:texts.length,code});
     const middle = Math.ceil(texts.length / 2);
     const halves = await Promise.all([texts.slice(0, middle), texts.slice(middle)]
       .map(part => translateSplitting(p, part, sourceLanguage, targetLanguage, fetchImpl, signal, onNetwork)));
@@ -313,10 +313,10 @@ async function trace<T extends unknown[]>(provider:Partial<Provider>|null|undefi
   try{
     const result=await run();
     const durationMs=Date.now()-started,count=operation==='models'?`${result.length} 个模型`:`${meta.items} 条 / ${meta.characters} 字`;
-    debug('provider',`${label}成功：${service} · ${count} · ${durationMs} ms`,{...meta,...(operation==='models'?{models:result.length}:{}),durationMs,outcome:'success'});return result;
+    debug('服务',`${label}成功：${service} · ${count} · ${durationMs} ms`,{...meta,...(operation==='models'?{models:result.length}:{}),durationMs,outcome:'success'});return result;
   }catch(error){
     const durationMs=Date.now()-started;
-    debugError('provider',`${label}失败：${service}${operation==='models'?'':` · ${meta.items} 条 / ${meta.characters} 字`} · ${durationMs} ms`,error,{...meta,durationMs,outcome:'error'});
+    debugError('服务',`${label}失败：${service}${operation==='models'?'':` · ${meta.items} 条 / ${meta.characters} 字`} · ${durationMs} ms`,error,{...meta,durationMs,outcome:'error'});
     throw error;
   }
 }

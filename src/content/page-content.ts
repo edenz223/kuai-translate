@@ -117,7 +117,7 @@ export function renderPageContent(output: HTMLElement,content: PageContent,parts
     const binding={source:run.anchor,node,output,valid,document,env};syncLink(binding,document,env);bindings.push(binding);
   }
   return bindings;
-  }catch(error){debugError('page:content','渲染译文失败',error);throw error;}
+  }catch(error){debugError('网页','渲染译文失败',error);throw error;}
 }
 export function refreshPageLinks(bindings: readonly PageLinkBinding[] | null | undefined,document: Document,env: BrowserEnvironment): void{for(const binding of bindings||[])syncLink(binding,document,env);}
 
