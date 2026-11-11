@@ -9,7 +9,15 @@ export interface TranslationOptions {
   signal?: AbortSignal; requestId?: string; providerId?: string;
   sourceLanguage?: string; targetLanguage?: string;
 }
-export interface TranslationResult { translations: string[]; providerId: string }
+/** Secrets-only, bounded snapshots. Request headers are never recorded. */
+export interface NetworkRecord {
+  method: string; url: string; query: unknown; request: unknown;
+  status: number | string; ok: boolean; response: unknown;
+  sentBytes: number; receivedBytes: number; durationMs: number;
+  error?: {code: string; message: string};
+}
+export interface NetworkDiagnostics {network?: NetworkRecord[]; providerId?: string}
+export interface TranslationResult extends NetworkDiagnostics { translations: string[]; providerId: string }
 export type Translate = (texts: string[], options?: TranslationOptions) => Promise<TranslationResult>;
 export type PreferencePatch = Partial<Pick<Settings,
   'subtitlesEnabled' | 'subtitleTranslationEnabled' | 'subtitleProviderId' | 'subtitleTargetLanguage' | 'subtitleTrackPreference' | 'subtitleListOpen' | 'subtitleShortcuts'>> &
@@ -42,7 +50,7 @@ export type RequestType = keyof RequestPayloadMap;
 export type RequestPayload<T extends RequestType> = RequestPayloadMap[T];
 export type BackgroundRequest = {[K in RequestType]: {type: K} & RequestPayloadMap[K]}[RequestType];
 export interface PublicFailure {code: string; message: string}
-export type MessageResponse<T> = {ok: true; value: T} | {ok: false; error: PublicFailure};
+export type MessageResponse<T> = {ok: true; value: T} | ({ok: false; error: PublicFailure} & NetworkDiagnostics);
 export type BackgroundResponse = MessageResponse<RequestResultMap[RequestType]>;
 export type PageActionType = 'KUAI_PAGE_TRANSLATE' | 'KUAI_PAGE_RESTORE' | 'KUAI_SELECTION_TRANSLATE' |
   'KUAI_INPUT_TRANSLATE' | 'KUAI_PAGE_STATUS' | 'KUAI_YOUTUBE_OPEN_LIST' | 'KUAI_PAGE_TOGGLE' | 'KUAI_PAGE_DISPLAY_MODE';

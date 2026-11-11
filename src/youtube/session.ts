@@ -1,4 +1,5 @@
-import {debug} from '../shared/debug.js';
+import {debugBatch,debugBatchError} from '../shared/network-log.js';
+import {debug,debugError} from '../shared/debug.js';
 import type {Settings} from '../shared/settings.js';
 import type {SubtitleSession,SubtitleState,CaptionCue,TranslateSubtitles} from './types.js';
 import {subtitleWords} from './i18n.js';
@@ -8,6 +9,8 @@ interface TranslationJob {revision:number;controller:AbortController;promise?:Pr
 const LIVE_SETTLE_MS=700,LIVE_MAX_WAIT_MS=3000,OVERLAP_SCAN=8;
 // The first request of a timeline is small so the opening sentences come back quickly.
 const BATCH=8,OPENING_BATCH=3;
+// Trigger near playback, then fill farther ahead to avoid one request per line.
+const TRIGGER=15,PREFETCH=60;
 const lastLine=(text:string)=>text.split('\n').map(line=>line.trim()).filter(Boolean).at(-1)||'';
 const continuesText=(previous:string,next:string)=>{const line=lastLine(previous);return !!line&&(next.startsWith(previous)||next.includes(line));};
 /** Framework-independent subtitle state and translation scheduling. */
@@ -65,7 +68,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     }
     if(loop&&!video.seeking){
       if(video.currentTime<loop.start-0.25||video.currentTime>loop.end+1)followLoop(video.currentTime);
-      else if(video.currentTime>=loop.end-0.05){try{video.currentTime=loop.start;}catch(error){debug('youtube:seek','error',error);}}
+      else if(video.currentTime>=loop.end-0.05){try{video.currentTime=loop.start;}catch(error){debugError('youtube:seek','字幕跳转失败',error);}}
     }
     const time=video.currentTime,{active,first}=activeAt(time);
     const next=active.length?{start:active[0].start,end:Math.min(...active.map(item=>item.end)),original:active.map(item=>item.text).join('\n'),
@@ -75,13 +78,15 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     if(JSON.stringify(next)!==JSON.stringify(state.currentCaption)){state.currentCaption=next;notify();}
     if(!running && !video.seeking && translating() && !liveWaiting()) {
       const pending=pendingFrom(time,first);
-      if(pending.length)translateCues(pending);
+      if(pending.length)translateCues(opening||state.isLiveDomCaptions?pending:pendingFrom(time,first,PREFETCH));
     }
   }
-  function pendingFrom(time:number,first=activeAt(time).first) {
+  function pendingFrom(time:number,first=activeAt(time).first,lookahead=TRIGGER) {
     const pending=[];
     for(let index=first;index<state.subtitlesList.length;index++){
-      const item=state.subtitlesList[index];if(item.start>time+15)break;
+      const item=state.subtitlesList[index];if(item.start>time+lookahead)break;
+      // A sentence loop only needs cues that begin before its end.
+      if(loop&&item.start>=loop.end)break;
       if(item.end>time&&item.status==='pending')pending.push(item);
       if(pending.length===BATCH)break;
     }
@@ -112,14 +117,16 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
       mapping.push([start,fragments.length]);cue.status='translating';cue.errorMessage='';
     }
     const job:TranslationJob={revision,controller:new AbortController()};running=job;opening=false;if(state.isLiveDomCaptions)livePendingSince=null;notify();
+    const started=Date.now();
     job.promise=Promise.resolve().then(()=>translate(fragments,{providerId:providerId(),sourceLanguage:config.sourceLanguage,targetLanguage:targetLanguage(),signal:job.controller.signal})).then(result=>{
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
       const values=result?.translations;
       if(!Array.isArray(values)||values.length!==fragments.length||values.some(value=>typeof value!=='string'||!value.trim()))throw new Error(subtitleWords(getLanguage()).emptyTranslation);
+      debugBatch('youtube:batch',`字幕翻译批次完成：${cues.length} 条 · ${Date.now()-started} ms`,result);
       cues.forEach((cue,index)=>{cue.translation=values.slice(...mapping[index]).join('');cue.status='success';});
       if(state.isLiveDomCaptions){const latest=cues.at(-1)!;liveSource={text:latest.text,translation:latest.translation!};carryLive(state.subtitlesList);}
     }).catch(error=>{
-      debug('youtube:session','error',error);
+      debugBatchError('youtube:batch',`字幕翻译批次失败：${cues.length} 条 · ${Date.now()-started} ms`,error);
       if(destroyed||job.revision!==revision||job.controller.signal.aborted)return;
       cues.forEach(cue=>{cue.status='error';cue.errorMessage=error?.message||subtitleWords(getLanguage()).translationFailed;});
     }).finally(()=>{
@@ -144,7 +151,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
     else{invalidate();liveSource=null;livePendingSince=live?Date.now():null;liveChangedAt=livePendingSince||0;opening=!live;}
     state.isLiveDomCaptions=!!live;
     state.subtitlesList=(cues||[]).filter(cue=>Number.isFinite(cue.start)&&Number.isFinite(cue.end)&&cue.start>=0&&cue.end>cue.start&&typeof cue.text==='string'&&cue.text.trim()).map(cue=>({...cue,translation:cue.translation||'',status:cue.status||'pending'})).sort((a,b)=>a.start-b.start);
-    debug('youtube:session','cues',{input:cues?.length||0,accepted:state.subtitlesList.length,live});
+    debug('youtube:session',`字幕载入：接收 ${cues?.length||0} 条，有效 ${state.subtitlesList.length} 条${live?'（直播）':''}`,{input:cues?.length||0,accepted:state.subtitlesList.length,live});
     if(rolling)carryLive(state.subtitlesList);
     state.errorMessage='';if(!state.isSubtitleSelectionHeld)state.currentCaption=null;notify();
   }
@@ -181,7 +188,7 @@ export function createSubtitleSession({id,video,settings,translate,onChange=()=>
   function seek(time:number) {
     if(!available()||!Number.isFinite(time)||time<0||!Number.isFinite(video.duration)||time>=video.duration)return false;
     if(video.seekable?.length){let found=false;for(let index=0;index<video.seekable.length;index++)if(time>=video.seekable.start(index)&&time<video.seekable.end(index))found=true;if(!found)return false;}
-    try{followLoop(time);video.currentTime=time;update();return true;}catch(error){debug('youtube:seek','error',error);return false;}
+    try{followLoop(time);video.currentTime=time;update();return true;}catch(error){debugError('youtube:seek','字幕跳转失败',error);return false;}
   }
   function tick(){update();}
   function play(){clearInterval(timer!);timer=setInterval(tick,150);update();}

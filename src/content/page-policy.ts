@@ -1,4 +1,4 @@
-import {debug} from '../shared/debug.js';
+import {debug,debugError} from '../shared/debug.js';
 import type {Settings} from '../shared/settings.js';
 import type {BrowserEnvironment,PageBlock} from './dom.js';
 
@@ -6,6 +6,16 @@ import {ancestors,collectBlocks,configurationKey,isBlock,isNonLanguageText} from
 import {normalizeInteractionOptions,isSiteListed} from '../shared/interactions.js';
 
 const options=(settings: Partial<Settings>)=>normalizeInteractionOptions(settings,settings.providers).pageOptions;
+const skipLabels:Record<string,string>={
+  'non-language-or-detached':'非文本或已移除','min-length':'长度不足',language:'不翻译的语言','page-area':'页脚区域',
+  selector:'排除选择器','site-rule':'网址规则','duplicate-or-invalid':'重复或无效',unreadable:'不可见','source-changed':'原文已变化',
+};
+/** One aggregate per collection/policy pass, never one line per DOM node. */
+export function reportPageCollection(scope:string,collected:number,selected:number,reasons:Record<string,number>,blocked=false,label='网页收集'):void{
+  const skipped=Object.values(reasons).reduce((sum,count)=>sum+count,0);
+  const explanation=Object.entries(reasons).filter(([,count])=>count>0).map(([reason,count])=>`${skipLabels[reason]||'其他'} ${count}`).join('、');
+  debug(scope,blocked?'当前网址命中不翻译规则，跳过整页翻译':`${label}：候选 ${collected} 段，翻译 ${selected} 段，跳过 ${skipped} 段${skipped?`（${explanation}）`:''}`,{collected,selected,skipped,reasons});
+}
 function language(value: unknown): string{
   if(typeof value!=='string'||value.length>32)return '';
   const code=value.trim().replace(/_/g,'-').toLowerCase();
@@ -35,8 +45,8 @@ export function detectTextLanguage(text: string,element: HTMLElement,env: Browse
       Promise.resolve(i18n.detectLanguage(String(text).slice(0,4096))).then(result=>{
         const item=result?.isReliable&&Array.isArray(result.languages)?result.languages.filter(item=>Number(item.percentage)>=70).sort((a,b)=>b.percentage-a.percentage)[0]:null;
         finish(language(item?.language));
-      },error=>{debug('page:language','error',error);finish('');});
-    }catch(error){debug('page:language','error',error);finish('');}
+      },error=>{debugError('page:language','检测网页语言失败',error);finish('');});
+    }catch(error){debugError('page:language','检测网页语言失败',error);finish('');}
   });
 }
 
@@ -78,7 +88,8 @@ export function filterPageBlocks(blocks: PageBlock[],settings: Settings,{env=glo
   const value=options(settings),blocked=isSiteListed(url,value.neverSites),skips:Record<string,number>={};
   const skip=(reason:string)=>{skips[reason]=(skips[reason]||0)+1;};
   const filtered=blocks.filter(block=>{const reason=blocked?'site-rule':blockSkipReason(block,value,env);if(reason)skip(reason);return !reason;});
-  const finish=(selected:PageBlock[])=>{debug('page:policy','pass',{collected:blocks.length,selected:selected.length,skipped:blocks.length-selected.length,reasons:skips});return selected;};
+  // The collection pass already logged; this recheck speaks only when it drops more blocks.
+  const finish=(selected:PageBlock[])=>{if(selected.length<blocks.length)reportPageCollection('page:policy',blocks.length,selected.length,skips,blocked,'翻译前复核');return selected;};
   if(blocked||!value.neverLanguages.length)return finish(filtered);
   return Promise.all(filtered.map(async block=>({block,code:await detectTextLanguage(block.text,block.element,env)})))
     .then(items=>finish(items.filter(item=>{const reason=languageListed(item.code,value.neverLanguages)?'language':pageBlockSkipReason(item.block,settings,{env,url});if(reason)skip(reason);return !reason;}).map(item=>item.block)));

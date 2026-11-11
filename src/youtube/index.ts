@@ -1,4 +1,4 @@
-import {debug,setDebug} from '../shared/debug.js';
+import {debug,debugError,setDebug} from '../shared/debug.js';
 import type {Settings} from '../shared/settings.js';
 import type {CaptionCue,CaptionTrack,SubtitleSession,SubtitleBridge,TranslateSubtitles,SettingsPatch} from './types.js';
 export interface YouTubeControllerOptions {
@@ -102,7 +102,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     // A previous empty response must not block the newly usable URL.
     if(record.track?.id===selected?.id&&record.track?.baseUrl!==selected?.baseUrl){clearPending(record);record.failedTrack='';}
     const selectionKey=JSON.stringify([tracks.length,selected?.id,selected?.languageCode,selected?.kind]);
-    if(record.selectionKey!==selectionKey)debug('youtube:tracks','selection',{available:tracks.length,language:selected?.languageCode,kind:selected?.kind,outcome:selected?'selected':'none'});
+    if(record.selectionKey!==selectionKey)debug('youtube:tracks',selected?`字幕轨道：共 ${tracks.length} 条，已选 ${selected.languageCode}（${selected.kind==='asr'?'自动生成':'人工字幕'}）`:'字幕轨道：未找到可用轨道',{available:tracks.length,language:selected?.languageCode,kind:selected?.kind,outcome:selected?'selected':'none'});
     record.selectionKey=selectionKey;
     record.tracks=tracks;record.track=selected;
     const none=metadata?.videoId===record.videoId&&!tracks.length;
@@ -137,7 +137,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
         const cues=Array.from(track.cues).map(cue=>{const text=(cue as VTTCue).text,voice=captionVoice(text);return{start:cue.startTime,end:cue.endTime,text:captionText(text),...(voice?{voice}:{})};});
         const live=liveVideo(record);installCues(record,live?cues:groupAuthoredCues(cues),'native:'+track.language,{live});return;
       }
-    }catch(error){debug('youtube:captions','error',error);}
+    }catch(error){debugError('youtube:captions','读取字幕失败',error);}
     const player=record.session.video.closest?.('.html5-video-player');
     const text=Array.from(player?.querySelectorAll<HTMLElement>('.ytp-caption-segment')||[]).map(node=>node.textContent).join('\n').trim();
     if(text===record.domText)return;record.domText=text;
@@ -216,7 +216,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
   function sync() {
     if(stopped||Date.now()<navigateUntil)return;
     const id=videoIdFromUrl(env.location.href);
-    if(id!==lastVideoId){debug('youtube:navigation','reset',{reason:'video-change'});clear();if(metadata?.videoId!==id)metadata=null;lastVideoId=id;}
+    if(id!==lastVideoId){debug('youtube:navigation','切换视频，重置字幕状态');clear();if(metadata?.videoId!==id)metadata=null;lastVideoId=id;}
     if(!id){clear();return;}
     let record:YouTubeRecord|null|undefined=currentRecord();const video=pickVideo(record?.session.video);
     if(record&&(record.session.video!==video||!record.session.video.isConnected)){remove(record);record=null;}
@@ -257,7 +257,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
         if(!data.requestId&&!record.track)record.capturedTrack=responseTrack;
         record.failedTrack='';record.session.state.errorMessage='';installCues(record,cues,trackId,{live:liveVideo(record)});return;
       }
-    }catch(error){debug('youtube:captions','error',error);}
+    }catch(error){debugError('youtube:captions','读取字幕失败',error);}
     // Empty/unreadable caption bodies can arrive before the first caption.
     // Keep the video silent and retain native fallback cues; only a requested
     // track that came back empty marks the timeline as failed for the list.
@@ -284,7 +284,7 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     try{
       const handled=action==='loop'?toggleLoop(record):navigate(record,action==='previous'?-1:action==='replay'?0:1);
       if(handled){event.preventDefault();event.stopPropagation();}
-    }catch(error){debug('youtube:navigation','error',error);record.view.reportError?.(error);}
+    }catch(error){debugError('youtube:navigation','字幕导航失败',error);record.view.reportError?.(error);}
   }
   function openSidebar(){sync();const record=currentRecord();if(!record||!sidebar)return false;sidebar.sync();return sidebar.toggle(record.session.id,true);}
   function listen(target:EventTarget,type:string,fn:BrowserEventCallback,capture=false){target.addEventListener(type,fn,capture);listeners.push(()=>target.removeEventListener(type,fn,capture));}
@@ -295,13 +295,13 @@ export function createYouTubeController({settings,subscribeSettings,translate,up
     sidebar=createSidebar(bridge,env);selection=createSelection(bridge,env);sidebar.start();selection.start();
     listen(env,'message',onData);listen(env,'popstate',sync);listen(env,'pageshow',sync);
     listen(env,'pagehide',event=>{if(!event.persisted)stop();});
-    listen(doc,'yt-navigate-start',()=>{debug('youtube:navigation','reset',{reason:'navigate-start'});navigateUntil=Date.now()+1500;clear();metadata=null;lastVideoId='';});
+    listen(doc,'yt-navigate-start',()=>{debug('youtube:navigation','开始页面跳转，重置字幕状态');navigateUntil=Date.now()+1500;clear();metadata=null;lastVideoId='';});
     listen(doc,'yt-navigate-finish',()=>{navigateUntil=0;sync();post({kind:'request-tracks'});});
     listen(doc,'visibilitychange',()=>{if(doc.visibilityState!=='hidden')sync();});
     listen(doc,'keydown',keydown,true);
     if(env.MutationObserver){observer=new env.MutationObserver(schedule);observer.observe(doc.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['aria-pressed']});}
     poll=env.setInterval(sync,1000);unsubscribe=subscribeSettings?.(updateSettings);sync();post({kind:'request-tracks'});return controller;
-    }catch(error){debug('youtube:init','error',error);stop();throw error;}
+    }catch(error){debugError('youtube:init','初始化字幕失败',error);stop();throw error;}
   }
   function stop(){if(stopped)return;stopped=true;unsubscribe?.();observer?.disconnect();if(poll!==null)env.clearInterval(poll);if(scheduled!==null)env.clearTimeout(scheduled);listeners.splice(0).forEach(dispose=>dispose());selection?.stop();sidebar?.stop();clear();subscribers.clear();}
   const controller={start,stop,sync,updateSettings,openSidebar};return controller;

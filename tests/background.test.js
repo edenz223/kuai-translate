@@ -10,7 +10,7 @@ const extensionId='kuai-extension';
 const page={id:extensionId,url:'https://example.com/article',tab:{id:4},frameId:0,documentId:'document-a'};
 const options={id:extensionId,url:'chrome-extension://'+extensionId+'/options.html',documentId:'options-a'};
 function event(){const callbacks=new Set();return {addListener:fn=>callbacks.add(fn),removeListener:fn=>callbacks.delete(fn),emit:(...args)=>{for(const fn of callbacks)fn(...args);},get size(){return callbacks.size;}};}
-function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenuHook,createMenuHook,tabs={}}={}){
+function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenuHook,createMenuHook,tabs={},fetchHook}={}){
   let data=structuredClone(stored);const access=[],writes=[],broadcasts=[],menus=[],menuCalls=[],menuUpdates=[],created=[],requests=[],badges=[];
   const changed=event();
   const chromeApi={
@@ -29,7 +29,7 @@ function fixture({stored=defaultSettings(),getHook,setHook,accessHook,removeMenu
       create:(menu,callback)=>{menuCalls.push(menu.id);if(createMenuHook)Promise.resolve(createMenuHook(menu)).then(()=>{menus.push(menu);callback?.();});else{menus.push(menu);callback?.();}return menu.id;}},
   };
   const fetchImpl=async(url,init)=>{requests.push({url,init});const texts=JSON.parse(init.body);return Response.json(texts.map(text=>({translations:[{text:'译文:'+text}]})));};
-  const controller=createBackground({chromeApi,fetchImpl}).start();
+  const controller=createBackground({chromeApi,fetchImpl:fetchHook || fetchImpl}).start();
   return {controller,chromeApi,access,writes,broadcasts,menus,menuCalls,menuUpdates,created,requests,badges,get data(){return data;}};
 }
 async function flush(){for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));}
@@ -278,4 +278,52 @@ test('settings unsubscribe does not throw after the extension context is invalid
   assert.equal(listeners.size,1);
   delete chromeApi.runtime;
   assert.doesNotThrow(unsubscribe);
+});
+
+test('translation diagnostics attach per-call payloads on success/failure only while debug is enabled',async t=>{
+  const {setDebug}=await import('../dist/src/shared/debug.js');
+  t.mock.method(console,'info',()=>{});t.mock.method(console,'warn',()=>{});t.after(()=>setDebug(false));
+  for(const debugMode of [false,true])for(const status of [200,429]){
+    const stored=defaultSettings();stored.debugMode=debugMode;
+    const h=fixture({stored,fetchHook:async()=>status===200?Response.json([{translations:[{text:'你好'}]}]):new Response('Service busy',{status})});
+    t.after(()=>h.controller.stop());await h.controller.ready;
+    const answer=await h.controller.handleMessage({type:'KUAI_TRANSLATE',requestId:'diagnostics',texts:['Hello']},page);
+    assert.equal(answer.ok,status===200);
+    const result=answer.ok?answer.value:answer;
+    assert.equal(Object.hasOwn(result,'network'),debugMode);
+    if(debugMode){
+      assert.equal(result.network.length,1);const [record]=result.network;
+      assert.equal(record.method,'POST');assert.match(record.url,/edge.microsoft.com\/translate\/translatetext/);
+      assert.equal(record.query.to,'zh-Hans');assert.deepEqual(record.request,['Hello']);
+      assert.equal(record.status,status);assert.equal(record.ok,status===200);assert.equal('headers' in record,false);
+      assert.deepEqual(record.response,status===200?[{translations:[{text:'你好'}]}]:'Service busy');
+    }else if(answer.ok)assert.deepEqual(answer,{ok:true,value:{translations:['你好'],providerId:'microsoft'}});
+    else assert.deepEqual(answer,{ok:false,error:{code:'HTTP_429',message:'The translation service returned HTTP 429. Check its configuration or retry later.'}});
+    h.controller.stop();
+  }
+});
+
+test('overlapping translation jobs keep separate collectors, including several HTTP calls per job',async t=>{
+  const {setDebug}=await import('../dist/src/shared/debug.js');
+  t.mock.method(console,'info',()=>{});t.mock.method(console,'warn',()=>{});t.after(()=>setDebug(false));
+  const stored=defaultSettings();stored.debugMode=true;stored.activeProviderId='google';
+  const pending=new Map();
+  const h=fixture({stored,fetchHook:url=>new Promise(resolve=>pending.set(new URL(url).searchParams.get('q'),resolve))});
+  t.after(()=>h.controller.stop());await h.controller.ready;
+  const a=h.controller.handleMessage({type:'KUAI_TRANSLATE',requestId:'concurrent-a',texts:['Alpha','Beta']},page);
+  const b=h.controller.handleMessage({type:'KUAI_TRANSLATE',requestId:'concurrent-b',texts:['Gamma','Delta']},page);
+  await flush();assert.equal(pending.size,4);
+  for(const text of ['Delta','Beta','Gamma','Alpha'])pending.get(text)(Response.json([[[text+' translated',text]]]));
+  const [first,second]=await Promise.all([a,b]);assert.equal(first.ok,true);assert.equal(second.ok,true);
+  assert.deepEqual(first.value.network.map(record=>record.query.q).sort(),['Alpha','Beta']);
+  assert.deepEqual(second.value.network.map(record=>record.query.q).sort(),['Delta','Gamma']);
+  assert.deepEqual(first.value.translations,['Alpha translated','Beta translated']);
+  assert.deepEqual(second.value.translations,['Gamma translated','Delta translated']);
+});
+
+test('request client preserves failure network objects for content batch logging',async()=>{
+  const network=[{method:'GET',url:'https://api.example/translate',query:{q:'Hello'},request:null,status:503,ok:false,response:'Unavailable',sentBytes:0,receivedBytes:11,durationMs:10,error:{code:'HTTP_503',message:'Unavailable'}}];
+  await assert.rejects(request('KUAI_TRANSLATE',{requestId:'failed',texts:['Hello']},{runtime:{sendMessage:async()=>({ok:false,error:{code:'HTTP_503',message:'Unavailable'},network,providerId:'google'})}}),error=>{
+    assert.equal(error.code,'HTTP_503');assert.equal(error.providerId,'google');assert.deepEqual(error.network,network);return true;
+  });
 });

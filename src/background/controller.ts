@@ -1,6 +1,6 @@
-import {debug,setDebug} from '../shared/debug.js';
+import {debugError,setDebug} from '../shared/debug.js';
 import type {Settings,Provider} from '../shared/settings.js';
-import type {BackgroundRequest, BackgroundResponse, PageActionType, PageBadgeState, PageRequest, SettingsChanged} from '../shared/messages.js';
+import type {BackgroundRequest, BackgroundResponse, NetworkRecord, PageActionType, PageBadgeState, PageRequest, SettingsChanged} from '../shared/messages.js';
 import type {SiteRule} from '../shared/site-rules.js';
 interface Owner {trusted:boolean;scope:string;tabId?:number;frameId?:number;documentId:string}
 interface TranslationJob {owner:Owner;controller:AbortController;savedProviderId:string;providerIdentity:string;
@@ -119,11 +119,11 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
         await chromeApi.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
         const value = await chromeApi.storage.local.get(SETTINGS_KEY);
         try { settings = normalizeSettings(value[SETTINGS_KEY] ?? defaultSettings()); }
-        catch (error) { debug('background:settings','error',error);settings = defaultSettings(); } // Preserve malformed stored bytes until an explicit save.
+        catch (error) { debugError('background:settings','读取设置失败',error);settings = defaultSettings(); } // Preserve malformed stored bytes until an explicit save.
         setDebug(settings.debugMode);
         serialized = JSON.stringify(settings);
         if (value[SETTINGS_KEY] === undefined) await chromeApi.storage.local.set({ [SETTINGS_KEY]: settings });
-      } catch (error) { debug('background:storage','error',error);throw failure('STORAGE_UNAVAILABLE', 'Private extension storage could not be initialized. Reload the extension and retry.'); }
+      } catch (error) { debugError('background:storage','初始化存储失败',error);throw failure('STORAGE_UNAVAILABLE', 'Private extension storage could not be initialized. Reload the extension and retry.'); }
     })();
     // An idle worker may initialize before its first caller subscribes to ready.
     // A transient failure must not poison every later request in this worker.
@@ -194,7 +194,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     await chromeApi.tabs.create({url:chromeApi.runtime.getURL('options.html')+'#'+section});
     return {opened:true,section};
   }
-  async function providerRequest(owner:Owner, requestId:unknown, provider:Provider, message:{texts:string[];providerId?:string;sourceLanguage?:string;targetLanguage?:string}, savedProvider=false, models=false) {
+  async function providerRequest(owner:Owner, requestId:unknown, provider:Provider, message:{texts:string[];providerId?:string;sourceLanguage?:string;targetLanguage?:string}, savedProvider=false, models=false, network?:NetworkRecord[]) {
     const key = requestKey(owner, requestId);
     if (jobs.has(key)) throw failure('DUPLICATE_REQUEST', 'This translation request is already running.');
     if (jobs.size >= 64 || Array.from(jobs.values()).filter(job => job.owner.scope === owner.scope).length >= 12)
@@ -209,6 +209,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     try {
       const options = {
         signal: job.controller.signal, fetchImpl, timeoutMs,
+        onNetwork:network?(record:NetworkRecord)=>{network.push(record);}:undefined,
       };
       if(models)return await listProviderModels(provider,options);
       const translations = await translateWithProvider(provider, {
@@ -220,6 +221,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     } finally { if (jobs.get(key) === job) jobs.delete(key); }
   }
   async function handleMessage(message:BackgroundRequest, sender:chrome.runtime.MessageSender):Promise<BackgroundResponse> {
+    let network:NetworkRecord[]|undefined,providerId:string|undefined;
     try {
       if (stopped) throw failure('CANCELLED', 'The extension worker has stopped. Retry the request.');
       const owner = identify(sender);
@@ -259,14 +261,20 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
           });
           break;
         case 'KUAI_TRANSLATE': {
+          if(settings.debugMode)network=[];
           const id = !message.providerId || message.providerId === 'follow_page' ? settings.activeProviderId : message.providerId;
           const provider = settings.providers.find(item => item.id === id && item.enabled);
           if (!provider) throw failure('INVALID_CONFIG', 'Select an enabled translation service in the extension settings.');
-          value = await providerRequest(owner, message.requestId, provider, message, true); break;
+          providerId=provider.id || provider.type;
+          const result = await providerRequest(owner, message.requestId, provider, message, true, false, network);
+          value = network && settings.debugMode ? {...result,network} : result; break;
         }
       }
       return { ok: true, value };
-    } catch (error) { debug('background:message','error',error);return { ok: false, error: publicError(error) }; }
+    } catch (error) {
+      debugError('background:message','后台消息处理失败',error);
+      return { ok: false, error: publicError(error),...(network && settings.debugMode?{network,...(providerId?{providerId}:{})}:{}) };
+    }
   }
   function onMessage(message:BackgroundRequest, sender:chrome.runtime.MessageSender, respond:(response:BackgroundResponse)=>void) {
     if (!messageTypes.has(message?.type)) return false;
@@ -384,7 +392,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     // Read the current record, not a potentially delayed older change payload.
     initialize().then(() => chromeApi.storage.local.get(SETTINGS_KEY)).then(value => {
       if (!stopped && epoch === settingsEpoch && value[SETTINGS_KEY] !== undefined) publish(normalizeSettings(value[SETTINGS_KEY]));
-    }).catch(error => {debug('background:settings','error',error);});
+    }).catch(error => {debugError('background:settings','读取设置失败',error);});
   }
   function listen<T extends (...args:any[])=>void>(event:chrome.events.Event<T>|undefined, callback:T) {
     if (!event) return;

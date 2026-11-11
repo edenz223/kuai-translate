@@ -1,9 +1,9 @@
-import {debug} from '../shared/debug.js';
+import {debug,debugError} from '../shared/debug.js';
 import { PROMPT_LIMIT, type Provider } from '../shared/settings.js';
 interface ValidatedProvider {id:string;type:string;apiKey?:string;baseUrl?:string;model?:string;region?:string;temperature?:number|null;systemPrompt?:string;userPrompt?:string}
-interface ProviderOptions {texts?:string[];sourceLanguage?:string;targetLanguage?:string;signal?:AbortSignal;fetchImpl?:typeof fetch;timeoutMs?:number}
+interface ProviderOptions {texts?:string[];sourceLanguage?:string;targetLanguage?:string;signal?:AbortSignal;fetchImpl?:typeof fetch;timeoutMs?:number;onNetwork?:NetworkObserver}
 import { failure } from './errors.js';
-import { requestJSON, withRequestLifetime } from './http.js';
+import { requestJSON, withRequestLifetime, type NetworkObserver } from './http.js';
 
 export { TranslationError, publicError } from './errors.js';
 export const REQUEST_LIMITS = Object.freeze({ items: 64, textCharacters: 5000, totalCharacters: 50000 });
@@ -102,23 +102,23 @@ async function mapLimited<T,R>(items:T[], fn:(item:T,index:number)=>Promise<R>, 
 
 // Models sometimes merge sentence fragments (common in subtitles) or cut a long answer short.
 // Re-request such a batch in halves so one bad answer does not fail every paragraph in it.
-async function translateSplitting(p:ValidatedProvider, texts:string[], sourceLanguage:string, targetLanguage:string, fetchImpl:typeof fetch, signal:AbortSignal):Promise<string[]> {
-  try { return await translateBatch(p, texts, sourceLanguage, targetLanguage, fetchImpl, signal); }
+async function translateSplitting(p:ValidatedProvider, texts:string[], sourceLanguage:string, targetLanguage:string, fetchImpl:typeof fetch, signal:AbortSignal, onNetwork?:NetworkObserver):Promise<string[]> {
+  try { return await translateBatch(p, texts, sourceLanguage, targetLanguage, fetchImpl, signal, onNetwork); }
   catch (error) {
     const code = (error as {code?:string})?.code;
     if (!modelTypes.has(p.type) || texts.length < 2 || signal.aborted || (code !== 'INVALID_RESPONSE' && code !== 'INCOMPLETE_RESPONSE')) throw error;
-    debug('provider','retry',{id:p.id,type:p.type,model:p.model,items:texts.length,code});
+    debug('provider',`模型响应不完整，拆分重试：${texts.length} 条 → 2 批 (${code})`,{id:p.id,type:p.type,model:p.model,items:texts.length,code});
     const middle = Math.ceil(texts.length / 2);
     const halves = await Promise.all([texts.slice(0, middle), texts.slice(middle)]
-      .map(part => translateSplitting(p, part, sourceLanguage, targetLanguage, fetchImpl, signal)));
+      .map(part => translateSplitting(p, part, sourceLanguage, targetLanguage, fetchImpl, signal, onNetwork)));
     return halves.flat();
   }
 }
 
-async function translateBatch(p:ValidatedProvider, texts:string[], sourceLanguage:string, targetLanguage:string, fetchImpl:typeof fetch, signal:AbortSignal):Promise<string[]> {
+async function translateBatch(p:ValidatedProvider, texts:string[], sourceLanguage:string, targetLanguage:string, fetchImpl:typeof fetch, signal:AbortSignal, onNetwork?:NetworkObserver):Promise<string[]> {
   const from = language(p.type, sourceLanguage), to = language(p.type, targetLanguage);
-  const get = (url:string|URL, headers:Record<string,string> = {}) => requestJSON(fetchImpl, url, { headers: { Accept: 'application/json', ...headers } }, signal);
-  const post = (url:string|URL, body:unknown, headers:Record<string,string> = {}) => requestJSON(fetchImpl, url, { method: 'POST', headers: { ...jsonHeaders, ...headers }, body: JSON.stringify(body) }, signal);
+  const get = (url:string|URL, headers:Record<string,string> = {}) => requestJSON(fetchImpl, url, { headers: { Accept: 'application/json', ...headers } }, signal, onNetwork);
+  const post = (url:string|URL, body:unknown, headers:Record<string,string> = {}) => requestJSON(fetchImpl, url, { method: 'POST', headers: { ...jsonHeaders, ...headers }, body: JSON.stringify(body) }, signal, onNetwork);
 
   if (p.type === 'microsoft' || p.type === 'azure') {
     let url; const headers:Record<string,string> = {};
@@ -244,7 +244,7 @@ export function modelPrompts(p:Pick<ValidatedProvider,'systemPrompt'|'userPrompt
 }
 
 async function translate(provider:Partial<Provider>|null|undefined, {
-  texts, sourceLanguage = 'auto', targetLanguage = 'zh-Hans', signal, fetchImpl = globalThis.fetch, timeoutMs = 30000,
+  texts, sourceLanguage = 'auto', targetLanguage = 'zh-Hans', signal, fetchImpl = globalThis.fetch, timeoutMs = 30000, onNetwork,
 }:ProviderOptions = {}):Promise<string[]> {
   const p = validateProvider(provider);
   if (!Array.isArray(texts) || !texts.length || texts.length > REQUEST_LIMITS.items ||
@@ -256,7 +256,7 @@ async function translate(provider:Partial<Provider>|null|undefined, {
   sourceLanguage = sourceLanguage.replaceAll('_', '-'); targetLanguage = targetLanguage.replaceAll('_', '-');
   return withRequestLifetime(async requestSignal => {
     const translated:string[] = [];
-    for (const batch of chunks(texts)) translated.push(...await translateSplitting(p, batch, sourceLanguage, targetLanguage, fetchImpl, requestSignal));
+    for (const batch of chunks(texts)) translated.push(...await translateSplitting(p, batch, sourceLanguage, targetLanguage, fetchImpl, requestSignal, onNetwork));
     return output(translated, texts.length);
   }, { signal, timeoutMs });
 }
@@ -264,7 +264,7 @@ async function translate(provider:Partial<Provider>|null|undefined, {
 export interface ProviderModel {id:string;name:string}
 
 /** Lists models with the same transport, credential and lifetime rules as translation. */
-async function listModels(provider:Partial<Provider>, {signal,fetchImpl=globalThis.fetch,timeoutMs}:Pick<ProviderOptions,'signal'|'fetchImpl'|'timeoutMs'> = {}):Promise<ProviderModel[]> {
+async function listModels(provider:Partial<Provider>, {signal,fetchImpl=globalThis.fetch,timeoutMs,onNetwork}:Pick<ProviderOptions,'signal'|'fetchImpl'|'timeoutMs'|'onNetwork'> = {}):Promise<ProviderModel[]> {
   const p=validateProvider(provider,{requireModel:false});
   if(!modelTypes.has(p.type))throw failure('INVALID_CONFIG','This translation service does not expose AI models.');
   const url=new URL(p.baseUrl!);
@@ -279,7 +279,7 @@ async function listModels(provider:Partial<Provider>, {signal,fetchImpl=globalTh
   return withRequestLifetime(async activeSignal=>{
     const models=new Map<string,ProviderModel>(),cursors=new Set<string>();
     for(let page=0;page<50;page++){
-      const value=await requestJSON(fetchImpl,url,{method:'GET',headers},activeSignal);
+      const value=await requestJSON(fetchImpl,url,{method:'GET',headers},activeSignal,onNetwork);
       const entries=p.type==='gemini'||p.type==='ollama'?value?.models:value?.data;
       if(!Array.isArray(entries))throw failure('INVALID_RESPONSE','The service did not return a model list.');
       for(const entry of entries){
@@ -306,14 +306,17 @@ async function listModels(provider:Partial<Provider>, {signal,fetchImpl=globalTh
 }
 
 /** Only request metadata crosses the diagnostic boundary, never input text or prompts. */
-async function trace<T>(provider:Partial<Provider>|null|undefined,operation:string,texts:unknown,run:()=>Promise<T>):Promise<T>{
+async function trace<T extends unknown[]>(provider:Partial<Provider>|null|undefined,operation:string,texts:unknown,run:()=>Promise<T>):Promise<T>{
   const started=Date.now(),items=Array.isArray(texts)?texts:[];
   const meta={operation,id:provider?.id,type:provider?.type,model:provider?.model,items:items.length,characters:items.reduce((sum,item)=>sum+(typeof item==='string'?item.length:0),0)};
+  const service=[provider?.type||'未知服务',provider?.model].filter(Boolean).join(' · '),label=operation==='models'?'获取模型列表':'翻译请求';
   try{
     const result=await run();
-    debug('provider','request',{...meta,durationMs:Date.now()-started,outcome:'success'});return result;
+    const durationMs=Date.now()-started,count=operation==='models'?`${result.length} 个模型`:`${meta.items} 条 / ${meta.characters} 字`;
+    debug('provider',`${label}成功：${service} · ${count} · ${durationMs} ms`,{...meta,...(operation==='models'?{models:result.length}:{}),durationMs,outcome:'success'});return result;
   }catch(error){
-    debug('provider','request',{...meta,durationMs:Date.now()-started,outcome:'error',code:(error as {code?:string})?.code||'UNKNOWN'});
+    const durationMs=Date.now()-started;
+    debugError('provider',`${label}失败：${service}${operation==='models'?'':` · ${meta.items} 条 / ${meta.characters} 字`} · ${durationMs} ms`,error,{...meta,durationMs,outcome:'error'});
     throw error;
   }
 }

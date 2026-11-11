@@ -1,4 +1,4 @@
-import {debug,setDebug} from '../shared/debug.js';
+import {debugError,setDebug} from '../shared/debug.js';
 import type {Settings} from '../shared/settings.js';
 import type {MessageResponse,PageBadgeState,PageRequest,PageStatus,PreferencePatch,PublicFailure} from '../shared/messages.js';
 import type {YouTubeControllerOptions} from '../youtube/index.js';
@@ -48,7 +48,7 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
       if(!next||typeof next!=='object'||Array.isArray(next))throw Error('Invalid settings response');
       settingsError='';updateSettings(next);read.resolve();
     }).catch(error=>{
-      debug('content:settings','error',error);
+      debugError('content:settings','读取设置失败',error);
       if(stopped||settingsRead!==read)return;
       settingsError='无法读取最新翻译设置，请重试或刷新页面。';
       read.reject(Object.assign(new Error(settingsError),{code:'SETTINGS_UNAVAILABLE'}));
@@ -84,7 +84,7 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
     interactions?.refreshPresentation?.();
     pageTriggers?.updateSettings();
     lastError='';
-    for(const callback of [...subscribers]){try{callback(next);}catch(error){debug('content:youtube','error',error);subtitleError={code:'YOUTUBE_UPDATE_FAILED',message:'字幕界面更新失败，请重新打开字幕列表或刷新页面。'};}}
+    for(const callback of [...subscribers]){try{callback(next);}catch(error){debugError('content:youtube','更新字幕界面失败',error);subtitleError={code:'YOUTUBE_UPDATE_FAILED',message:'字幕界面更新失败，请重新打开字幕列表或刷新页面。'};}}
     reportBadge();
   }
   function reportBadge(): void{
@@ -109,7 +109,7 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
       if(stopped){instance?.stop?.();return;}
       youtube=instance;subtitleError=null;return instance;
     }).catch(cause=>{
-      debug('content:youtube','error',cause);
+      debugError('content:youtube','更新字幕界面失败',cause);
       attemptSubscriptions.forEach(off=>off());
       const error=new Error('字幕入口暂时无法初始化，请重试打开字幕列表或刷新页面。') as CodedError & {code:string};error.code='YOUTUBE_INIT_FAILED';
       subtitleError={code:error.code,message:error.message};throw error;
@@ -180,7 +180,7 @@ export function createContentRuntime({env=globalThis,client=defaultClient,startY
       if(!stopped)phase='ready';reportBadge();
       return api;
     })().catch(cause=>{
-      debug('content:init','error',cause);
+      debugError('content:init','初始化页面翻译失败',cause);
       cleanup();startPromise=null;
       if(stopped){
         phase='stopped';
