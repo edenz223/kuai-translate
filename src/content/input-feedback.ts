@@ -13,15 +13,15 @@ import {resolveFeatureSettings} from '../shared/interactions.js';
 
 const spring='cubic-bezier(.34,1.56,.64,1)';
 const MIN_LOADING_MS=400;
-/** The dot reflects the request state even while collapsed; motion is dropped for reduced-motion users. */
+/** The entry reflects the request state even while collapsed; motion is dropped for reduced-motion users. */
 const TRIGGER_STYLE=[
   ':host{all:initial;--accent:#087e8b;--accent-2:#14b8a6;--ok:#16a34a;--bad:#dc2626}*{box-sizing:border-box}[hidden]{display:none!important}',
   'button{font:12px/1.4 system-ui,sans-serif;cursor:pointer;border:1px solid #5888c0;border-radius:5px;background:#fff;color:#173f71;padding:2px 5px;-webkit-tap-highlight-color:transparent}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}button:disabled{opacity:.5}',
   '.trigger{position:relative;width:18px;height:18px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--accent);display:grid;place-items:center}',
   `.trigger.entering{animation:kuai-appear .32s ${spring} both}`,
-  `.trigger:not(.icon)::before{content:"";position:absolute;inset:1px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 8%,transparent);opacity:0;transform:scale(.4);transition:opacity .2s,transform .28s ${spring},border-color .2s,background .2s}`,
+  `.trigger::before{content:"";position:absolute;inset:1px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 8%,transparent);opacity:0;transform:scale(.4);transition:opacity .2s,transform .28s ${spring},border-color .2s,background .2s}`,
   `.trigger:not(.icon)::after{content:"";width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,var(--accent-2),var(--accent));box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--accent) 45%,transparent);transition:transform .28s ${spring},background .25s,box-shadow .25s}`,
-  '.trigger:not(.icon):hover::before,.trigger:not(.icon):focus-visible::before,.trigger[aria-expanded=true]::before{opacity:1;transform:scale(1)}',
+  '.trigger:hover::before,.trigger:focus-visible::before,.trigger[aria-expanded=true]::before{opacity:1;transform:scale(1)}',
   '.trigger:not(.icon):hover::after{transform:scale(1.2)}.trigger[aria-expanded=true]:not(.icon)::after{transform:scale(.75)}.trigger:active::after{transform:scale(.6)}',
   '.trigger[data-state=loading]::before{opacity:1;transform:scale(1);border-color:color-mix(in srgb,var(--accent) 18%,transparent);background:transparent}',
   '.spinner{position:absolute;inset:1px;border-radius:50%;border:1.5px solid transparent;border-top-color:var(--accent);pointer-events:none;opacity:0;animation:kuai-spin .8s linear infinite;transition:opacity .2s}.trigger[data-state=loading]>.spinner{opacity:1}',
@@ -30,7 +30,11 @@ const TRIGGER_STYLE=[
   '.trigger[data-state=translated]::before{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 8%,transparent);animation:kuai-ring-done .6s ease-out}.trigger[data-state=error]::before{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent);animation:kuai-ring-done .6s ease-out}',
   `.trigger[data-state=translated]:not(.icon)::after{background:var(--ok);box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--ok) 50%,transparent);animation:kuai-pop .4s ${spring}}`,
   '.trigger[data-state=error]:not(.icon)::after{background:var(--bad);box-shadow:0 0 0 2px #fff,0 1px 4px color-mix(in srgb,var(--bad) 50%,transparent)}.trigger[data-state=error]{animation:kuai-shake .4s ease-in-out}',
-  '.trigger.icon{width:28px;height:28px;border-radius:8px;background:#fff;border:1px solid #e2e8f0;box-shadow:0 1px 2px rgb(15 23 42/.06),0 3px 10px rgb(15 23 42/.08);font-weight:600;transition:transform .2s,box-shadow .2s,color .2s}.trigger.icon:hover{transform:translateY(-1px);box-shadow:0 2px 4px rgb(15 23 42/.08),0 6px 16px rgb(15 23 42/.12)}',
+  // The icon's ring follows its rounded-square outline; the loading arc travels along that same outline.
+  '.trigger.icon{width:22px;height:22px;border-radius:6px;overflow:visible}.trigger.icon::before,.trigger.icon>.spinner{inset:-4px;border-radius:10px}.trigger.icon::before{background:transparent}',
+  '.trigger.icon>.spinner{padding:1.5px;border:0;overflow:hidden;animation:none;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}.trigger.icon>.spinner::before{content:"";position:absolute;inset:-50%;background:conic-gradient(transparent 0 65%,var(--accent));animation:kuai-spin .8s linear infinite}',
+  `.trigger.icon>svg{display:block;width:100%;height:100%;pointer-events:none;transition:transform .28s ${spring}}.trigger.icon:hover>svg,.trigger.icon[aria-expanded=true]>svg{transform:scale(1.05)}.trigger.icon:active>svg{transform:scale(.95)}`,
+  '.trigger.icon[data-state=translated]::before,.trigger.icon[data-state=error]::before{opacity:1;transform:scale(1)}',
   `.translate-action{--from:6px;position:absolute;right:calc(100% + 5px);bottom:-6px;display:grid;place-items:center;width:30px;height:30px;padding:0;background:rgb(255 255 255/.92);color:#475569;border:1px solid rgb(15 23 42/.08);border-radius:10px;box-shadow:0 1px 2px rgb(15 23 42/.06),0 6px 18px rgb(15 23 42/.14);backdrop-filter:blur(8px);transform-origin:var(--origin,right center);transition:opacity .18s,transform .3s ${spring},border-radius .3s ${spring},color .2s,background .2s,border-color .2s,box-shadow .2s,display .3s allow-discrete,overlay .3s allow-discrete}`,
   '.translate-action[data-side=right]{--from:-6px;--origin:left center}',
   '@starting-style{.translate-action{opacity:0;transform:translateX(var(--from)) scale(.6)}}',
@@ -172,9 +176,9 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
   function layout(){
     if(!trigger||!renderedElement?.isConnected)return;
     const raw=renderedElement.getBoundingClientRect(),rect=visibleRect(renderedElement,raw),button=trigger.shadowRoot!.querySelector<HTMLButtonElement>('[data-trigger]')!,icon=options().icon==='icon';lastRect=rectKey(raw);
-    const width=rect.right-rect.left,height=rect.bottom-rect.top,minimum=Math.min(icon?28:18,raw.width,raw.height),hidden=width<minimum||height<minimum||width<=0||height<=0;
+    const width=rect.right-rect.left,height=rect.bottom-rect.top,minimum=Math.min(icon?22:18,raw.width,raw.height),hidden=width<minimum||height<minimum||width<=0||height<=0;
     trigger.style.visibility=hidden?'hidden':'visible';if(preview)preview.style.visibility=hidden?'hidden':'visible';if(hidden)return;
-    const size=Math.max(1,Math.min(icon?28:18,width,height)),left=Math.max(rect.left,rect.right-24-size),top=Math.max(rect.top,rect.bottom-8-size);
+    const size=Math.max(1,Math.min(icon?22:18,width,height)),left=Math.max(rect.left,rect.right-24-size),top=Math.max(rect.top,rect.bottom-8-size);
     button.style.width=size+'px';button.style.height=size+'px';trigger.style.width=size+'px';trigger.style.height=size+'px';place(trigger,left,top);
     const actionButton=trigger.shadowRoot!.querySelector<HTMLButtonElement>('[data-translate]')!;actionButton.style.right=left>=37?'calc(100% + 5px)':'auto';actionButton.style.left=left>=37?'auto':'calc(100% + 5px)';actionButton.setAttribute('data-side',left>=37?'left':'right');
     const view=viewport(),viewportWidth=view.right-view.left,viewportHeight=view.bottom-view.top;
@@ -201,8 +205,7 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     else if(loadingSince!==null&&(state.status==='success'||failed)&&now-loadingSince<MIN_LOADING_MS){
       visualLoading=true;if(loadingTimer===null)loadingTimer=env.setTimeout(()=>{loadingTimer=null;sync();},MIN_LOADING_MS-(now-loadingSince));
     }else clearLoading();
-    if(config.icon==='icon')button.textContent=visualLoading?'…':'译';
-    else{const label=button.querySelector<HTMLElement>('[data-trigger-label]');if(label)label.textContent=visualLoading?'…':'';}
+    const label=button.querySelector<HTMLElement>('[data-trigger-label]');if(label)label.textContent=visualLoading?'…':'';
     button.setAttribute('aria-expanded',String(expanded));button.title=labels().inputTrigger;
     const translateButton=root.querySelector<HTMLButtonElement>('[data-translate]')!,mode=visualLoading?'loading':restorable?'translated':failed?'error':copyResult?'copy':'idle',showCheck=restorable&&!visualLoading;
     if(mode==='error')button.className=button.className.replace(' entering','');
@@ -210,7 +213,7 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     const check=translateButton.querySelector<SVGElement>('[data-check]')!;if(showCheck)check.removeAttribute('hidden');else check.setAttribute('hidden','');
     const actionLabel=visualLoading?labels().cancel:restorable?labels().restore:failed?labels().retry:copyResult?labels().copy:labels().inputTrigger+' ('+resolveFeatureSettings(getSettings(),'input').targetLanguage+')';
     translateButton.title=actionLabel;translateButton.setAttribute('aria-label',actionLabel);
-    const box=root.querySelector<HTMLElement>('.feedback')!;box.hidden=config.icon==='dot'&&config.autoApply||!active||state.status==='idle';const status=box.querySelector<HTMLElement>('[role="status"]')!;status.title=state.message;status.textContent=state.status==='loading'?labels().loading:state.status==='error'?labels().failed:state.message===labels().changed?labels().copy:state.message;syncActions(root);
+    const box=root.querySelector<HTMLElement>('.feedback')!;box.hidden=config.icon!=='none'&&config.autoApply||!active||state.status==='idle';const status=box.querySelector<HTMLElement>('[role="status"]')!;status.title=state.message;status.textContent=state.status==='loading'?labels().loading:state.status==='error'?labels().failed:state.message===labels().changed?labels().copy:state.message;syncActions(root);
     if(preview){const output=preview.shadowRoot!.querySelector<HTMLElement>('[data-translation]')!;if(output.textContent!==state.translation)output.textContent=state.translation;preview.shadowRoot!.querySelector<HTMLElement>('[role="status"]')!.textContent=pendingApply&&!editor.valid(pendingApply.snapshot)?labels().changed:state.message;syncActions(preview.shadowRoot!);}
     layout();
   }
@@ -230,16 +233,16 @@ export function createInputFeedback({document,env,editor,translate,cancel,getSet
     const host=document.createElement('div');host.id='kuai-input-trigger';host.setAttribute('data-kuai-owned','');host.setAttribute('data-kuai-ui','');
     const shadow=host.attachShadow({mode:'open'}),style=append('style',shadow);
     style.textContent=TRIGGER_STYLE;
-    const button=action(shadow,'trigger',labels().inputTrigger,()=>{if(state.status==='loading'&&context?.element===renderedElement)cancelCurrent();else if(config.icon==='dot'){expanded=!expanded;sync();}else if(canRestore())restore();else void run().catch(()=>{});});
+    const button=action(shadow,'trigger',labels().inputTrigger,()=>{if(state.status==='loading'&&context?.element===renderedElement)cancelCurrent();else if(config.icon!=='none'){expanded=!expanded;sync();}else if(canRestore())restore();else void run().catch(()=>{});});
     const translateButton=action(shadow,'translate',labels().inputTrigger,()=>{
       if(state.status==='loading'&&context?.element===renderedElement){cancelCurrent();return;}
       if(canRestore()){restore();return;}
       if(context?.element===renderedElement&&state.message===labels().changed&&state.translation){void env.navigator?.clipboard?.writeText(state.translation).catch(()=>{});return;}
       void run().catch(()=>{});
     });translateButton.className='translate-action';translateButton.textContent='';appendIcon(document,translateButton,'translate');const check=appendIcon(document,translateButton,'check');check.setAttribute('data-check','');check.setAttribute('class','completion-check');check.setAttribute('hidden','');
-    const icon=config.icon==='icon';button.className='trigger'+(icon?' icon':config.icon==='none'?' none':'')+' entering';button.textContent=icon?'译':'';button.title=active&&state.message||labels().inputTrigger;button.setAttribute('tabindex','0');
+    const icon=config.icon==='icon';button.className='trigger'+(icon?' icon':config.icon==='none'?' none':'')+' entering';button.textContent='';if(icon)appendIcon(document,button,'kuai');button.title=active&&state.message||labels().inputTrigger;button.setAttribute('tabindex','0');
     button.addEventListener('animationend',event=>{if(event.target===button&&event.animationName==='kuai-appear')button.className=button.className.replace(' entering','');});
-    if(!icon){const spinner=append('span',button);spinner.className='spinner';spinner.setAttribute('aria-hidden','true');if(config.icon==='none')append('span',button,'data-trigger-label');}
+    const spinner=append('span',button);spinner.className='spinner';spinner.setAttribute('aria-hidden','true');if(config.icon==='none')append('span',button,'data-trigger-label');
     {
       const feedback=append('div',shadow);feedback.className='feedback';const status=append('span',feedback);status.className='status';status.setAttribute('role','status');status.title=state.message;status.textContent=state.status==='loading'?labels().loading:state.status==='error'?labels().failed:state.message===labels().changed?labels().copy:state.message;actions(feedback);
     }

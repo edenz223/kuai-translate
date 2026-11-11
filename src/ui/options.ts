@@ -37,6 +37,7 @@ const SECTIONS=['webpage','hover','selection','input','subtitles','providers','b
 /** One section at a time; the address hash keeps links from the popup and context menu working. */
 function bindSections(document: Document): void {
   const view=document.defaultView;
+  if(view?.history)view.history.scrollRestoration='manual';
   for(const id of SECTIONS){
     const link=byId(document,'nav-'+id);
     link.addEventListener('focus',()=>{
@@ -125,9 +126,10 @@ export async function startOptions(document: Document = globalThis.document): Pr
       button.classList.toggle('selected',selected);
       if(selected)button.setAttribute('aria-current','true');
       const name=document.createElement('strong');name.textContent=provider.name || TYPE_NAMES[provider.type];button.append(name);
-      if(!FREE_TYPES.includes(provider.type)){const detail=document.createElement('span');detail.className='provider-type-name';detail.textContent=(TYPE_NAMES[provider.type] || provider.type)+(provider.model ? ' · '+provider.model : '');button.append(detail);}
+      const typeName=TYPE_NAMES[provider.type] || provider.type,detailText=[name.textContent===typeName?'':typeName,provider.model].filter(Boolean).join(' · ');
+      if(!FREE_TYPES.includes(provider.type) && detailText){const detail=document.createElement('span');detail.className='provider-type-name';detail.textContent=detailText;button.append(detail);}
       const result=testResults.get(provider.id),issue=providerIssue(provider);
-      const chips=[...providerUsage(settings,provider.id).map(label=>chip(label,'use'))];
+      const chips=[...providerUsage(settings,provider.id).map(label=>chip(({网页:'默认',字幕:'用于字幕',划词:'用于划词',输入:'用于输入'} as Record<string,string>)[label] || label,'use'))];
       if(!provider.enabled)chips.push(chip('已停用','off'));
       if(issue)chips.push(chip(issue,'warn'));
       else if(result?.fingerprint===JSON.stringify(provider))chips.push(chip(result.ok ? '测试通过' : '测试失败',result.ok ? 'ok' : 'warn'));
@@ -156,7 +158,8 @@ export async function startOptions(document: Document = globalThis.document): Pr
     if(provider) {
       const info=PROVIDER_INFO[provider.type],active=provider.id===settings.activeProviderId;
       byId(document,'provider-title').textContent=provider.name || TYPE_NAMES[provider.type] || provider.type;
-      byId(document,'provider-kind').textContent=TYPE_NAMES[provider.type] || provider.type;
+      const typeName=TYPE_NAMES[provider.type] || provider.type;
+      byId(document,'provider-kind').textContent=isFree?'免费服务':provider.name && provider.name!==typeName?'自配 API · '+typeName:'自配 API';
       const usage=[],others=providerUsage(settings,provider.id).filter(label=>label!=='网页');
       if(active)usage.push('网页翻译默认使用此服务，跟随网页设置的功能也会使用它');
       if(others.length)usage.push(others.join('、')+'指定使用此服务');
@@ -194,6 +197,7 @@ export async function startOptions(document: Document = globalThis.document): Pr
     fillSelect(document,byId<HTMLSelectElement>(document,'subtitle-shortcuts'),SUBTITLE_SHORTCUT_CHOICES,settings.subtitleShortcuts);
     for(const [key,id] of Object.entries(preferences))byId<HTMLInputElement>(document,id).checked=!!settings[key as keyof Settings];
     byId(document,'subtitle-options-panel').hidden=!settings.subtitlesEnabled;
+    for(const id of ['subtitle-target-language','subtitle-provider'])byId<HTMLSelectElement>(document,id).disabled=!settings.subtitleTranslationEnabled;
     byId<HTMLButtonElement>(document,'page-swap-languages').disabled=settings.sourceLanguage==='auto';
     byId(document,'page-swap-help').hidden=settings.sourceLanguage!=='auto';
     presentation.render(settings);
@@ -203,6 +207,10 @@ export async function startOptions(document: Document = globalThis.document): Pr
     const invalid=interactions.validationCount()+unsavedUrls,incomplete=interactions.incompleteCount();
     // The sidebar shows which features are off and which hidden section still holds an unsaved draft.
     const off: Record<string,boolean>={hover:!settings.hoverEnabled,selection:!settings.selectionEnabled,input:!settings.inputOptions.enabled,subtitles:!settings.subtitlesEnabled};
+    for(const [id,disabled] of Object.entries(off)){
+      byId(document,id+'-state').textContent=disabled?'已关闭':'已开启';
+      byId(document,id+'-off-note').hidden=!disabled;
+    }
     const unsaved=new Set(interactions.invalidGroups().map(group=>group==='page' ? 'webpage' : group));
     if(unsavedUrls)unsaved.add('providers');
     for(const id of SECTIONS){const link=byId(document,'nav-'+id);link.classList.toggle('off',!!off[id]);link.classList.toggle('invalid',unsaved.has(id));}
@@ -227,6 +235,10 @@ export async function startOptions(document: Document = globalThis.document): Pr
   try {await editor.load();}catch(error){fail(error);return;}
   presentation.bind();
   interactions.bind();
+  for(const [section,id] of Object.entries({hover:'hover-enabled',selection:'selection-enabled',input:'input-option-enabled',subtitles:'subtitles-enabled'})){
+    const control=byId<HTMLInputElement>(document,id);
+    byId(document,'enable-'+section).addEventListener('click',()=>{control.click();control.focus();});
+  }
   // The address may pass through invalid text while typing; keep it as a draft instead of failing the save.
   const {baseUrl:baseUrlField,...boundFields}=fields;
   bindProviderFields({fields:boundFields,editor,getId:()=>selectedId,onError:fail});

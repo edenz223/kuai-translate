@@ -300,8 +300,9 @@ for(const [order,want]of [['original-translation','Keep hello\n你好 tail'],['t
  const h=fixture(),input=field(h);h.settings.inputOptions={includeOriginal:true,displayOrder:order};const ui=createInteractions(h.dependencies).start();await ui.translateInput();assert.equal(input.value,want);ui.stop();
 });
 
-test('preview mode applies only after an explicit Apply action',async()=>{
- const h=fixture(),input=field(h);h.settings.inputOptions={autoApply:false};const ui=createInteractions(h.dependencies).start();const result=await ui.translateInput();assert.equal(result.applied,false);assert.equal(input.value,'Keep hello tail');const apply=popupAction(h,'data-apply');assert.ok(apply);assert.equal(apply.hidden,false);h.emit(apply,'pointerdown');h.emit(apply,'click');assert.equal(input.value,'Keep 你好 tail');ui.stop();
+for(const icon of ['dot','icon'])test(`${icon} preview mode applies only after an explicit Apply action`,async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={autoApply:false,icon};const ui=createInteractions(h.dependencies).start();h.emit(feedback(h,'trigger'),'click');h.emit(feedback(h,'translate'),'click');await settleOptions();assert.equal(input.value,'Keep hello tail');const preview=h.doc.getElementById('kuai-input-preview');assert.ok(preview);assert.equal(preview.shadowRoot.querySelector('[data-translation]').textContent,'你好');assert.equal(h.doc.getElementById('kuai-input-trigger').shadowRoot.querySelector('.feedback').hidden,false);
+ const apply=popupAction(h,'data-apply');assert.ok(apply);assert.equal(apply.hidden,false);h.emit(apply,'pointerdown');h.emit(apply,'click');assert.equal(input.value,'Keep 你好 tail');h.advance(400);h.emit(feedback(h,'translate'),'click');assert.equal(input.value,'Keep hello tail');assert.equal(h.requests.length,1);ui.stop();
 });
 
 for(const autocomplete of ['current-password','new-password','one-time-code','cc-number','section-checkout cc-csc'])test(`sensitive ${autocomplete} fields never send text`,async()=>{
@@ -312,8 +313,11 @@ test('disabled features and unsupported fields never consume ordinary keyboard s
  const h=fixture(),input=field(h);h.settings.inputOptions={enabled:false};const ui=createInteractions(h.dependencies).start();assert.equal(keyOptions(h,input).defaultPrevented,false);h.settings.inputOptions.enabled=true;input.readOnly=true;assert.equal(keyOptions(h,input).defaultPrevented,false);input.readOnly=false;input.type='password';input.tagName='INPUT';assert.equal(keyOptions(h,input).defaultPrevented,false);await settleOptions();assert.equal(h.requests.length,0);ui.stop();
 });
 
-test('focus icon translates its current field without stealing focus or text selection',async()=>{
- const h=fixture(),input=field(h);h.settings.inputOptions={icon:'dot'};const ui=createInteractions(h.dependencies).start();h.emit(input,'focusin');const trigger=h.doc.getElementById('kuai-input-trigger')?.shadowRoot.querySelector('button');assert.ok(trigger);assert.equal(h.emit(trigger,'pointerdown').defaultPrevented,true);h.emit(trigger,'click');await settleOptions();assert.equal(h.requests.length,0);assert.equal(input.value,'Keep hello tail');const translate=h.doc.getElementById('kuai-input-trigger').shadowRoot.querySelector('[data-translate]');assert.ok(translate);assert.equal(translate.hidden,false);h.emit(translate,'click');await settleOptions();assert.strictEqual(h.doc.activeElement,input);assert.equal(input.value,'Keep 你好 tail');ui.stop();
+for(const icon of ['dot','icon'])test(`${icon} entry toggles its action and preserves focus and text selection`,async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={icon};const ui=createInteractions(h.dependencies).start();h.emit(input,'focusin');const trigger=feedback(h,'trigger'),translate=feedback(h,'translate');assert.ok(trigger);assert.equal(translate.hidden,true);assert.equal(trigger.getAttribute('aria-expanded'),'false');
+ for(const type of ['pointerdown','mousedown'])assert.equal(h.emit(trigger,type).defaultPrevented,true);
+ h.emit(trigger,'click');await settleOptions();assert.equal(h.requests.length,0);assert.equal(input.value,'Keep hello tail');assert.equal(translate.hidden,false);assert.equal(trigger.getAttribute('aria-expanded'),'true');assert.strictEqual(h.doc.activeElement,input);assert.equal(input.selectionStart,5);assert.equal(input.selectionEnd,10);
+ h.emit(trigger,'click');assert.equal(translate.hidden,true);assert.equal(trigger.getAttribute('aria-expanded'),'false');assert.equal(h.requests.length,0);h.emit(trigger,'click');assert.equal(h.emit(translate,'pointerdown').defaultPrevented,true);h.emit(translate,'click');await settleOptions();assert.strictEqual(h.doc.activeElement,input);assert.equal(input.value,'Keep 你好 tail');assert.deepEqual(h.requests[0].texts,['hello']);ui.stop();
 });
 
 test('safe rich text replacement preserves the existing text and inline element identities',async()=>{
@@ -337,11 +341,11 @@ test('a delegated beforeinput veto prevents both automatic and explicit preview 
 });
 
 
-test('expanded icon translates, shows a check and restores without a second request or text popup',async()=>{
- const h=fixture(),input=field(h),ui=createInteractions(h.dependencies).start();
+for(const icon of ['dot','icon'])test(`expanded ${icon} translates, shows a check and restores without a second request or text popup`,async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={icon};const ui=createInteractions(h.dependencies).start();
  const root=()=>h.doc.getElementById('kuai-input-trigger').shadowRoot;
  h.emit(root().querySelector('[data-trigger]'),'click');const action=root().querySelector('[data-translate]');
- assert.equal(action.getAttribute('data-state'),'idle');h.emit(action,'pointerdown');h.emit(action,'click');await settleOptions();
+ assert.equal(action.getAttribute('data-state'),'idle');assert.equal(h.requests.length,0);h.emit(action,'pointerdown');h.emit(action,'click');await settleOptions();
  assert.equal(input.value,'Keep 你好 tail');assert.equal(action.hidden,false);assert.equal(action.getAttribute('data-state'),'loading');assert.equal(action.querySelector('[data-check]').hasAttribute('hidden'),true);h.advance(400);assert.equal(action.getAttribute('data-state'),'translated');
  assert.equal(action.querySelector('[data-check]').hasAttribute('hidden'),false);assert.equal(root().querySelector('.feedback').hidden,true);
  h.emit(action,'pointerdown');h.emit(action,'click');await settleOptions();
@@ -349,19 +353,25 @@ test('expanded icon translates, shows a check and restores without a second requ
  assert.equal(action.querySelector('[data-check]').hasAttribute('hidden'),true);assert.equal(action.hidden,false);assert.equal(root().querySelector('.feedback').hidden,true);ui.stop();
 });
 
-test('icon loading and errors remain silent and support cancel and retry',async()=>{
- const h=fixture(),input=field(h),ui=createInteractions(h.dependencies).start();let finish;
+for(const icon of ['dot','icon'])test(`${icon} loading and errors remain silent and support cancel and retry`,async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={icon};const ui=createInteractions(h.dependencies).start();let finish;
  h.respond(()=>new Promise(resolve=>{finish=resolve;}));const root=h.doc.getElementById('kuai-input-trigger').shadowRoot;
  h.emit(root.querySelector('[data-trigger]'),'click');const action=root.querySelector('[data-translate]');h.emit(action,'click');
- assert.equal(action.hidden,false);assert.equal(action.getAttribute('data-state'),'loading');assert.equal(root.querySelector('.feedback').hidden,true);
+ assert.equal(action.hidden,false);assert.equal(action.getAttribute('data-state'),'loading');assert.equal(root.querySelector('[data-trigger]').getAttribute('data-state'),'loading');assert.equal(root.querySelector('.feedback').hidden,true);
  h.emit(action,'click');finish({translations:['late']});await settleOptions();assert.equal(input.value,'Keep hello tail');
  h.respond(async()=>{throw Error('offline');});h.emit(root.querySelector('[data-trigger]'),'click');h.emit(action,'click');await settleOptions();
- assert.equal(action.getAttribute('data-state'),'loading');h.advance(400);assert.equal(action.getAttribute('data-state'),'error');assert.equal(root.querySelector('.feedback').hidden,true);
+ assert.equal(action.getAttribute('data-state'),'loading');h.advance(400);assert.equal(action.getAttribute('data-state'),'error');assert.equal(root.querySelector('[data-trigger]').getAttribute('data-state'),'error');assert.equal(root.querySelector('.feedback').hidden,true);
  h.respond(async()=>({translations:['done']}));h.emit(action,'click');await settleOptions();assert.equal(input.value,'Keep done tail');h.advance(400);assert.equal(action.getAttribute('data-state'),'translated');ui.stop();
 });
 
-test('the collapsed dot carries the request state so progress is visible without expanding',async()=>{
- const h=fixture(),input=field(h);h.settings.inputOptions={icon:'dot'};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));
+for(const icon of ['dot','icon'])test(`${icon} action copies an unsafe result without another request`,async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={icon};let finish,copied;h.env.navigator.clipboard={writeText:async value=>{copied=value;}};h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),trigger=feedback(h,'trigger'),action=feedback(h,'translate');
+ h.emit(trigger,'click');h.emit(action,'click');input.value='changed';h.emit(input,'input');finish({translations:['你好']});await settleOptions();h.advance(400);assert.equal(action.getAttribute('data-state'),'copy');assert.equal(h.doc.getElementById('kuai-input-trigger').shadowRoot.querySelector('.feedback').hidden,true);
+ h.emit(trigger,'click');assert.equal(action.hidden,true);h.emit(trigger,'click');assert.equal(action.hidden,false);h.emit(action,'click');await settleOptions();assert.equal(copied,'你好');assert.equal(input.value,'changed');assert.equal(h.requests.length,1);ui.stop();
+});
+
+for(const icon of ['dot','icon'])test(`the collapsed ${icon} carries the request state so progress is visible without expanding`,async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={icon};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));
  const ui=createInteractions(h.dependencies).start();h.emit(input,'focusin');
  const dot=()=>h.doc.getElementById('kuai-input-trigger').shadowRoot.querySelector('[data-trigger]');
  const spinner=dot().querySelector('.spinner');assert.ok(spinner);assert.equal(spinner.getAttribute('aria-hidden'),'true');assert.equal(dot().getAttribute('data-state'),'idle');
@@ -377,29 +387,30 @@ test('slow input responses finish the visual loading state without another wait'
  assert.equal(dot.getAttribute('data-state'),'translated');assert.equal(h.timerCount(),0);ui.stop();
 });
 
-test('cancelling input loading resets the dot immediately and ignores late responses',async()=>{
- const h=fixture(),input=field(h);let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),dot=feedback(h,'trigger');
+for(const icon of ['dot','icon'])test(`cancelling input loading via ${icon} resets it immediately and ignores late responses`,async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={icon};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),dot=feedback(h,'trigger');
  const task=ui.translateInput();h.advance(100);h.emit(dot,'click');assert.equal(dot.getAttribute('data-state'),'idle');assert.equal(h.timerCount(),0);assert.deepEqual(h.cancellations,['request-1']);
  finish({translations:['Late']});assert.deepEqual(await task,{cancelled:true});h.advance(500);assert.equal(dot.getAttribute('data-state'),'idle');assert.equal(input.value,'Keep hello tail');assert.equal(h.timerCount(),0);ui.stop();
 });
 
-test('reduced motion input feedback has no minimum loading hold',async()=>{
- const h=fixture(),input=field(h);h.env.matchMedia=query=>({matches:query==='(prefers-reduced-motion: reduce)'});const ui=createInteractions(h.dependencies).start(),dot=feedback(h,'trigger');
+for(const icon of ['dot','icon'])test(`reduced motion ${icon} feedback has no minimum loading hold`,async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={icon};h.env.matchMedia=query=>({matches:query==='(prefers-reduced-motion: reduce)'});const ui=createInteractions(h.dependencies).start(),dot=feedback(h,'trigger');
  assert.equal((await ui.translateInput()).applied,true);assert.equal(input.value,'Keep 你好 tail');assert.equal(dot.getAttribute('data-state'),'translated');assert.equal(h.timerCount(),0);
  ui.restoreInput();h.respond(async()=>{throw Error('offline');});await assert.rejects(ui.translateInput(),/offline/);assert.equal(dot.getAttribute('data-state'),'error');assert.equal(h.timerCount(),0);ui.stop();
 });
 
-test('input preview presence changes preserve the trigger host and reveal results during the visual hold',async()=>{
- const h=fixture(),input=field(h);h.settings.inputOptions={autoApply:false,icon:'dot'};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),host=h.doc.getElementById('kuai-input-trigger'),dot=feedback(h,'trigger');
+for(const icon of ['dot','icon'])test(`${icon} preview presence changes preserve the trigger host and reveal results during the visual hold`,async()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={autoApply:false,icon};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),host=h.doc.getElementById('kuai-input-trigger'),dot=feedback(h,'trigger');
  assert.equal(h.doc.getElementById('kuai-input-preview'),null);const task=ui.translateInput();assert.equal(h.doc.getElementById('kuai-input-trigger'),host);assert.equal(dot.getAttribute('data-state'),'loading');const preview=h.doc.getElementById('kuai-input-preview');assert.ok(preview);
  finish({translations:['你好']});assert.equal((await task).applied,false);assert.equal(h.doc.getElementById('kuai-input-trigger'),host);assert.equal(h.doc.getElementById('kuai-input-preview'),preview);assert.equal(input.value,'Keep hello tail');assert.equal(ui.getState().status,'success');assert.equal(preview.shadowRoot.querySelector('[data-translation]').textContent,'你好');assert.equal(preview.shadowRoot.querySelector('[data-apply]').hidden,false);assert.equal(dot.getAttribute('data-state'),'loading');assert.doesNotMatch(host.shadowRoot.querySelector('[role="status"]').textContent,/Translating|翻译中/);
  h.advance(400);assert.equal(dot.getAttribute('data-state'),'idle');h.emit(preview.shadowRoot.querySelector('[data-close]'),'click');assert.equal(h.doc.getElementById('kuai-input-preview'),null);assert.equal(h.doc.getElementById('kuai-input-trigger'),host);assert.equal(dot.getAttribute('data-state'),'idle');ui.stop();
 });
 
-test('the icon trigger keeps its text and feedback updates while its visual loading state is held',async()=>{
+test('the icon entry keeps its inline Kuai SVG and spinner through the minimum loading hold',async()=>{
  const h=fixture();field(h);h.settings.inputOptions={icon:'icon'};let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));const ui=createInteractions(h.dependencies).start(),button=feedback(h,'trigger'),root=h.doc.getElementById('kuai-input-trigger').shadowRoot;
- assert.equal(button.textContent,'译');assert.equal(button.querySelector('.spinner'),null);const task=ui.translateInput();assert.equal(button.textContent,'…');finish({translations:['你好']});await task;assert.equal(button.textContent,'…');assert.equal(button.getAttribute('data-state'),'loading');assert.equal(feedback(h,'restore').hidden,false);assert.doesNotMatch(root.querySelector('[role="status"]').textContent,/Translating|翻译中/);
- h.advance(400);assert.equal(button.textContent,'译');assert.equal(button.getAttribute('data-state'),'translated');ui.stop();
+ const svg=button.querySelector('svg'),spinner=button.querySelector('.spinner');assert.ok(svg);assert.ok(spinner);assert.equal(svg.getAttribute('viewBox'),'0 0 128 128');assert.equal(svg.getAttribute('width'),'22');assert.equal(svg.getAttribute('height'),'22');assert.equal(svg.getAttribute('aria-hidden'),'true');assert.equal(svg.children.length,3);assert.equal(svg.querySelector('rect').getAttribute('fill'),'#3340a6');assert.equal(svg.querySelectorAll('path')[0].getAttribute('fill'),'#ffffff');assert.equal(svg.querySelectorAll('path')[1].getAttribute('fill'),'#7de3e0');assert.equal(button.textContent,'');
+ const task=ui.translateInput();assert.equal(button.textContent,'');assert.equal(button.getAttribute('data-state'),'loading');assert.equal(root.querySelector('.feedback').hidden,true);finish({translations:['你好']});await task;assert.equal(button.textContent,'');assert.equal(button.getAttribute('data-state'),'loading');assert.equal(root.querySelector('.feedback').hidden,true);
+ h.advance(399);assert.equal(button.getAttribute('data-state'),'loading');h.advance(1);assert.equal(button.textContent,'');assert.equal(button.querySelector('svg'),svg);assert.equal(button.querySelector('.spinner'),spinner);assert.equal(button.getAttribute('data-state'),'translated');ui.stop();
 });
 
 test('the none option keeps its loading ellipsis and spinner without an idle trigger',async()=>{
@@ -428,6 +439,13 @@ test('the trigger entrance class is removed when its entrance animation ends',()
 });
 
 const bounds=(left,top,width,height)=>({left,top,right:left+width,bottom:top+height,width,height});
+
+test('the 22px Kuai entry uses the existing insets, shrinks in small fields and hides when clipped',()=>{
+ const h=fixture(),input=field(h);h.settings.inputOptions={icon:'icon'};input._rect=bounds(100,50,300,100);const ui=createInteractions(h.dependencies).start(),host=h.doc.getElementById('kuai-input-trigger'),button=feedback(h,'trigger');
+ assert.equal(host.style.width,'22px');assert.equal(host.style.height,'22px');assert.equal(button.style.width,'22px');assert.equal(button.style.height,'22px');assert.equal(host.style.left,'354px');assert.equal(host.style.top,'120px');assert.equal(host.style.visibility,'visible');
+ input._rect=bounds(100,50,300,16);h.emit(h.env,'resize');assert.equal(host.style.width,'16px');assert.equal(host.style.height,'16px');assert.equal(host.style.top,'50px');assert.equal(host.style.visibility,'visible');
+ input._rect=bounds(100,-20,300,30);h.emit(h.env,'resize');assert.equal(host.style.visibility,'hidden');assert.equal(h.requests.length,0);ui.stop();
+});
 function trackingFixture(){
  const h=fixture(),observers=[];h.env.ResizeObserver=class{constructor(callback){this.callback=callback;this.targets=new Set();observers.push(this);}observe(node){this.targets.add(node);}disconnect(){this.targets.clear();}};
  h.env.visualViewport=new h.env.constructor();Object.assign(h.env.visualViewport,{offsetLeft:0,offsetTop:0,width:1200,height:800});
@@ -529,8 +547,8 @@ test('fixed host compensation corrects offsets and zoom without changing action 
 test('preview and feedback follow the visible anchor and compensate fixed offsets',async()=>{
  const h=trackingFixture(),input=field(h);h.settings.inputOptions={autoApply:false,icon:'icon'};input._rect=bounds(100,150,300,100);
  const create=h.doc.createElement;h.doc.createElement=tag=>{const node=create(tag),measure=node.getBoundingClientRect.bind(node);node.getBoundingClientRect=()=>{const rect=measure();return node.id==='kuai-input-preview'||node.className==='feedback'?bounds(rect.left+80,rect.top-40,rect.width,rect.height):rect;};return node;};
- const ui=createInteractions(h.dependencies).start();await ui.translateInput();const preview=h.doc.getElementById('kuai-input-preview'),box=h.host().shadowRoot.querySelector('.feedback');assert.equal(preview.getBoundingClientRect().left,100);assert.equal(preview.getBoundingClientRect().top,258);assert.equal(box.getBoundingClientRect().top,180);
- input._rect=bounds(150,200,300,200);h.observers[0].callback();h.advance(16);assert.equal(preview.getBoundingClientRect().left,150);assert.equal(preview.getBoundingClientRect().top,408);assert.equal(box.getBoundingClientRect().top,330);ui.stop();
+ const ui=createInteractions(h.dependencies).start();await ui.translateInput();const preview=h.doc.getElementById('kuai-input-preview'),box=h.host().shadowRoot.querySelector('.feedback');assert.equal(preview.getBoundingClientRect().left,100);assert.equal(preview.getBoundingClientRect().top,258);assert.equal(box.getBoundingClientRect().top,186);
+ input._rect=bounds(150,200,300,200);h.observers[0].callback();h.advance(16);assert.equal(preview.getBoundingClientRect().left,150);assert.equal(preview.getBoundingClientRect().top,408);assert.equal(box.getBoundingClientRect().top,336);ui.stop();
 });
 
 for(const cause of ['hide','stop'])test('input tracking tears down observers, listeners and queued frames on '+cause,()=>{

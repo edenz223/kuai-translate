@@ -9,11 +9,12 @@ function styleBoundary() {
 }
 function createDocument(file) {
   const nodes=new Map();
-  const document={activeElement:null,addEventListener(){},defaultView:{addEventListener(){}},getElementById:id=>nodes.get(id)||null,createElement};
+  const document={activeElement:null,addEventListener(){},defaultView:{addEventListener(){}},getElementById:id=>nodes.get(id)||null,createTextNode:value=>({...createElement("#text"),textContent:value}),createElement};
   function createElement(tag) {
     const node={tagName:tag.toUpperCase(),value:'',type:'text',checked:false,disabled:false,hidden:false,files:[],dataset:{},listeners:{},children:[],style:styleBoundary(),className:'',textContent:'',
       setAttribute(name,value){this[name]=String(value);},getAttribute(name){return this[name]??null;},removeAttribute(name){delete this[name];},append(...children){this.children.push(...children);},replaceChildren(...children){this.children=children;},
       addEventListener(type,listener){(this.listeners[type] ||= []).push(listener);},removeEventListener(type,listener){this.listeners[type]=(this.listeners[type]||[]).filter(item=>item!==listener);},
+      async click(){if(this.tagName==='INPUT'&&this.type==='checkbox'){this.checked=!this.checked;await this.fire('change');}else await this.fire('click');},
       focus(){document.activeElement=this;},async fire(type){await Promise.all((this.listeners[type]||[]).map(listener=>listener({target:this,currentTarget:this,preventDefault(){},stopPropagation(){}})));},
     };
     node.classList={toggle(name,value){const classes=new Set(node.className.split(/\s+/).filter(Boolean));if(value===undefined)value=!classes.has(name);if(value)classes.add(name);else classes.delete(name);node.className=[...classes].join(' ');return value;},contains:name=>node.className.split(/\s+/).includes(name)};
