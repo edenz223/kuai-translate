@@ -16,6 +16,7 @@ export async function request<T extends RequestType>(type:T, payload:RequestPayl
     const error=new Error(response?.error?.message || '扩展没有返回有效结果，请重试') as Error&{code:string}&NetworkDiagnostics;
     if(response?.network!==undefined)error.network=response.network;
     if(response?.providerId!==undefined)error.providerId=response.providerId;
+    if(response?.providerLabel!==undefined)error.providerLabel=response.providerLabel;
     error.code=response?.error?.code || 'NO_RESPONSE';throw error;
   }
   return response.value;

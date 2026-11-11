@@ -303,6 +303,7 @@ test('translation diagnostics attach per-call payloads on success/failure only w
       assert.equal(record.query.to,'zh-Hans');assert.deepEqual(record.request,['Hello']);
       assert.equal(record.status,status);assert.equal(record.ok,status===200);assert.equal('headers' in record,false);
       assert.deepEqual(record.response,status===200?[{translations:[{text:'你好'}]}]:'Service busy');
+      assert.equal(result.providerLabel,'微软翻译');
     }else if(answer.ok)assert.deepEqual(answer,{ok:true,value:{translations:['你好'],providerId:'microsoft'}});
     else assert.deepEqual(answer,{ok:false,error:{code:'HTTP_429',message:'The translation service returned HTTP 429. Check its configuration or retry later.'}});
     h.controller.stop();

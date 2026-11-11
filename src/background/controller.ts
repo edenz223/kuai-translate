@@ -221,7 +221,7 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
     } finally { if (jobs.get(key) === job) jobs.delete(key); }
   }
   async function handleMessage(message:BackgroundRequest, sender:chrome.runtime.MessageSender):Promise<BackgroundResponse> {
-    let network:NetworkRecord[]|undefined,providerId:string|undefined;
+    let network:NetworkRecord[]|undefined,providerId:string|undefined,providerLabel:string|undefined;
     try {
       if (stopped) throw failure('CANCELLED', 'The extension worker has stopped. Retry the request.');
       const owner = identify(sender);
@@ -266,14 +266,16 @@ export function createBackground({ chromeApi = globalThis.chrome, fetchImpl = gl
           const provider = settings.providers.find(item => item.id === id && item.enabled);
           if (!provider) throw failure('INVALID_CONFIG', 'Select an enabled translation service in the extension settings.');
           providerId=provider.id || provider.type;
+          // Custom services have random ids; logs name the service and model instead.
+          providerLabel=[provider.name || provider.type,provider.model].filter(Boolean).join(' · ');
           const result = await providerRequest(owner, message.requestId, provider, message, true, false, network);
-          value = network && settings.debugMode ? {...result,network} : result; break;
+          value = network && settings.debugMode ? {...result,network,providerLabel} : result; break;
         }
       }
       return { ok: true, value };
     } catch (error) {
       debugError('后台','后台消息处理失败',error);
-      return { ok: false, error: publicError(error),...(network && settings.debugMode?{network,...(providerId?{providerId}:{})}:{}) };
+      return { ok: false, error: publicError(error),...(network && settings.debugMode?{network,...(providerId?{providerId,providerLabel}:{})}:{}) };
     }
   }
   function onMessage(message:BackgroundRequest, sender:chrome.runtime.MessageSender, respond:(response:BackgroundResponse)=>void) {

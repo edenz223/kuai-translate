@@ -137,6 +137,8 @@ test('without records only a summary is printed, and debug off suppresses all ba
   assert.deepEqual(calls.map(call=>call[0]),['info','info','warn']);
   assert.match(calls[2][1],/HTTP_429 服务繁忙/);assert.match(calls[2][2],/background:#b45309/);
   calls.length=0;debugBatchError('网页',summary,undefined);assert.match(calls[0][1],/✖.*UNKNOWN/);
+  calls.length=0;debugBatch('网页',summary,{providerId:'b4bc4e46-9c4d-4c07-8d1d-d2540dcafd6d',providerLabel:'Gemini · gemini-flash-lite-latest'});
+  assert.match(calls[0][1],/· Gemini · gemini-flash-lite-latest ·/);assert.doesNotMatch(calls[0][1],/b4bc4e46/);
   setDebug(false,true);calls.length=0;debugBatch('字幕',summary,{network:[base]});debugBatchError('网页',summary,{network:[base]});assert.deepEqual(calls,[]);
 });
 
