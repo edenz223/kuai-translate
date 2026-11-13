@@ -12,6 +12,51 @@ const sheet=h=>h.doc.querySelector('[data-kuai-page-style]')?.textContent||'';
 
 const output = node => node.querySelector('[data-kuai-page-translation]');
 
+test('HN short titles keep their source font beside a longer, smaller domain label',async()=>{
+ const {measureSourceLayout}=await import('../dist/src/content/page-layout.js');
+ for(const mode of ['bilingual','translation_only'])for(const size of [100,125])for(const title of ['Anthropic IPO','A longer announcement about the Anthropic IPO']){
+  const h=fixture(),host=h.paragraph('','td'),line=h.doc.createElement('span'),link=h.doc.createElement('a'),meta=h.doc.createElement('span'),domainLink=h.doc.createElement('a'),domain=h.doc.createElement('span');
+  host.className='title';line.className='titleline';meta.className='sitebit comhead';domain.className='sitestr';
+  Object.assign(host.style,{fontSize:'13.3333px',lineHeight:'normal'});link.style.fontSize='13.3333px';
+  meta.style.fontSize=domain.style.fontSize='10.6667px';
+  link.setAttribute('href','https://ipo.anthropic.com/us/');link.textContent=title;
+  domainLink.setAttribute('href','from?site=anthropic.com');domain.append('anthropic','.com');domainLink.append(domain);meta.append(' (',domainLink,')');line.append(link,meta);host.append(line);
+  h.settings.pageDisplayMode=mode;h.settings.pageStyle={fontSize:size};
+  const before=host.outerHTML,metrics=measureSourceLayout(host,h.env);
+  assert.equal(metrics.fontSize,13.3333);assert.equal(metrics.fontOverride,false);
+  const page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.ok(output(host));assert.equal(output(host).style.getPropertyValue('font-size'),'');
+  assert.equal(output(host).getAttribute('data-kuai-only')!==null,mode==='translation_only');
+  if(size===125)assert.match(sheet(h),/font-size:125%!important/);
+  page.refreshPresentation();assert.equal(output(host).style.getPropertyValue('font-size'),'');
+  page.restore();assert.equal(host.outerHTML,before);
+ }
+});
+
+test('font selection ignores address labels and non-language decorations, preserving small prose and dotted names',async()=>{
+ const {measureSourceLayout}=await import('../dist/src/content/page-layout.js');
+ for(const href of ['https://anthropic.com/','https://www.anthropic.com/','from?site=anthropic.com'])for(const title of ['A small heading','Node.js']){
+  const h=fixture(),host=h.paragraph('','div'),link=h.doc.createElement('a'),meta=h.doc.createElement('a'),domain=h.doc.createElement('span');
+  host.style.fontSize='16px';Object.assign(link.style,{fontSize:'11px',lineHeight:'15px'});link.setAttribute('href','https://nodejs.org/');link.textContent=title;
+  domain.style.fontSize='20px';domain.textContent='anthropic.com';meta.setAttribute('href',href);meta.append(domain);host.append(link,' ',meta);
+  for(const text of ['(((((((((((((((((((((((((','@a_very_long_username','https://example.com/a/very/long/path','421K']){
+   const decoration=h.doc.createElement('span');decoration.style.fontSize='30px';decoration.textContent=text;host.append(' ',decoration);
+  }
+  const metrics=measureSourceLayout(host,h.env);assert.equal(metrics.fontSize,11);assert.equal(metrics.lineHeight,'15px');
+  const before=host.outerHTML,page=createPageTranslator(h.dependencies);await page.translatePage();
+  assert.equal(output(host).style.getPropertyValue('font-size'),'11px');page.restore();assert.equal(host.outerHTML,before);
+ }
+});
+
+test('bare dotted prose stays eligible without an address link, and empty font candidates use the host',async()=>{
+ const {measureSourceLayout}=await import('../dist/src/content/page-layout.js');
+ const h=fixture(),host=h.paragraph('Hi ','div'),span=h.doc.createElement('span');host.style.fontSize='16px';span.style.fontSize='11px';span.textContent='Node.js';host.append(span);
+ assert.equal(measureSourceLayout(host,h.env).fontSize,11);
+ span.textContent='anthropic.com';assert.equal(measureSourceLayout(host,h.env).fontSize,11);
+ host.firstChild.nodeValue='((((';span.textContent='@long_username';
+ const metrics=measureSourceLayout(host,h.env);assert.equal(metrics.fontSize,16);assert.equal(metrics.fontOverride,false);
+});
+
 test('dominant inline text supplies the wrapper font in both layouts and display modes',async()=>{
  for(const mode of ['bilingual','translation_only'])for(const text of ['Great video','A comment with enough text to need a block translation.']){
   const h=fixture(),host=h.paragraph('','div'),attributed=h.doc.createElement('yt-attributed-string'),span=h.doc.createElement('span');
